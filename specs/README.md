@@ -61,7 +61,8 @@ This specification is organized into the following sections:
 
 ### Architecture
 
-- [Architecture Overview](./architecture/README.md) - High-level system design and component interactions
+- [Architecture Overview](architecture/
+README.md) - High-level system design and component interactions
 - [Container Deployment](./architecture/container-deployment.md) - Always-on container architecture vs Function Apps
 - [Session Management](./architecture/session-management.md) - Flexible ordering strategies per bot
 

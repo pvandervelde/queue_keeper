@@ -389,7 +389,7 @@ key_vault:
 
 1. **Build**: Rust compilation with cargo
 2. **Test**: Unit and integration tests
-3. **Package**: Create Azure Functions deployment package
+3. **Package**: Create container image for Azure Container Apps
 4. **Deploy**: Blue-green deployment with health checks
 5. **Verify**: Smoke tests and monitoring validation
 
