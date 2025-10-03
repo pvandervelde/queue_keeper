@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document defines the infrastructure prerequisites, deployment requirements, and operational procedures for Queue-Keeper. Since Queue-Keeper is a library crate rather than a deployable service, this guide focuses on the infrastructure requirements that consuming applications must provide.
+This document defines the infrastructure prerequisites, deployment requirements, and operational procedures for Queue-Keeper. Queue-Keeper is a deployable service, and this guide focuses on the infrastructure and operational requirements necessary to run and manage the service in production environments.
 
 ## Infrastructure Prerequisites
 
