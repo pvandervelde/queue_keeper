@@ -79,6 +79,13 @@ README.md) - High-level system design and component interactions
 - [Configuration Management](./design/configuration.md) - Container-based config with flexible ordering control
 - [Error Handling](./design/error-handling.md) - Retry policies and failure recovery
 
+### Domain
+
+- [Vocabulary](./vocabulary.md) - Domain concepts and terminology definitions
+- [Responsibilities](./responsibilities.md) - Component responsibilities and collaboration patterns
+- [Constraints](./constraints.md) - Implementation rules and architectural boundaries
+- [Assertions](./assertions.md) - Behavioral specifications and testable requirements
+
 ### Security
 
 - [Security Model](./security/README.md) - Authentication, authorization, and secret management
@@ -104,73 +111,11 @@ README.md) - High-level system design and component interactions
 **Implementation Language**: Rust \
 **Infrastructure**: Terraform (External Repository)
 
-## Behavioral Assertions
+## System Integration
 
-The following assertions define testable behaviors and constraints that must be validated during implementation and testing:
+For detailed behavioral assertions and requirements, see [Assertions](./assertions.md).
 
-### Webhook Processing Assertions
-
-1. **Signature Validation**: All incoming webhooks MUST be validated using HMAC-SHA256 with the GitHub webhook secret before any processing occurs.
-
-2. **Response Time SLA**: Queue-Keeper MUST respond to GitHub within 1 second for 95% of requests under normal load conditions.
-
-3. **Payload Persistence**: Every valid webhook payload MUST be persisted to blob storage before normalization, ensuring no data loss even if downstream processing fails.
-
-4. **Event ID Uniqueness**: Generated event IDs MUST be globally unique and sortable, preventing duplicate processing across system restarts.
-
-5. **Session ID Consistency**: Events for the same GitHub entity (PR/issue) MUST generate identical session IDs to ensure ordered processing.
-
-### Queue Routing Assertions
-
-6. **One-to-Many Routing**: A single webhook event MUST be successfully delivered to all configured bot queues based on static subscription configuration.
-
-7. **Ordering Guarantee**: Events with identical session IDs MUST be processed sequentially by the same bot instance, while events with different session IDs MAY be processed in parallel.
-
-8. **Routing Atomicity**: Either all configured bot queues receive the event, or the entire operation fails and gets retried.
-
-9. **Dead Letter Handling**: Events that fail delivery after maximum retry attempts MUST be routed to the dead letter queue with failure metadata.
-
-### Error Handling Assertions
-
-10. **Retry Behavior**: Transient failures MUST trigger exponential backoff retry with increasing delays (1s, 2s, 4s, 8s, 16s maximum).
-
-11. **Circuit Breaker**: After 5 consecutive failures to any downstream service, the circuit breaker MUST open and fail fast for 30 seconds.
-
-12. **Graceful Degradation**: If blob storage is unavailable, webhook processing MUST continue but log warnings about missing audit trail.
-
-13. **Invalid Signature Response**: Webhooks with invalid signatures MUST receive HTTP 401 responses without any processing or storage.
-
-### Configuration Assertions
-
-14. **Static Configuration**: Bot subscription configuration MUST be loaded at application startup and remain immutable until restart.
-
-15. **Configuration Validation**: Invalid configuration (duplicate bot names, invalid event types, malformed queue names) MUST prevent application startup with clear error messages.
-
-16. **Secret Caching**: GitHub webhook secrets MUST be cached for maximum 5 minutes to balance performance and security.
-
-### Security Assertions
-
-17. **Secret Rotation**: Webhook secret rotation MUST be supported without system downtime, with new secrets taking effect within 5 minutes.
-
-18. **Audit Logging**: All webhook processing activities MUST generate structured audit logs with correlation IDs for end-to-end tracing.
-
-19. **Rate Limiting**: Repeated authentication failures from the same IP address MUST trigger rate limiting after 10 failures in 5 minutes.
-
-### Performance Assertions
-
-20. **Memory Usage**: Queue-Keeper MUST operate within 512MB memory limit per function instance under normal load.
-
-21. **Concurrent Processing**: System MUST support minimum 1000 concurrent webhook requests without degradation.
-
-22. **Auto-scaling**: Function instances MUST auto-scale based on queue depth (>100 messages) and resource utilization (>80% CPU/memory).
-
-### Data Integrity Assertions
-
-23. **Payload Immutability**: Raw webhook payloads stored in blob storage MUST be immutable and tamper-evident.
-
-24. **Event Schema Validation**: Normalized events MUST conform to the defined schema version and pass validation before queue delivery.
-
-25. **Replay Idempotency**: Replaying the same webhook multiple times MUST produce identical normalized events with the same event ID.
+For information on how the queue-runtime and github-bot-sdk libraries integrate with Queue-Keeper, see [Library Integration](./integration.md).
 
 ## Edge Cases
 

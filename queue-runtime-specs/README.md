@@ -120,10 +120,18 @@ This specification is organized into the following modules:
 
 ### Architecture Documents
 
+- [Architecture Overview](./architecture.md) - Hexagonal architecture with ports and adapters
 - [Queue Naming Strategy](./architecture/naming.md) - Queue naming conventions and patterns
 - [Session Strategies](./architecture/sessions.md) - Ordered processing strategies and key generation
 - [Provider Differences](./architecture/providers.md) - Azure vs AWS implementation differences
 - [Performance Optimization](./architecture/performance.md) - Throughput and latency optimization
+
+### Domain Foundation
+
+- [Vocabulary](./vocabulary.md) - Queue runtime domain concepts and terminology
+- [Responsibilities](./responsibilities.md) - Component responsibilities and collaboration patterns
+- [Constraints](./constraints.md) - Implementation rules and API contract requirements
+- [Assertions](./assertions.md) - Behavioral specifications and testable requirements
 
 ## Core API
 
