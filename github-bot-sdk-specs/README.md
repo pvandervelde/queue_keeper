@@ -116,10 +116,18 @@ This specification is organized into the following modules:
 
 ### Architecture Documents
 
+- [Architecture Overview](./architecture.md) - SDK architecture and hexagonal design
 - [Security Model](./architecture/security.md) - Authentication, secrets, and security considerations
 - [Performance](./architecture/performance.md) - Caching, rate limiting, and optimization strategies
 - [Extensibility](./architecture/extensibility.md) - Plugin system and customization points
 - [Integration Patterns](./architecture/integration.md) - Common bot implementation patterns
+
+### Domain Foundation
+
+- [Vocabulary](./vocabulary.md) - SDK domain concepts and terminology
+- [Responsibilities](./responsibilities.md) - Module responsibilities and collaboration patterns
+- [Constraints](./constraints.md) - Security requirements and API contract rules
+- [Assertions](./assertions.md) - Behavioral specifications for authentication and API usage
 
 ## Quick Start Example
 
