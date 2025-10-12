@@ -45,11 +45,11 @@ config = "0.14"
 clap = { version = "4.4", features = ["derive"] }
 
 # Azure integrations
-azure_core = "0.19"
-azure_identity = "0.19"
-azure_storage_blobs = "0.19"
-azure_security_keyvault = "0.19"
-azure_messaging_servicebus = "0.19"
+azure_core = "0.29"
+azure_identity = "0.29"
+azure_storage_blobs = "0.21"
+azure_security_keyvault = "0.21"
+azure_messaging_servicebus = "0.21"
 
 # AWS integrations (future)
 aws-config = "1.0"
