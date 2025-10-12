@@ -1,0 +1,79 @@
+[workspace]
+members = [
+    "crates/queue-keeper-core",
+    "crates/queue-keeper-cli",
+    "crates/queue-keeper-service",
+    "crates/github-bot-sdk",
+    "crates/queue-runtime",
+]
+resolver = "2"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1.35", features = ["full"] }
+async-trait = "0.1"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# HTTP and networking
+reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
+hyper = { version = "1.0", features = ["full"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+
+# Error handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Logging and tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+opentelemetry = "0.21"
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# Cryptography
+jsonwebtoken = "9.2"
+hmac = "0.12"
+sha2 = "0.10"
+
+# Configuration
+config = "0.14"
+clap = { version = "4.4", features = ["derive"] }
+
+# Azure integrations
+azure_core = "0.19"
+azure_identity = "0.19"
+azure_storage_blobs = "0.19"
+azure_security_keyvault = "0.19"
+azure_messaging_servicebus = "0.19"
+
+# AWS integrations (future)
+aws-config = "1.0"
+aws-sdk-sqs = "1.0"
+aws-sdk-secretsmanager = "1.0"
+
+# Utilities
+uuid = { version = "1.6", features = ["v4", "serde"] }
+ulid = "1.1"
+bytes = "1.5"
+url = "2.5"
+
+# Testing
+mockall = "0.12"
+wiremock = "0.6"
+
+[profile.release]
+# Optimize for performance and size
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[profile.dev]
+# Faster compilation for development
+opt-level = 0
+debug = true

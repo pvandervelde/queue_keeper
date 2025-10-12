@@ -1,0 +1,45 @@
+[package]
+name = "github-bot-sdk"
+version = "0.1.0"
+edition = "2021"
+description = "GitHub Bot SDK for Queue-Keeper"
+license = "MIT"
+repository = "https://github.com/pvandervelde/queue_keeper"
+
+[dependencies]
+# Core dependencies
+tokio = { version = "1.0", features = ["full"] }
+tracing = "0.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+
+# HTTP client
+reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
+
+# JWT and crypto
+jsonwebtoken = "9.0"
+hmac = "0.12"
+sha2 = "0.10"
+rsa = "0.9"
+
+# Date/time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Error handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Async traits
+async-trait = "0.1"
+
+# Base64 encoding
+base64 = "0.22"
+
+# URL handling
+url = "2.0"
+
+[dev-dependencies]
+tempfile = "3.0"
+tokio-test = "0.4"
+wiremock = "0.6"
