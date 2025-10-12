@@ -1,0 +1,46 @@
+[package]
+name = "queue-runtime"
+version = "0.1.0"
+edition = "2021"
+description = "Multi-provider queue runtime for Queue-Keeper"
+license = "MIT"
+repository = "https://github.com/pvandervelde/queue_keeper"
+
+[dependencies]
+# Core dependencies
+tokio = { version = "1.0", features = ["full"] }
+tracing = "0.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+
+# Date/time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Error handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Async traits
+async-trait = "0.1"
+
+# Azure Service Bus
+azure_messaging_servicebus = "0.19"
+azure_core = "0.19"
+azure_identity = "0.19"
+
+# AWS SQS
+aws-config = "1.0"
+aws-sdk-sqs = "1.0"
+
+# Configuration
+config = "0.14"
+
+# Utilities
+url = "2.0"
+bytes = "1.0"
+base64 = "0.22"
+
+[dev-dependencies]
+tempfile = "3.0"
+tokio-test = "0.4"
