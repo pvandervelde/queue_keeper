@@ -36,7 +36,7 @@ opentelemetry = "0.21"
 chrono = { version = "0.4", features = ["serde"] }
 
 # Cryptography
-jsonwebtoken = "9.2"
+jsonwebtoken = "10.0"
 hmac = "0.12"
 sha2 = "0.10"
 
