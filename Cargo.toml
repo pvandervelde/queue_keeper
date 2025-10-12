@@ -63,7 +63,7 @@ bytes = "1.5"
 url = "2.5"
 
 # Testing
-mockall = "0.12"
+mockall = "0.13"
 wiremock = "0.6"
 
 [profile.release]
