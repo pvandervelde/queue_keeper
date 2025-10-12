@@ -25,9 +25,9 @@ anyhow = "1.0"
 async-trait = "0.1"
 
 # Azure Service Bus
-azure_messaging_servicebus = "0.19"
-azure_core = "0.19"
-azure_identity = "0.19"
+azure_messaging_servicebus = "0.21"
+azure_core = "0.29"
+azure_identity = "0.29"
 
 # AWS SQS
 aws-config = "1.0"
