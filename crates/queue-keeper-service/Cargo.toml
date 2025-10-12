@@ -18,7 +18,7 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 
 # HTTP server
 axum = { version = "0.7", features = ["macros", "tracing"] }
-tower = { version = "0.4", features = [
+tower = { version = "0.5", features = [
     "util",
     "timeout",
     "load-shed",
