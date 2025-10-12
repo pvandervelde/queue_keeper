@@ -34,7 +34,7 @@ aws-config = "1.0"
 aws-sdk-sqs = "1.0"
 
 # Configuration
-config = "0.14"
+config = "0.15"
 
 # Utilities
 url = "2.0"
