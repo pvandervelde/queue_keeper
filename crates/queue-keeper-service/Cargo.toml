@@ -56,7 +56,7 @@ async-trait = "0.1"
 reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
 
 # Observability
-prometheus = { version = "0.13", features = ["process"] }
+prometheus = { version = "0.14", features = ["process"] }
 opentelemetry = "0.20"
 opentelemetry-prometheus = "0.13"
 opentelemetry-otlp = "0.13"
