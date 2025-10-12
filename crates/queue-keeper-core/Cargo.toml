@@ -33,4 +33,4 @@ queue-runtime = { path = "../queue-runtime" }
 
 [dev-dependencies]
 mockall = { workspace = true }
-tokio-test = "0.4"
+tokio-test = "=0.4.4"
