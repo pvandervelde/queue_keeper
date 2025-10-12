@@ -17,7 +17,7 @@ serde_json = "1.0"
 uuid = { version = "1.0", features = ["v4", "serde"] }
 
 # HTTP server
-axum = { version = "0.7", features = ["macros", "tracing"] }
+axum = { version = "0.8", features = ["macros", "tracing"] }
 tower = { version = "0.4", features = [
     "util",
     "timeout",
