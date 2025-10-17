@@ -846,6 +846,12 @@ pub trait GitHubApiClient: Send + Sync {
     async fn get_rate_limit(&self, token: &InstallationToken) -> Result<RateLimitInfo, ApiError>;
 }
 
+// ============================================================================
+// Submodules
+// ============================================================================
+
+pub mod jwt;
+
 #[cfg(test)]
 #[path = "mod_tests.rs"]
 mod tests;
