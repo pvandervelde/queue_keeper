@@ -6,6 +6,8 @@
 use chrono::{DateTime, Utc};
 use thiserror::Error;
 
+use crate::auth::InstallationId;
+
 /// Authentication-related errors with retry classification.
 ///
 /// This error type covers all authentication failures including credential issues,
@@ -19,7 +21,7 @@ pub enum AuthError {
 
     /// Installation not found or access denied (non-retryable).
     #[error("Installation {installation_id} not found or access denied")]
-    InstallationNotFound { installation_id: u64 },
+    InstallationNotFound { installation_id: InstallationId },
 
     /// Installation token has expired (retryable via refresh).
     #[error("Installation token expired")]

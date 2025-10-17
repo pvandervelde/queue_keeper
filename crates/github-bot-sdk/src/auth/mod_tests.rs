@@ -2,6 +2,13 @@
 
 use super::*;
 
+/// Verify GitHubAppId creation, conversion, and parsing.
+///
+/// Tests the GitHubAppId newtype to ensure:
+/// - Creation via `new()` stores the correct value
+/// - Conversion to u64 and string formats work correctly
+/// - String parsing succeeds for valid numeric input
+/// - String parsing fails for invalid non-numeric input
 #[test]
 fn test_github_app_id() {
     let app_id = GitHubAppId::new(12345);
@@ -15,6 +22,12 @@ fn test_github_app_id() {
     assert!(invalid.is_err());
 }
 
+/// Verify InstallationId creation, conversion, and parsing.
+///
+/// Tests the InstallationId newtype to ensure:
+/// - Creation via `new()` stores the correct value
+/// - Conversion to u64 and string formats work correctly
+/// - String parsing succeeds for valid numeric input
 #[test]
 fn test_installation_id() {
     let installation = InstallationId::new(98765);
@@ -25,6 +38,11 @@ fn test_installation_id() {
     assert_eq!(parsed.as_u64(), 11111);
 }
 
+/// Verify RepositoryId creation and conversion.
+///
+/// Tests the RepositoryId newtype to ensure:
+/// - Creation via `new()` stores the correct value
+/// - Conversion to u64 and string formats work correctly
 #[test]
 fn test_repository_id() {
     let repo = RepositoryId::new(54321);
@@ -32,6 +50,11 @@ fn test_repository_id() {
     assert_eq!(repo.to_string(), "54321");
 }
 
+/// Verify UserId creation and conversion.
+///
+/// Tests the UserId newtype to ensure:
+/// - Creation via `new()` stores the correct value
+/// - Conversion to u64 and string formats work correctly
 #[test]
 fn test_user_id() {
     let user = UserId::new(99999);
@@ -39,6 +62,13 @@ fn test_user_id() {
     assert_eq!(user.to_string(), "99999");
 }
 
+/// Verify JsonWebToken expiry detection and validation.
+///
+/// Tests JWT token expiry logic to ensure:
+/// - Tokens with future expiry are not marked as expired
+/// - `expires_soon()` correctly detects when expiry is within the margin
+/// - `expires_soon()` returns false when sufficient time remains
+/// - Accessor methods return correct app_id and token values
 #[test]
 fn test_jwt_token_expiry() {
     let app_id = GitHubAppId::new(1);
@@ -52,6 +82,12 @@ fn test_jwt_token_expiry() {
     assert_eq!(jwt.token(), "test_token");
 }
 
+/// Verify that JsonWebToken does not leak secrets in Debug output.
+///
+/// Tests the custom Debug implementation to ensure:
+/// - Token value is redacted (not visible in debug output)
+/// - Debug output contains "<REDACTED>" placeholder instead
+/// - Prevents accidental logging of sensitive JWT tokens
 #[test]
 fn test_jwt_token_security() {
     let app_id = GitHubAppId::new(1);
@@ -66,6 +102,14 @@ fn test_jwt_token_security() {
     assert!(debug_output.contains("<REDACTED>"));
 }
 
+/// Verify InstallationToken permission checking and repository access control.
+///
+/// Tests permission and repository access logic to ensure:
+/// - `has_permission()` correctly evaluates permissions based on level hierarchy
+/// - Read permission allows read operations but not write
+/// - Write permission allows both read and write operations
+/// - Admin permission allows all operations
+/// - `can_access_repository()` correctly checks repository list
 #[test]
 fn test_installation_token_permissions() {
     let permissions = InstallationPermissions {
@@ -96,6 +140,12 @@ fn test_installation_token_permissions() {
     assert!(!token.can_access_repository(RepositoryId::new(456)));
 }
 
+/// Verify that InstallationToken does not leak secrets in Debug output.
+///
+/// Tests the custom Debug implementation to ensure:
+/// - Token value is redacted (not visible in debug output)
+/// - Debug output contains "<REDACTED>" placeholder instead
+/// - Prevents accidental logging of sensitive installation tokens
 #[test]
 fn test_installation_token_security() {
     let token = InstallationToken::new(
@@ -111,6 +161,13 @@ fn test_installation_token_security() {
     assert!(debug_output.contains("<REDACTED>"));
 }
 
+/// Verify that PrivateKey does not leak key material in Debug output.
+///
+/// Tests the custom Debug implementation to ensure:
+/// - Private key bytes are redacted (not visible in debug output)
+/// - Debug output contains "<REDACTED>" placeholder instead
+/// - Algorithm information is safely accessible
+/// - Prevents accidental logging of sensitive cryptographic material
 #[test]
 fn test_private_key_security() {
     let key = PrivateKey::new(b"super_secret_key_material".to_vec(), KeyAlgorithm::RS256);
@@ -121,6 +178,10 @@ fn test_private_key_security() {
     assert_eq!(key.algorithm(), &KeyAlgorithm::RS256);
 }
 
+/// Verify PermissionLevel enum variants are distinct.
+///
+/// Tests that different PermissionLevel values are properly distinguished
+/// through inequality checks (None ≠ Read ≠ Write ≠ Admin).
 #[test]
 fn test_permission_level_ordering() {
     assert!(PermissionLevel::Read != PermissionLevel::None);
@@ -128,6 +189,13 @@ fn test_permission_level_ordering() {
     assert!(PermissionLevel::Admin != PermissionLevel::Write);
 }
 
+/// Verify Repository helper methods for name extraction.
+///
+/// Tests Repository utility methods to ensure:
+/// - `owner_name()` correctly extracts owner from full_name
+/// - `repo_name()` correctly extracts repository name from full_name
+/// - `full_name()` returns the complete "owner/repo" format
+/// - `html_url` is correctly constructed from full_name
 #[test]
 fn test_repository_helpers() {
     let owner = User {
@@ -152,6 +220,11 @@ fn test_repository_helpers() {
     assert_eq!(repo.html_url, "https://github.com/octocat/hello-world");
 }
 
+/// Verify InstallationPermissions default values.
+///
+/// Tests the Default trait implementation to ensure:
+/// - Most permissions default to None
+/// - Metadata permission defaults to Read (GitHub requirement)
 #[test]
 fn test_default_permissions() {
     let perms = InstallationPermissions::default();
@@ -163,6 +236,12 @@ fn test_default_permissions() {
     assert_eq!(perms.actions, PermissionLevel::None);
 }
 
+/// Verify JsonWebToken time-until-expiry calculation.
+///
+/// Tests the `time_until_expiry()` method to ensure:
+/// - Correctly calculates remaining time until token expires
+/// - Returns a Duration that accounts for current time
+/// - Provides accurate minute-level precision
 #[test]
 fn test_jwt_token_time_until_expiry() {
     let app_id = GitHubAppId::new(1);
@@ -173,6 +252,12 @@ fn test_jwt_token_time_until_expiry() {
     assert!(remaining.num_minutes() >= 4 && remaining.num_minutes() <= 5);
 }
 
+/// Verify InstallationToken expiry detection and soon-to-expire warnings.
+///
+/// Tests token expiry logic to ensure:
+/// - Tokens with future expiry are not marked as expired
+/// - `expires_soon()` returns false when margin is less than remaining time
+/// - `expires_soon()` returns true when margin exceeds remaining time
 #[test]
 fn test_installation_token_expiry() {
     let token = InstallationToken::new(
@@ -188,6 +273,10 @@ fn test_installation_token_expiry() {
     assert!(token.expires_soon(Duration::minutes(40)));
 }
 
+/// Verify UserType enum variants and Debug output.
+///
+/// Tests that UserType variants (User, Bot, Organization) are correctly
+/// defined and produce expected Debug string representations.
 #[test]
 fn test_user_type_variants() {
     let user_type = UserType::User;
@@ -200,6 +289,10 @@ fn test_user_type_variants() {
     assert_eq!(format!("{:?}", org_type), "Organization");
 }
 
+/// Verify RepositorySelection enum variants and equality.
+///
+/// Tests that RepositorySelection variants (All, Selected) are correctly
+/// defined and properly compared for equality and inequality.
 #[test]
 fn test_repository_selection_variants() {
     let all = RepositorySelection::All;
@@ -210,6 +303,10 @@ fn test_repository_selection_variants() {
     assert_ne!(all, selected);
 }
 
+/// Verify all Permission enum variants are distinct.
+///
+/// Tests that all permission variants (read/write for issues, PRs, contents, checks)
+/// are properly defined and each variant is unique (equal to itself, unequal to others).
 #[test]
 fn test_permission_enum_all_variants() {
     let permissions = vec![
@@ -235,12 +332,21 @@ fn test_permission_enum_all_variants() {
     }
 }
 
+/// Verify KeyAlgorithm enum and Debug output.
+///
+/// Tests that KeyAlgorithm::RS256 produces the expected Debug string representation.
 #[test]
 fn test_key_algorithm() {
     let algo = KeyAlgorithm::RS256;
     assert_eq!(format!("{:?}", algo), "RS256");
 }
 
+/// Verify JwtClaims serialization to JSON.
+///
+/// Tests the Serialize trait implementation to ensure:
+/// - GitHubAppId is serialized as a numeric value
+/// - Issued-at (iat) and expiry (exp) timestamps are correctly serialized
+/// - JSON output contains all expected claim fields
 #[test]
 fn test_jwt_claims_serialization() {
     use serde_json;
