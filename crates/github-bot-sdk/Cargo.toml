@@ -18,7 +18,7 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
 
 # JWT and crypto
-jsonwebtoken = "10.0"
+jsonwebtoken = { version = "10.0", features = ["rust_crypto"] }
 hmac = "0.12"
 sha2 = "0.10"
 rsa = "0.9"
