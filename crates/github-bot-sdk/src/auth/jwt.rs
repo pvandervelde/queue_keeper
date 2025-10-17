@@ -11,9 +11,12 @@
 //!
 //! See `github-bot-sdk-specs/modules/auth.md` for complete specification.
 
-use crate::auth::{GitHubAppId, JsonWebToken, JwtClaims, PrivateKey};
-use crate::error::{AuthError, SigningError, ValidationError};
+use crate::auth::{GitHubAppId, JsonWebToken, JwtClaims, KeyAlgorithm, PrivateKey};
+use crate::error::{AuthError, ValidationError};
 use chrono::{Duration, Utc};
+use jsonwebtoken::{encode, EncodingKey, Header, Algorithm};
+use rsa::pkcs1::DecodeRsaPrivateKey;
+use rsa::RsaPrivateKey;
 
 /// Interface for JWT token generation and signing.
 ///
@@ -178,8 +181,25 @@ impl RS256JwtGenerator {
 #[async_trait::async_trait]
 impl JwtGenerator for RS256JwtGenerator {
     async fn generate_jwt(&self, app_id: GitHubAppId) -> Result<JsonWebToken, AuthError> {
-        // TODO: implement
-        unimplemented!("JWT generation will be implemented in implementation phase")
+        let claims = self.build_claims(app_id);
+        let expires_at = Utc::now() + self.expiration_duration;
+
+        // Create encoding key from private key
+        let encoding_key = EncodingKey::from_rsa_pem(self.private_key.key_data())
+            .map_err(|e| AuthError::InvalidPrivateKey {
+                message: format!("Failed to create encoding key: {}", e),
+            })?;
+
+        // Set up JWT header for RS256
+        let header = Header::new(Algorithm::RS256);
+
+        // Encode the JWT
+        let token_string = encode(&header, &claims, &encoding_key)
+            .map_err(|e| AuthError::JwtGenerationFailed {
+                message: format!("Failed to encode JWT: {}", e),
+            })?;
+
+        Ok(JsonWebToken::new(token_string, app_id, expires_at))
     }
 
     fn expiration_duration(&self) -> Duration {
@@ -212,8 +232,36 @@ impl PrivateKey {
     /// let key = PrivateKey::from_pem(pem).expect("Invalid PEM");
     /// ```
     pub fn from_pem(pem: &str) -> Result<Self, ValidationError> {
-        // TODO: implement
-        unimplemented!("PEM parsing will be implemented in implementation phase")
+        // Trim whitespace
+        let pem = pem.trim();
+
+        // Validate PEM format
+        if pem.is_empty() {
+            return Err(ValidationError::InvalidFormat {
+                field: "private_key".to_string(),
+                message: "PEM string cannot be empty".to_string(),
+            });
+        }
+
+        if !pem.contains("-----BEGIN") || !pem.contains("-----END") {
+            return Err(ValidationError::InvalidFormat {
+                field: "private_key".to_string(),
+                message: "Invalid PEM format: missing BEGIN/END markers".to_string(),
+            });
+        }
+
+        // Attempt to parse the RSA private key to validate it
+        RsaPrivateKey::from_pkcs1_pem(pem)
+            .map_err(|e| ValidationError::InvalidFormat {
+                field: "private_key".to_string(),
+                message: format!("Failed to parse RSA private key: {}", e),
+            })?;
+
+        // Store the PEM bytes
+        Ok(Self {
+            key_data: pem.as_bytes().to_vec(),
+            algorithm: KeyAlgorithm::RS256,
+        })
     }
 
     /// Create a private key from PKCS#8 DER-encoded bytes.
@@ -229,8 +277,18 @@ impl PrivateKey {
     /// - Key type is not RSA
     /// - Key data is corrupted
     pub fn from_pkcs8_der(der: &[u8]) -> Result<Self, ValidationError> {
-        // TODO: implement
-        unimplemented!("DER parsing will be implemented in implementation phase")
+        // Validate by attempting to parse
+        use rsa::pkcs8::DecodePrivateKey;
+        RsaPrivateKey::from_pkcs8_der(der)
+            .map_err(|e| ValidationError::InvalidFormat {
+                field: "private_key".to_string(),
+                message: format!("Failed to parse PKCS#8 DER private key: {}", e),
+            })?;
+
+        Ok(Self {
+            key_data: der.to_vec(),
+            algorithm: KeyAlgorithm::RS256,
+        })
     }
 }
 

@@ -4,14 +4,33 @@ use super::*;
 use chrono::{Duration, Utc};
 
 // Test private key (2048-bit RSA key for testing only - DO NOT USE IN PRODUCTION)
+// Generated with: openssl genrsa 2048
 const TEST_PRIVATE_KEY_PEM: &str = r#"-----BEGIN RSA PRIVATE KEY-----
-MIIEpAIBAAKCAQEAu1SU1LfVLPHCozMxH2Mo4lgOEePzNm0tRgeLezV6ffAt0gun
-VTLw7onLRnrq0/IzW7yWR7QkrmBL7jTKEn5u+qKhbwKfBstIs+bMY2Zkp18gnTxK
-LxoS2tFczGkPLPgizskuemMghRniWaoLcyehkd3qqGElvW/VDL5AaWTg0nLVkjRo
-9z+40RQzuVaE8AkAFmxZzow3x+VJYKdjykkJ0iT9wCS0DRTXu269V264Vf/3jvre
-dZVp7ZD7jPzH7RqfYDCh7rjdl3bqKMTyGBvOkuNt0lZH5lfG7WccmvLl7K5e5P+1
-0M3KMhZy6Ykl7xHjCYVGW04x8jdHDCQB3NQnrwIDAQABAoIBAHLZqH9Y1EyXwJpT
-UwDPVHQHLKPAYeXQBX3hVxLzQQqAZdUvZXvA2YZ0KJDhj6LpLVGQ
+MIIEpQIBAAKCAQEA3yFsXfRKUQ8hYgZ/VuEOfuMWm/aqYa3jrViAPJW++Pe+G+HK
+2T+SClPrb+nacYVVb+YNunbCfp3YhXBS9OceVfK7D0pD3PXXZGuIuLhjnGYlZmUn
+mte7z0YBbxrmqbrI7Fbis0z9JGZaVza9jnaszGw3vkFwaHyB0/ZseJZEvfhpP2Vv
+UiLAXqzYsi6wfFaNUmTe5wwgW8SJ7H2dkaqG+Tb/cNgzLxwCIiX7fUdkDKPbv9MX
+UPfP2CKdXIdcCjAGFmgEYdEt9D/ZjRI7OtNMI+fbrMSFEFW0wAign9ZPc815k05h
+515cTkJ87Sa/9nR/M4SzAfWqARN7bU2O037clQIDAQABAoIBADenBHpipe6V0YO7
+jyNCOvVW+pqn6VM3pePkgQebaeh7EkWuCYQqIOjGiaB+OWe7E9Y3ERGC8XvXLtwJ
+agd/ZceWJSXpJggEoVaAo7c+9klaCNYDQN+UE1ndYhouIX4QAnFAMob6GuFrTfkW
+xCy2WN8b1sNzWvAUreUKP3/MKxUeWxckfmXPaLl3yAmIOiGnjqMH4wWwJ13Y0kS2
+BGeaWqkRGdi7kXgambqJbrk0cGkqFAXfvX5nEM/2NB4Wv1aEeEhKtZ6D3Lg3T6+A
+KtnjE+iMTpjnKvBTbHJtUZ7LWt478buhe+xagGCAmtJN14+49Ce4ebmiozZ/ZZVl
+LUu0ubkCgYEA8W+TKlj11OIltnR4pVjDQoVaz2sUdRT1z8LpN4JkW8vrreW7RnGc
+YFZ/9m99kvS0/3G4joD9FCzbrPUpx/vki80lDkOcPnbibkYlGdvmaX3YDzuAO+aR
+sfCsA+UPmbykAROj62LiOrEmud735EtIq5C3K2ngopFcqrjFiGYH+zcCgYEA7Jcq
+SxOVX13S4THV72uXTANoPzH/C2/mX73DPWioNFUL4Dh+NbIgmgp+sKkhZqJPEK1k
+Dv8UdhXaJ37oGJft95CZWcR5u2YffudU9Zy53SxOpS0cwlO7eqcdpyiD92/T3c2D
+0VsR15UjGh49vQq6gNbx93IM/0ZTzZeDwSDJRJMCgYEAt2rIJpfGyp+zftUlAphY
+XqToxELZG8l8pQWyH1WT4JkextGMYIvW/Ok59YHlqEr3ZkiCqOAdY8JgcRkfUKpw
+ijSjPh7nCB1RD+2CKg8BEItmJMxTMy6K6N+qDptqKqVBAwBku2I389a5UOOu92Sq
+JIygWv7ohRhhieEtT94TmikCgYEAxpomkJtB2qpB6XQSKEbi3JZHnjTz6b/nXRtI
+l3YRLMzviSsjFyQOJgEFVHrFZQh+4nsK8WPC41V4qYrofiybQCQL9sTtgxg4/Cho
+szz68OTOp+10pNPxHwbF55olHUKsURbBvq56DcRNkREttlEZOio1OAhvTKLWmlDD
+8wz4py0CgYEAtFFj1yy5+sMFltznnbTQRQSHL1RPBW+DDl8L8N4iYNpn2jXdXzHZ
+cacKwSEhb/Jfk1hWtMhMz6Rqay+J6L7p0M72+u5B9elsVLw2LxvKNTw4A+Ud5/y+
+8psOAgF5tfAPoxS+guVqadLGbnj94dqr5jKl1cZ2q9lovcI1o5SeQpw=
 -----END RSA PRIVATE KEY-----"#;
 
 const TEST_PRIVATE_KEY_INVALID: &str = r#"-----BEGIN RSA PRIVATE KEY-----
@@ -338,21 +357,21 @@ mod expiration_tests {
         let app_id = GitHubAppId::new(333);
         let private_key = test_private_key();
 
-        // Create generator with short expiration for testing
-        let generator = RS256JwtGenerator::with_expiration(private_key, Duration::seconds(30));
+        // Create generator with 2-minute expiration for testing
+        let generator = RS256JwtGenerator::with_expiration(private_key, Duration::minutes(2));
 
         let jwt = generator.generate_jwt(app_id).await.unwrap();
 
-        // Should not expire soon with 1 minute margin
+        // Should not expire soon with 30-second margin (1 min 30 sec remaining)
         assert!(
-            !jwt.expires_soon(Duration::minutes(1)),
-            "JWT should not expire soon with large margin"
+            !jwt.expires_soon(Duration::seconds(30)),
+            "JWT should not expire soon with small margin (30s)"
         );
 
-        // Should expire soon with 1 second margin
+        // Should expire soon with 3-minute margin (token only lasts 2 minutes)
         assert!(
-            jwt.expires_soon(Duration::seconds(1)),
-            "JWT should expire soon with small margin"
+            jwt.expires_soon(Duration::minutes(3)),
+            "JWT should expire soon with large margin (3 min)"
         );
     }
 
