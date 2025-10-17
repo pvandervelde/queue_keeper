@@ -2,7 +2,32 @@
 
 This document provides guidelines and conventions for AI agents working on this codebase.
 
+## Pre-Implementation Checklist
+
+Before implementing features, verify:
+
+1. **Read Specifications**: Check `specs/`, `github-bot-sdk-specs/`, or `queue-runtime-specs/` for relevant documentation
+2. **Search Existing Code**: Use semantic_search to find similar implementations
+3. **Check Module Structure**: Determine if code belongs in existing module or needs new one
+4. **Security Review**: Identify sensitive data (tokens, secrets) requiring special handling
+5. **Plan Tests**: Identify test scenarios before writing implementation
+
 ## Code Organization
+
+### Workspace Structure
+
+This is a Cargo workspace with multiple crates. When adding code:
+
+- **New crate needed**: Distinct domain boundary, separate compilation unit, or independent versioning
+- **Existing crate**: Feature extends existing functionality or shares domain concepts
+- **Workspace dependencies**: Always use workspace-level dependency management for shared crates
+
+Add new workspace members to root `Cargo.toml`:
+
+```toml
+[workspace]
+members = ["crates/new-crate"]
+```
 
 ### Module Structure
 
@@ -13,8 +38,10 @@ src/
 ├── lib.rs              # Public API and module declarations
 ├── error.rs            # Error types and handling
 ├── error_tests.rs      # Error tests
-├── module1.rs          # Module 1 public interface
+├── module1.rs          # Module 1 public interface (use for single-file modules)
 ├── module1/
+│   ├── mod.rs          # Module public interface (use for multi-file modules)
+│   ├── mod_tests.rs    # Module-level tests
 │   ├── types.rs        # Domain types
 │   ├── types_tests.rs  # Type tests
 │   └── implementation.rs
@@ -22,6 +49,10 @@ src/
 └── module2/
     └── ...
 ```
+
+**File vs Directory Modules**:
+- Single file `module.rs`: Module fits in one file, no submodules needed
+- Directory `module/mod.rs`: Module requires multiple files or has submodules
 
 ### Naming Conventions
 
@@ -59,6 +90,10 @@ All public APIs must have rustdoc comments:
 /// Returns `ErrorType` if:
 /// - Condition 1
 /// - Condition 2
+///
+/// # Panics
+///
+/// Documents any conditions that cause panics.
 pub fn public_api() -> Result<(), ErrorType> {
     // Implementation...
 }
@@ -87,6 +122,7 @@ fn test_token_expiration_detection() {
 2. Implement retry classification (`is_transient()`, `should_retry()`)
 3. Include sufficient context for debugging
 4. Never expose secrets in error messages
+5. Use `.context()` to build error chains with additional context
 
 ```rust
 #[derive(Debug, Error)]
@@ -107,6 +143,14 @@ impl MyError {
     }
 }
 ```
+
+## Logging and Observability
+
+- Use structured logging with appropriate levels (trace, debug, info, warn, error)
+- **Critical**: Never log secrets, tokens, or sensitive data in any form
+- Log operation start/end for auditing
+- Include correlation IDs for distributed tracing
+- Use `Debug` trait carefully on types containing sensitive data
 
 ## Testing Strategy
 
@@ -173,6 +217,14 @@ mod validation_tests {
 }
 ```
 
+### Integration Testing
+
+- Place integration tests in `tests/` directory at crate root
+- Use test fixtures and mock patterns for external dependencies
+- Test async code with `#[tokio::test]` or appropriate runtime
+- Verify error paths and edge cases explicitly
+- Use `assert_eq!`, `assert!`, and `matches!` appropriately
+
 ## Rust-Specific Conventions
 
 ### Type Safety
@@ -196,6 +248,25 @@ pub struct GitHubAppId(u64);
 - Use `#[async_trait]` for async trait methods
 - Document cancellation behavior
 - Ensure proper resource cleanup
+- Use `tokio::spawn` for concurrent tasks; avoid blocking operations in async context
+- Implement timeouts with `tokio::time::timeout` for operations that may hang
+- Use `tokio::select!` for cancellation patterns
+
+### Trait Design
+
+- Use traits for abstraction boundaries and testability
+- Prefer trait objects (`dyn Trait`) for runtime polymorphism
+- Use generic bounds (`T: Trait`) for compile-time polymorphism
+- Document trait contracts thoroughly, including preconditions and postconditions
+- Implement common traits (`Clone`, `Debug`, `Send`, `Sync`) when appropriate
+
+### Performance Considerations
+
+- Prefer borrowing (`&T`) over cloning when possible
+- Use `Arc<T>` for shared ownership across threads
+- Use `Cow<'_, T>` when data may or may not need to be owned
+- Avoid unnecessary allocations in hot paths
+- Profile before optimizing; measure impact of changes
 
 ### Security
 
@@ -203,6 +274,8 @@ pub struct GitHubAppId(u64);
 - Implement `Debug` carefully for sensitive types
 - Use constant-time comparison for security-critical operations
 - Zero sensitive memory on drop when possible
+- Validate and sanitize all external inputs (webhooks, API responses, user data)
+- Use type system to distinguish validated vs unvalidated data
 
 ```rust
 impl std::fmt::Debug for SecretToken {
