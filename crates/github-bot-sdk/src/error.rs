@@ -31,6 +31,14 @@ pub enum AuthError {
     #[error("Insufficient permissions for operation: {permission}")]
     InsufficientPermissions { permission: String },
 
+    /// Invalid private key format or data (non-retryable).
+    #[error("Invalid private key: {message}")]
+    InvalidPrivateKey { message: String },
+
+    /// JWT generation failed (non-retryable).
+    #[error("JWT generation failed: {message}")]
+    JwtGenerationFailed { message: String },
+
     /// GitHub API returned an error response.
     #[error("GitHub API error: {status} - {message}")]
     GitHubApiError { status: u16, message: String },
@@ -77,6 +85,8 @@ impl AuthError {
             Self::InstallationNotFound { .. } => false,
             Self::TokenExpired => true, // Can refresh token
             Self::InsufficientPermissions { .. } => false,
+            Self::InvalidPrivateKey { .. } => false,
+            Self::JwtGenerationFailed { .. } => false,
             Self::GitHubApiError { status, .. } => *status >= 500 || *status == 429,
             Self::SigningError(_) => false,
             Self::SecretError(e) => e.is_transient(),
