@@ -6,6 +6,63 @@
 
 **Responsibilities**: Manages GitHub App authentication lifecycle including JWT generation, installation token exchange, and secure token caching
 
+**Related Documentation**: See `github-bot-sdk-specs/architecture/app-level-authentication.md` for comprehensive guide on authentication levels and usage patterns.
+
+## Authentication Levels
+
+GitHub App authentication operates at two distinct levels:
+
+### App-Level Authentication (JWT)
+
+**Purpose**: Authenticate AS the GitHub App itself for app-wide operations.
+
+**Token Type**: JSON Web Token (JWT)
+
+- **Lifetime**: Maximum 10 minutes (GitHub requirement)
+- **Signing**: RS256 with private key
+- **Scope**: App-wide operations
+
+**Use Cases**:
+
+- Listing all installations (`GET /app/installations`)
+- Getting app information (`GET /app`)
+- Managing specific installation (`GET /app/installations/{id}`)
+- Converting webhook events to installation IDs
+
+**API Method**: `AuthenticationProvider::app_token()`
+
+### Installation-Level Authentication (Installation Token)
+
+**Purpose**: Authenticate as a specific installation for repository/org operations.
+
+**Token Type**: Installation Access Token
+
+- **Lifetime**: 1 hour (GitHub managed)
+- **Obtained**: JWT exchanged for installation token via GitHub API
+- **Scope**: Limited to installation's permissions and repositories
+
+**Use Cases**:
+
+- Repository operations (create issues/PRs, read files, webhooks)
+- Organization operations (team management, org settings)
+- Any operation within the installation's granted permissions
+
+**API Method**: `AuthenticationProvider::installation_token(installation_id)`
+
+### Choosing the Right Authentication Level
+
+| Operation Type | Auth Level | Method |
+|----------------|------------|--------|
+| List installations | App-level | `app_token()` |
+| Get app metadata | App-level | `app_token()` |
+| Discover installation for webhook | App-level | `app_token()` |
+| Create issue/PR | Installation-level | `installation_token(id)` |
+| Read repository files | Installation-level | `installation_token(id)` |
+| Manage webhooks | Installation-level | `installation_token(id)` |
+| Update check runs | Installation-level | `installation_token(id)` |
+
+**Hybrid Pattern**: Many bots use app-level authentication to discover the appropriate installation, then switch to installation-level authentication for actual operations.
+
 ## Dependencies
 
 - Shared Types: `UserId`, `RepositoryId`, `Timestamp`, `ValidationError`
@@ -151,30 +208,84 @@ pub enum Permission {
 
 ### AuthenticationProvider
 
-Main interface for GitHub App authentication operations.
+Main interface for GitHub App authentication operations with support for both app-level and installation-level authentication.
 
 ```rust
 #[async_trait]
 pub trait AuthenticationProvider: Send + Sync {
-    async fn generate_jwt(&self) -> Result<JsonWebToken, AuthError>;
+    /// Get JWT token for app-level API operations.
+    ///
+    /// Returns a cached JWT if available and not expiring soon (within 2 minutes).
+    /// Automatically generates new JWT when needed.
+    ///
+    /// # Use Cases
+    /// - Listing installations
+    /// - Getting app information
+    /// - Managing installations
+    ///
+    /// # Errors
+    /// * `AuthError::SecretError` - Failed to retrieve private key or app ID
+    /// * `AuthError::SigningError` - JWT signing failed
+    async fn app_token(&self) -> Result<JsonWebToken, AuthError>;
 
-    async fn get_installation_token(
+    /// Get installation token for installation-level API operations.
+    ///
+    /// Returns a cached token if available and not expiring soon (within 5 minutes).
+    /// Automatically exchanges JWT for installation token when needed.
+    ///
+    /// # Use Cases
+    /// - Repository operations
+    /// - Issue/PR management
+    /// - Any operation within installation scope
+    ///
+    /// # Errors
+    /// * `AuthError::InstallationNotFound` - Installation doesn't exist or access denied
+    /// * `AuthError::GitHubApiError` - GitHub API request failed
+    async fn installation_token(
         &self,
         installation_id: InstallationId,
     ) -> Result<InstallationToken, AuthError>;
 
+    /// Refresh installation token (bypass cache, force new token).
+    ///
+    /// Use sparingly as it counts against rate limits.
     async fn refresh_installation_token(
         &self,
         installation_id: InstallationId,
     ) -> Result<InstallationToken, AuthError>;
 
+    /// List all installations for this GitHub App.
+    ///
+    /// Convenience method combining app_token() with list installations API.
     async fn list_installations(&self) -> Result<Vec<Installation>, AuthError>;
 
+    /// Get repositories accessible by installation.
+    ///
+    /// Convenience method combining installation_token() with list repositories API.
     async fn get_installation_repositories(
         &self,
         installation_id: InstallationId,
     ) -> Result<Vec<Repository>, AuthError>;
 }
+```
+
+**Authentication Flow**:
+
+```
+app_token() flow:
+1. Check TokenCache for valid JWT
+2. If expired/missing, get private key from SecretProvider
+3. Generate new JWT via JwtSigner
+4. Cache JWT (valid for ~8 minutes)
+5. Return JWT
+
+installation_token() flow:
+1. Check TokenCache for valid installation token
+2. If expired/missing:
+   a. Get JWT via app_token()
+   b. Call GitHub API to exchange JWT for installation token
+   c. Cache installation token (valid for ~55 minutes)
+3. Return installation token
 ```
 
 ### SecretProvider (External Trait)

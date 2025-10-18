@@ -727,27 +727,84 @@ pub struct RateLimitInfo {
 // ============================================================================
 
 /// Main interface for GitHub App authentication operations.
+///
+/// Provides two authentication levels:
+/// - **App-level**: JWT tokens for operations as the GitHub App (discovering installations, managing app)
+/// - **Installation-level**: Installation tokens for operations within a specific installation context
+///
+/// See `github-bot-sdk-specs/architecture/app-level-authentication.md` for detailed usage patterns.
 #[async_trait::async_trait]
 pub trait AuthenticationProvider: Send + Sync {
-    /// Generate JWT token for GitHub App authentication.
-    async fn generate_jwt(&self) -> Result<JsonWebToken, AuthError>;
+    /// Get JWT token for app-level GitHub API operations.
+    ///
+    /// Use this for operations that require authentication as the GitHub App itself, such as:
+    /// - Listing installations (`GET /app/installations`)
+    /// - Getting app information (`GET /app`)
+    /// - Managing installations (`GET /app/installations/{installation_id}`)
+    ///
+    /// This method handles caching and automatic refresh of JWTs.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use github_bot_sdk::auth::{AuthenticationProvider, AuthError};
+    /// # async fn example(auth: &dyn AuthenticationProvider) -> Result<(), AuthError> {
+    /// // Get JWT for app-level operations
+    /// let jwt = auth.app_token().await?;
+    /// // Use jwt.token() in Authorization: Bearer header
+    /// # Ok(())
+    /// # }
+    /// ```
+    async fn app_token(&self) -> Result<JsonWebToken, AuthError>;
 
-    /// Get installation token for API operations.
-    async fn get_installation_token(
+    /// Get installation token for installation-level API operations.
+    ///
+    /// Use this for operations within a specific installation context, such as:
+    /// - Repository operations (reading files, creating issues/PRs)
+    /// - Organization operations (team management, webhooks)
+    /// - Any operation scoped to the installation's permissions
+    ///
+    /// This method handles caching and automatic refresh of installation tokens.
+    ///
+    /// # Arguments
+    ///
+    /// * `installation_id` - The installation to get a token for
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use github_bot_sdk::auth::{AuthenticationProvider, InstallationId, AuthError};
+    /// # async fn example(auth: &dyn AuthenticationProvider) -> Result<(), AuthError> {
+    /// let installation_id = InstallationId::new(123456);
+    /// let token = auth.installation_token(installation_id).await?;
+    /// // Use token.token() in Authorization: Bearer header
+    /// # Ok(())
+    /// # }
+    /// ```
+    async fn installation_token(
         &self,
         installation_id: InstallationId,
     ) -> Result<InstallationToken, AuthError>;
 
-    /// Refresh installation token (force new token).
+    /// Refresh installation token (force new token generation).
+    ///
+    /// Bypasses cache and requests a new installation token from GitHub.
+    /// Use sparingly as it counts against rate limits.
     async fn refresh_installation_token(
         &self,
         installation_id: InstallationId,
     ) -> Result<InstallationToken, AuthError>;
 
     /// List all installations for this GitHub App.
+    ///
+    /// Requires app-level authentication. This is a convenience method that combines
+    /// app_token() with the list installations API call.
     async fn list_installations(&self) -> Result<Vec<Installation>, AuthError>;
 
     /// Get repositories accessible by installation.
+    ///
+    /// Requires installation-level authentication. This is a convenience method that combines
+    /// installation_token() with the list repositories API call.
     async fn get_installation_repositories(
         &self,
         installation_id: InstallationId,
@@ -850,7 +907,9 @@ pub trait GitHubApiClient: Send + Sync {
 // Submodules
 // ============================================================================
 
+pub mod cache;
 pub mod jwt;
+pub mod tokens;
 
 #[cfg(test)]
 #[path = "mod_tests.rs"]

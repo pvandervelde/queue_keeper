@@ -4,7 +4,74 @@ The authentication module provides comprehensive GitHub App authentication capab
 
 ## Overview
 
-The authentication system provides GitHub App authentication capabilities for both repository-specific and installation-wide operations. It supports authentication as a GitHub App for general operations, and as specific installations for user or organization-scoped actions.
+The authentication system provides GitHub App authentication capabilities at two levels:
+
+1. **App-Level Authentication**: Authenticate as the GitHub App itself using JWT tokens for app-wide operations
+2. **Installation-Level Authentication**: Authenticate as a specific installation using installation tokens for repository and organization operations
+
+### Authentication Levels
+
+**App-Level Operations (JWT Authentication)**:
+
+- List all installations for the app (`GET /app/installations`)
+- Get app information (`GET /app`)
+- Get a specific installation (`GET /app/installations/{installation_id}`)
+- Create installation access tokens (`POST /app/installations/{installation_id}/access_tokens`)
+- Suspend/unsuspend installations
+- Access app-level marketplace and billing information
+
+**Installation-Level Operations (Installation Token Authentication)**:
+
+- All repository operations (issues, pull requests, commits, etc.)
+- Organization-specific operations within installation scope
+- User-specific operations within installation scope
+- Any operation requiring repository or organization access
+
+## Authentication Workflows
+
+### App-Level Authentication Workflow
+
+For operations that require app-level authentication:
+
+1. Generate JWT using the app's private key
+2. Use JWT directly in Authorization header: `Bearer <JWT>`
+3. Make API call to app-level endpoint (e.g., `/app/installations`)
+4. JWT expires after 10 minutes (GitHub maximum)
+
+**Use Cases**:
+
+- **Installation Discovery**: List all installations to determine where the app is installed
+- **Installation Management**: Get installation details, suspend/unsuspend installations
+- **Token Generation**: Create installation access tokens for discovered installations
+- **App Metadata**: Retrieve app information and configuration
+
+### Installation-Level Authentication Workflow
+
+For operations that require installation-level authentication:
+
+1. Generate JWT using the app's private key
+2. Exchange JWT for installation token via `POST /app/installations/{installation_id}/access_tokens`
+3. Use installation token in Authorization header: `Bearer <installation_token>` or `token <installation_token>`
+4. Make API call to installation-scoped endpoint (e.g., `/repos/{owner}/{repo}/issues`)
+5. Installation token expires after 1 hour
+
+**Use Cases**:
+
+- **Repository Operations**: All operations on repositories within the installation
+- **Organization Operations**: Organization-level operations within installation scope
+- **Webhook Processing**: Authenticated operations in response to webhook events
+
+### Hybrid Workflow
+
+For bots that need to discover installations and then operate on them:
+
+1. Generate JWT for app-level authentication
+2. Call `GET /app/installations` to discover all installations
+3. For each installation:
+   - Exchange JWT for installation token
+   - Cache installation token with installation ID as key
+   - Perform repository/organization operations using cached token
+4. Refresh installation tokens proactively before expiration
 
 ## Core Types
 
