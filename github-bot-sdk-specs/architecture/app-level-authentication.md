@@ -143,27 +143,63 @@ if installation.suspended_at.is_none() {
 
 ## Implementation Requirements
 
-### AuthProvider Trait
+### AuthenticationProvider Trait
 
-The `AuthProvider` trait must support both authentication levels:
+The `AuthenticationProvider` trait must support both authentication levels:
 
 ```rust
 #[async_trait]
-pub trait AuthProvider: Send + Sync {
-    type Token: Clone + Send + Sync;
-    type Error: std::error::Error + Send + Sync + 'static;
+pub trait AuthenticationProvider: Send + Sync {
+    /// Get JWT token for app-level GitHub API operations.
+    ///
+    /// Use this for operations that require authentication as the GitHub App itself, such as:
+    /// - Listing installations (`GET /app/installations`)
+    /// - Getting app information (`GET /app`)
+    /// - Managing installations (`GET /app/installations/{installation_id}`)
+    ///
+    /// This method handles caching and automatic refresh of JWTs.
+    async fn app_token(&self) -> Result<JsonWebToken, AuthError>;
 
-    /// Generate a JWT for app-level authentication
-    async fn app_token(&self) -> Result<Self::Token, Self::Error>;
+    /// Get installation token for installation-level API operations.
+    ///
+    /// Use this for operations within a specific installation context, such as:
+    /// - Repository operations (reading files, creating issues/PRs)
+    /// - Organization operations (team management, webhooks)
+    /// - Any operation scoped to the installation's permissions
+    ///
+    /// This method handles caching and automatic refresh of installation tokens.
+    ///
+    /// # Arguments
+    ///
+    /// * `installation_id` - The installation to get a token for
+    async fn installation_token(
+        &self,
+        installation_id: InstallationId,
+    ) -> Result<InstallationToken, AuthError>;
 
-    /// Exchange JWT for installation token
-    async fn installation_token(&self, installation_id: u64) -> Result<Self::Token, Self::Error>;
+    /// Refresh installation token (force new token generation).
+    ///
+    /// Bypasses cache and requests a new installation token from GitHub.
+    /// Use sparingly as it counts against rate limits.
+    async fn refresh_installation_token(
+        &self,
+        installation_id: InstallationId,
+    ) -> Result<InstallationToken, AuthError>;
 
-    /// Refresh an existing token
-    async fn refresh_token(&self, token: &Self::Token) -> Result<Self::Token, Self::Error>;
+    /// List all installations for this GitHub App.
+    ///
+    /// Requires app-level authentication. This is a convenience method that combines
+    /// app_token() with the list installations API call.
+    async fn list_installations(&self) -> Result<Vec<Installation>, AuthError>;
 
-    /// Check if token expires soon
-    fn token_expires_soon(&self, token: &Self::Token) -> bool;
+    /// Get repositories accessible by installation.
+    ///
+    /// Requires installation-level authentication. This is a convenience method that combines
+    /// installation_token() with the list repositories API call.
+    async fn get_installation_repositories(
+        &self,
+        installation_id: InstallationId,
+    ) -> Result<Vec<Repository>, AuthError>;
 }
 ```
 
