@@ -51,7 +51,7 @@ This document defines testable behavioral assertions for the GitHub Bot SDK. The
 - Private key content never appears in error message
 - No partial token generation occurs
 
-### Assertion 43: Installation Token Retrieval
+### Assertion 4: Installation Token Retrieval
 
 **Given**: A valid JWT token and installation ID
 **When**: `get_installation_token()` is called
@@ -113,7 +113,7 @@ This document defines testable behavioral assertions for the GitHub Bot SDK. The
 
 ## API Operations Assertions
 
-### Assertion 6: Repository Information Retrieval
+### Assertion 8: Repository Information Retrieval
 
 **Given**: Valid authentication and existing repository
 **When**: `get_repository()` is called with repository ID
@@ -127,7 +127,7 @@ This document defines testable behavioral assertions for the GitHub Bot SDK. The
 - Permissions reflect actual GitHub App installation permissions
 - Data types match specification
 
-### Assertion 8: Repository Access Without Permission
+### Assertion 9: Repository Access Without Permission
 
 **Given**: Valid authentication but repository not in installation scope
 **When**: `get_repository()` is called
@@ -141,7 +141,7 @@ This document defines testable behavioral assertions for the GitHub Bot SDK. The
 - Error message is actionable for troubleshooting
 - Security context preserved (no data leaks)
 
-### Assertion 9: Pull Request Creation
+### Assertion 10: Pull Request Creation
 
 **Given**: Valid authentication and repository with write permissions
 **When**: `create_pull_request()` is called with valid PR data
@@ -156,7 +156,7 @@ This document defines testable behavioral assertions for the GitHub Bot SDK. The
 - Labels, assignees, and reviewers applied correctly
 - PR state is "open" initially
 
-### Assertion 10: Pull Request Creation Without Write Permission
+### Assertion 11: Pull Request Creation Without Write Permission
 
 **Given**: Valid authentication but repository with read-only permissions
 **When**: `create_pull_request()` is called
@@ -170,7 +170,7 @@ This document defines testable behavioral assertions for the GitHub Bot SDK. The
 - Error indicates "write" permission requirement
 - No partial PR creation occurs
 
-### Assertion 11: Issue Management Operations
+### Assertion 12: Issue Management Operations
 
 **Given**: Valid authentication and repository with appropriate permissions
 **When**: Issue operations are performed (create, update, close)
@@ -187,7 +187,7 @@ This document defines testable behavioral assertions for the GitHub Bot SDK. The
 
 ## Rate Limiting Assertions
 
-### Assertion 12: Rate Limit Respect
+### Assertion 13: Rate Limit Respect
 
 **Given**: GitHub API client approaching rate limits
 **When**: Multiple API requests are made rapidly
@@ -202,7 +202,7 @@ This document defines testable behavioral assertions for the GitHub Bot SDK. The
 - Rate limit headers parsed correctly
 - Operations resume after rate limit reset
 
-### Assertion 13: Rate Limit Exceeded Handling
+### Assertion 14: Rate Limit Exceeded Handling
 
 **Given**: GitHub API returning HTTP 429 rate limit exceeded
 **When**: Additional API requests are attempted
@@ -217,7 +217,7 @@ This document defines testable behavioral assertions for the GitHub Bot SDK. The
 - Maximum retry attempts honored
 - Success after rate limit window expires
 
-### Assertion 14: Secondary Rate Limit Handling
+### Assertion 15: Secondary Rate Limit Handling
 
 **Given**: GitHub API returning secondary rate limit (abuse detection)
 **When**: Client receives HTTP 403 with rate limit message
@@ -234,7 +234,7 @@ This document defines testable behavioral assertions for the GitHub Bot SDK. The
 
 ## Webhook Processing Assertions
 
-### Assertion 15: Webhook Signature Validation
+### Assertion 16: Webhook Signature Validation
 
 **Given**: Valid webhook payload and matching signature
 **When**: `validate_webhook()` is called
@@ -249,7 +249,7 @@ This document defines testable behavioral assertions for the GitHub Bot SDK. The
 - Payload integrity confirmed
 - No timing side channels in validation
 
-### Assertion 16: Webhook Signature Validation Failure
+### Assertion 17: Webhook Signature Validation Failure
 
 **Given**: Webhook payload with invalid or tampered signature
 **When**: `validate_webhook()` is called
@@ -264,7 +264,7 @@ This document defines testable behavioral assertions for the GitHub Bot SDK. The
 - Consistent timing prevents timing attacks
 - No information leakage about signature validation
 
-### Assertion 17: Webhook Event Processing
+### Assertion 18: Webhook Event Processing
 
 **Given**: Valid authenticated webhook with supported event type
 **When**: `process_webhook_event()` is called
@@ -279,7 +279,7 @@ This document defines testable behavioral assertions for the GitHub Bot SDK. The
 - Event data parsed according to GitHub schema
 - Handler context includes authentication information
 
-### Assertion 18: Webhook Event Deduplication
+### Assertion 19: Webhook Event Deduplication
 
 **Given**: Multiple webhook deliveries with same event ID
 **When**: Events are processed sequentially
@@ -296,7 +296,7 @@ This document defines testable behavioral assertions for the GitHub Bot SDK. The
 
 ## Error Handling and Recovery Assertions
 
-### Assertion 19: Network Connectivity Failure
+### Assertion 20: Network Connectivity Failure
 
 **Given**: GitHub API client when network connectivity is lost
 **When**: API operations are attempted
@@ -311,7 +311,7 @@ This document defines testable behavioral assertions for the GitHub Bot SDK. The
 - Recovery after connectivity restoration
 - Circuit breaker prevents cascading failures
 
-### Assertion 20: GitHub API Server Errors
+### Assertion 21: GitHub API Server Errors
 
 **Given**: GitHub API returning HTTP 5xx server errors
 **When**: API operations are attempted
@@ -326,7 +326,7 @@ This document defines testable behavioral assertions for the GitHub Bot SDK. The
 - Circuit breaker opens after sustained failures
 - Operations succeed after GitHub recovery
 
-### Assertion 21: Authentication Token Expiry During Operations
+### Assertion 22: Authentication Token Expiry During Operations
 
 **Given**: Long-running operations with expiring tokens
 **When**: Token expires during operation sequence
@@ -343,7 +343,7 @@ This document defines testable behavioral assertions for the GitHub Bot SDK. The
 
 ## Security Assertions
 
-### Assertion 22: Private Key Security
+### Assertion 23: Private Key Security
 
 **Given**: GitHub App private key loaded into memory
 **When**: Private key is used for JWT generation
@@ -358,7 +358,7 @@ This document defines testable behavioral assertions for the GitHub Bot SDK. The
 - Debug output excludes sensitive data
 - Error messages don't leak key information
 
-### Assertion 23: Token Security in Transit
+### Assertion 24: Token Security in Transit
 
 **Given**: Authentication tokens being used for API requests
 **When**: HTTP requests are made to GitHub API
@@ -373,7 +373,7 @@ This document defines testable behavioral assertions for the GitHub Bot SDK. The
 - No tokens in URLs or query parameters
 - Authorization headers properly formatted
 
-### Assertion 24: Sensitive Data Logging Prevention
+### Assertion 25: Sensitive Data Logging Prevention
 
 **Given**: SDK operations involving authentication or API data
 **When**: Logging occurs at any level
@@ -390,7 +390,7 @@ This document defines testable behavioral assertions for the GitHub Bot SDK. The
 
 ## Performance and Scalability Assertions
 
-### Assertion 25: Concurrent API Operations
+### Assertion 26: Concurrent API Operations
 
 **Given**: Multiple concurrent GitHub API requests
 **When**: Operations execute simultaneously
@@ -405,7 +405,7 @@ This document defines testable behavioral assertions for the GitHub Bot SDK. The
 - Token cache handles concurrent access
 - Performance scales with concurrency
 
-### Assertion 26: Memory Usage Under Load
+### Assertion 27: Memory Usage Under Load
 
 **Given**: High-volume API operations over extended time
 **When**: Continuous operations are performed
