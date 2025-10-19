@@ -122,8 +122,6 @@ pub enum EventTypePattern {
 }
 
 impl EventTypePattern {
-
-
     /// Check if this pattern matches the given event type
     pub fn matches(&self, _event_type: &str) -> bool {
         unimplemented!("See specs/interfaces/bot-configuration.md")
@@ -141,7 +139,7 @@ impl FromStr for EventTypePattern {
     fn from_str(_pattern: &str) -> Result<Self, Self::Err> {
         // TODO: Implement pattern parsing
         // Examples:
-        // - "issues.opened" → Exact("issues.opened")  
+        // - "issues.opened" → Exact("issues.opened")
         // - "issues.*" → Wildcard("issues.*")
         // - "pull_request" → EntityAll("pull_request")
         // - "!push" → Exclude("push")

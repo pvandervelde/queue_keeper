@@ -747,7 +747,8 @@ pub trait AuthenticationProvider: Send + Sync {
     /// # Examples
     ///
     /// ```no_run
-    /// # use github_bot_sdk::auth::{AuthenticationProvider, AuthError};
+    /// # use github_bot_sdk::auth::AuthenticationProvider;
+    /// # use github_bot_sdk::error::AuthError;
     /// # async fn example(auth: &dyn AuthenticationProvider) -> Result<(), AuthError> {
     /// // Get JWT for app-level operations
     /// let jwt = auth.app_token().await?;
@@ -773,7 +774,8 @@ pub trait AuthenticationProvider: Send + Sync {
     /// # Examples
     ///
     /// ```no_run
-    /// # use github_bot_sdk::auth::{AuthenticationProvider, InstallationId, AuthError};
+    /// # use github_bot_sdk::auth::{AuthenticationProvider, InstallationId};
+    /// # use github_bot_sdk::error::AuthError;
     /// # async fn example(auth: &dyn AuthenticationProvider) -> Result<(), AuthError> {
     /// let installation_id = InstallationId::new(123456);
     /// let token = auth.installation_token(installation_id).await?;

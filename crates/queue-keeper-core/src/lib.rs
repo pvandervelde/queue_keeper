@@ -14,15 +14,12 @@
 //!
 //! ## Usage
 //!
-//! ```rust,no_run
-//! use queue_keeper_core::{EventId, SessionId, WebhookProcessor};
+//! ```rust
+//! use queue_keeper_core::{EventId, SessionId};
 //!
-//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! // Core types are available for use across the system
 //! let event_id = EventId::new();
-//! let session_id = SessionId::from_parts("owner", "repo", "pull_request", "123")?;
-//! # Ok(())
-//! # }
+//! let session_id = SessionId::from_parts("owner", "repo", "pull_request", "123");
 //! ```
 
 use chrono::{DateTime, Utc};

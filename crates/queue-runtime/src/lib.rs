@@ -97,8 +97,6 @@ impl MessageId {
         Self(id.to_string())
     }
 
-
-
     /// Get message ID as string
     pub fn as_str(&self) -> &str {
         &self.0

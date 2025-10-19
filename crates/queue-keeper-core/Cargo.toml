@@ -2,6 +2,7 @@
 name = "queue-keeper-core"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
 
 [dependencies]
 # Async runtime
@@ -28,8 +29,8 @@ ulid = { version = "1.2", features = ["serde"] }
 bytes = { workspace = true }
 
 # Dependencies on library crates
-github-bot-sdk = { path = "../github-bot-sdk" }
-queue-runtime = { path = "../queue-runtime" }
+github-bot-sdk = { path = "../github-bot-sdk", version = "0.1.0" }
+queue-runtime = { path = "../queue-runtime", version = "0.1.0" }
 
 [dev-dependencies]
 mockall = { workspace = true }
