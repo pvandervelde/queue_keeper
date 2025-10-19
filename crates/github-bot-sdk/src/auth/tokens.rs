@@ -114,13 +114,18 @@ where
             .await
             .map_err(AuthError::SecretError)?;
 
-        // Check cache first
-        if let Some(jwt) = self
-            .token_cache
-            .get_jwt(app_id)
-            .await
-            .map_err(AuthError::CacheError)?
-        {
+        // Check cache first (graceful fallback on cache errors)
+        let cached_jwt = match self.token_cache.get_jwt(app_id).await {
+            Ok(Some(jwt)) => Some(jwt),
+            Ok(None) => None,
+            Err(_) => {
+                // Cache read error - log and continue with generation
+                // This ensures cache failures don't block authentication
+                None
+            }
+        };
+
+        if let Some(jwt) = cached_jwt {
             // Return cached token if it's not expired and not expiring soon
             if !jwt.expires_soon(self.config.jwt_refresh_margin) {
                 return Ok(jwt);
