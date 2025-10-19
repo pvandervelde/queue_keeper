@@ -4,7 +4,33 @@ The client module provides a high-level, authenticated GitHub API client built o
 
 ## Overview
 
-The GitHub client abstracts the complexity of making authenticated API requests to GitHub, providing a clean interface for common operations while maintaining flexibility for custom requests.
+The GitHub client abstracts the complexity of making authenticated API requests to GitHub, providing a clean interface for common operations while maintaining flexibility for custom requests. The client supports both app-level and installation-level authentication to enable the full range of GitHub API operations.
+
+## Authentication Context
+
+The client supports two authentication contexts:
+
+### App-Level Client
+
+Authenticates as the GitHub App itself using JWT tokens. Used for app-wide operations.
+
+**Supported Operations**:
+
+- List all installations (`GET /app/installations`)
+- Get app details (`GET /app`)
+- Get specific installation (`GET /app/installations/{installation_id}`)
+- Create installation access tokens
+- Manage installation lifecycle (suspend/unsuspend)
+
+### Installation-Level Client
+
+Authenticates as a specific installation using installation tokens. Used for repository and organization operations.
+
+**Supported Operations**:
+
+- All repository operations (issues, PRs, commits, etc.)
+- Organization operations within installation scope
+- User operations within installation scope
 
 ## Core Types
 
@@ -23,16 +49,38 @@ pub struct GitHubClient {
 impl GitHubClient {
     pub fn new(auth: impl AuthProvider + 'static) -> GitHubClientBuilder { ... }
 
+    // App-Level Operations (authenticated with JWT)
+
+    /// List all installations for the authenticated app
+    pub async fn list_installations(&self) -> Result<Vec<Installation>, ClientError> { ... }
+
+    /// Get details about the authenticated app
+    pub async fn get_app(&self) -> Result<App, ClientError> { ... }
+
+    /// Get a specific installation by ID
+    pub async fn get_installation(&self, installation_id: u64) -> Result<Installation, ClientError> { ... }
+
+    /// Make a raw authenticated GET request as the app
+    pub async fn get_as_app(&self, path: &str) -> Result<Response, ClientError> { ... }
+
+    /// Make a raw authenticated POST request as the app
+    pub async fn post_as_app(&self, path: &str, body: &impl Serialize) -> Result<Response, ClientError> { ... }
+
+    // Installation-Level Operations (authenticated with installation token)
+
     /// Get an installation-specific client
     pub async fn installation(&self, repo: &Repository) -> Result<InstallationClient, ClientError> { ... }
 
-    /// Make a raw authenticated GET request
+    /// Get an installation-specific client by installation ID
+    pub async fn installation_by_id(&self, installation_id: u64) -> Result<InstallationClient, ClientError> { ... }
+
+    /// Make a raw authenticated GET request as an installation
     pub async fn get(&self, installation_id: u64, path: &str) -> Result<Response, ClientError> { ... }
 
-    /// Make a raw authenticated POST request
+    /// Make a raw authenticated POST request as an installation
     pub async fn post(&self, installation_id: u64, path: &str, body: &impl Serialize) -> Result<Response, ClientError> { ... }
 
-    /// Execute a GraphQL query
+    /// Execute a GraphQL query as an installation
     pub async fn graphql(&self, installation_id: u64, query: &str, variables: Value) -> Result<GraphQLResponse, ClientError> { ... }
 }
 ```
@@ -250,6 +298,64 @@ The client uses strongly-typed structs for all GitHub API operations.
 
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct App {
+    pub id: u64,
+    pub slug: String,
+    pub name: String,
+    pub owner: User,
+    pub description: Option<String>,
+    pub external_url: String,
+    pub html_url: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Installation {
+    pub id: u64,
+    pub account: Account,
+    pub access_tokens_url: String,
+    pub repositories_url: String,
+    pub html_url: String,
+    pub app_id: u64,
+    pub target_type: TargetType,
+    pub permissions: Permissions,
+    pub events: Vec<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub single_file_name: Option<String>,
+    pub has_multiple_single_files: bool,
+    pub suspended_at: Option<DateTime<Utc>>,
+    pub suspended_by: Option<User>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TargetType {
+    Organization,
+    User,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Account {
+    pub id: u64,
+    pub login: String,
+    pub avatar_url: String,
+    pub html_url: String,
+    #[serde(rename = "type")]
+    pub account_type: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Permissions {
+    pub metadata: Option<String>,
+    pub contents: Option<String>,
+    pub issues: Option<String>,
+    pub pull_requests: Option<String>,
+    // Additional permission fields as needed
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Repository {
     pub owner: String,
     pub name: String,
@@ -371,6 +477,54 @@ let client = GitHubClient::new(auth)
     .timeout(Duration::from_secs(30))
     .max_retries(3)
     .build();
+```
+
+### App-Level Operations
+
+```rust
+// Get app information
+let app = client.get_app().await?;
+println!("App: {} ({})", app.name, app.id);
+
+// List all installations
+let installations = client.list_installations().await?;
+for installation in installations {
+    println!(
+        "Installed on: {} (ID: {})",
+        installation.account.login,
+        installation.id
+    );
+}
+
+// Get specific installation details
+let installation = client.get_installation(12345).await?;
+println!("Installation target: {:?}", installation.target_type);
+
+// Make a custom app-level API request
+let response = client.get_as_app("/app/hook/config").await?;
+```
+
+### Installation Discovery and Operations
+
+```rust
+// Discover all installations and operate on each
+let installations = client.list_installations().await?;
+
+for installation in installations {
+    // Get an installation-specific client
+    let inst_client = client.installation_by_id(installation.id).await?;
+
+    // List repositories for this installation
+    let repos = inst_client.list_repositories().await?;
+
+    for repo in repos {
+        println!("Processing repo: {}", repo.full_name);
+
+        // Perform repository operations
+        let issues = inst_client.list_issues(&repo, &Default::default()).await?;
+        // ... process issues
+    }
+}
 ```
 
 ### Working with Issues

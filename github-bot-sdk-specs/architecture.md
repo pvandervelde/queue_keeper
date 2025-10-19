@@ -165,31 +165,41 @@ pub trait EventProcessingService {
 
 ### API Operations Domain
 
-**Purpose**: Provides type-safe, authenticated access to GitHub's REST API with built-in error handling and rate limiting.
+**Purpose**: Provides type-safe, authenticated access to GitHub's REST API with built-in error handling and rate limiting at both app and installation levels.
 
 **Core Concepts**:
 
-- Authenticated API request construction
+- Authenticated API request construction (app-level or installation-level)
 - Response parsing and error handling
 - Rate limit awareness and backoff
 - Request/response correlation for tracing
+- Automatic authentication context selection
 
 **Domain Rules**:
 
-- All API requests must include proper authentication
+- All API requests must include proper authentication (JWT for app operations, installation token for repository operations)
 - Rate limits must be respected with exponential backoff
 - Request failures must be classified for retry decisions
 - API responses must be validated before use
 - Large result sets must support pagination
+- App-level operations use JWT authentication
+- Installation-level operations use installation token authentication
 
 **Key Operations**:
 
 ```rust
 // Core API operations
 pub trait ApiOperationsService {
+    // Generic request execution
     async fn execute_request<T>(&self, request: ApiRequest) -> Result<T, ApiError>
     where T: DeserializeOwned;
 
+    // App-level operations (authenticated with JWT)
+    async fn list_installations(&self) -> Result<Vec<Installation>, ApiError>;
+    async fn get_app(&self) -> Result<App, ApiError>;
+    async fn get_installation(&self, installation_id: u64) -> Result<Installation, ApiError>;
+
+    // Installation-level operations (authenticated with installation token)
     async fn get_installation_repos(&self, installation_id: u64) -> Result<Vec<Repository>, ApiError>;
     async fn create_issue_comment(&self, repo: &Repository, issue: u32, body: &str) -> Result<Comment, ApiError>;
     async fn update_pull_request_status(&self, repo: &Repository, pr: u32, status: PrStatus) -> Result<(), ApiError>;
