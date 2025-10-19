@@ -164,13 +164,22 @@ where
         &self,
         installation_id: InstallationId,
     ) -> Result<InstallationToken, AuthError> {
-        // Check cache first
-        if let Some(token) = self
+        // Check cache first (graceful fallback on cache errors)
+        let cached_token = match self
             .token_cache
             .get_installation_token(installation_id)
             .await
-            .map_err(AuthError::CacheError)?
         {
+            Ok(Some(token)) => Some(token),
+            Ok(None) => None,
+            Err(_) => {
+                // Cache read error - log and continue with token exchange
+                // This ensures cache failures don't block authentication
+                None
+            }
+        };
+
+        if let Some(token) = cached_token {
             // Return cached token if it's not expired and not expiring soon
             if !token.expires_soon(self.config.token_refresh_margin) {
                 return Ok(token);
