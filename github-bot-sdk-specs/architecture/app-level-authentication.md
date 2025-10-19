@@ -34,7 +34,7 @@ Authenticate as the GitHub App itself using JWT tokens signed with the app's pri
 
 **Token Lifetime**: Maximum 10 minutes (GitHub requirement)
 
-**Caching**: Generally not cached; generated on-demand for each operation
+**Caching**: Cached and reused until within 2 minutes of expiry (configurable refresh margin). Default JWT lifetime is 10 minutes with 8-minute effective cache duration.
 
 ### Installation-Level Authentication (Installation Token)
 
