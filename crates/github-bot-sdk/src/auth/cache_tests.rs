@@ -1,6 +1,7 @@
 //! Tests for token cache implementation.
 
 use super::*;
+use crate::auth::{InstallationPermissions, RepositoryId};
 use chrono::{Duration, Utc};
 
 // ============================================================================
@@ -16,8 +17,6 @@ fn create_test_jwt(app_id: u64) -> JsonWebToken {
 }
 
 fn create_test_installation_token(installation_id: u64) -> InstallationToken {
-    use super::super::{InstallationPermissions, RepositoryId};
-
     InstallationToken::new(
         format!("ghs_test_{}", installation_id),
         InstallationId::new(installation_id),
@@ -201,7 +200,7 @@ mod installation_token_cache_tests {
             "new_token".to_string(),
             installation_id,
             Utc::now() + Duration::hours(1),
-            super::super::InstallationPermissions::default(),
+            InstallationPermissions::default(),
             vec![],
         );
         cache
@@ -229,7 +228,7 @@ mod installation_token_cache_tests {
             "expired_token".to_string(),
             installation_id,
             Utc::now() - Duration::minutes(1), // Already expired
-            super::super::InstallationPermissions::default(),
+            InstallationPermissions::default(),
             vec![],
         );
 

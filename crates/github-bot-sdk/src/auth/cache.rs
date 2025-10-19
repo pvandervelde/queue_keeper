@@ -3,7 +3,6 @@
 //! Provides thread-safe, TTL-based caching for JWT and installation tokens.
 
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
@@ -22,23 +21,45 @@ pub struct InMemoryTokenCache {
 /// Cached token with metadata.
 struct CachedToken<T> {
     token: T,
-    cached_at: DateTime<Utc>,
 }
 
 impl<T> CachedToken<T> {
     fn new(token: T) -> Self {
-        // TODO: implement
-        Self {
-            token,
-            cached_at: Utc::now(),
-        }
+        Self { token }
+    }
+
+    fn token(&self) -> &T {
+        &self.token
+    }
+
+    fn is_valid(&self) -> bool
+    where
+        T: TokenExpiry,
+    {
+        !self.token.is_expired()
+    }
+}
+
+/// Trait for tokens that have expiration.
+trait TokenExpiry {
+    fn is_expired(&self) -> bool;
+}
+
+impl TokenExpiry for JsonWebToken {
+    fn is_expired(&self) -> bool {
+        self.is_expired()
+    }
+}
+
+impl TokenExpiry for InstallationToken {
+    fn is_expired(&self) -> bool {
+        self.is_expired()
     }
 }
 
 impl InMemoryTokenCache {
     /// Create a new in-memory token cache.
     pub fn new() -> Self {
-        // TODO: implement
         Self {
             jwt_cache: Arc::new(RwLock::new(HashMap::new())),
             installation_cache: Arc::new(RwLock::new(HashMap::new())),
@@ -55,39 +76,86 @@ impl Default for InMemoryTokenCache {
 #[async_trait]
 impl TokenCache for InMemoryTokenCache {
     async fn get_jwt(&self, app_id: GitHubAppId) -> Result<Option<JsonWebToken>, CacheError> {
-        // TODO: implement
-        todo!("Implement get_jwt()")
+        let cache = self
+            .jwt_cache
+            .read()
+            .map_err(|e| CacheError::OperationFailed {
+                message: format!("Failed to acquire read lock: {}", e),
+            })?;
+
+        Ok(cache.get(&app_id).map(|cached| cached.token().clone()))
     }
 
     async fn store_jwt(&self, jwt: JsonWebToken) -> Result<(), CacheError> {
-        // TODO: implement
-        todo!("Implement store_jwt()")
+        let mut cache = self
+            .jwt_cache
+            .write()
+            .map_err(|e| CacheError::OperationFailed {
+                message: format!("Failed to acquire write lock: {}", e),
+            })?;
+
+        let app_id = jwt.app_id();
+        cache.insert(app_id, CachedToken::new(jwt));
+
+        Ok(())
     }
 
     async fn get_installation_token(
         &self,
         installation_id: InstallationId,
     ) -> Result<Option<InstallationToken>, CacheError> {
-        // TODO: implement
-        todo!("Implement get_installation_token()")
+        let cache = self
+            .installation_cache
+            .read()
+            .map_err(|e| CacheError::OperationFailed {
+                message: format!("Failed to acquire read lock: {}", e),
+            })?;
+
+        Ok(cache
+            .get(&installation_id)
+            .map(|cached| cached.token().clone()))
     }
 
     async fn store_installation_token(&self, token: InstallationToken) -> Result<(), CacheError> {
-        // TODO: implement
-        todo!("Implement store_installation_token()")
+        let mut cache =
+            self.installation_cache
+                .write()
+                .map_err(|e| CacheError::OperationFailed {
+                    message: format!("Failed to acquire write lock: {}", e),
+                })?;
+
+        let installation_id = token.installation_id();
+        cache.insert(installation_id, CachedToken::new(token));
+
+        Ok(())
     }
 
     async fn invalidate_installation_token(
         &self,
         installation_id: InstallationId,
     ) -> Result<(), CacheError> {
-        // TODO: implement
-        todo!("Implement invalidate_installation_token()")
+        let mut cache =
+            self.installation_cache
+                .write()
+                .map_err(|e| CacheError::OperationFailed {
+                    message: format!("Failed to acquire write lock: {}", e),
+                })?;
+
+        cache.remove(&installation_id);
+
+        Ok(())
     }
 
     fn cleanup_expired_tokens(&self) {
-        // TODO: implement
-        todo!("Implement cleanup_expired_tokens()")
+        // Cleanup JWT tokens
+        if let Ok(mut jwt_cache) = self.jwt_cache.write() {
+            jwt_cache.retain(|_, cached| cached.is_valid());
+        }
+
+        // Cleanup installation tokens
+        if let Ok(mut inst_cache) = self.installation_cache.write() {
+            inst_cache.retain(|_, cached| cached.is_valid());
+        }
     }
 }
 

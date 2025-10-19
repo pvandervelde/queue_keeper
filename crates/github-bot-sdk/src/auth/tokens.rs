@@ -6,13 +6,12 @@
 //! See `github-bot-sdk-specs/modules/auth.md` for complete specification.
 
 use async_trait::async_trait;
-use chrono::{Duration, Utc};
+use chrono::Duration;
 use std::sync::Arc;
 
 use super::{
-    AuthenticationProvider, GitHubApiClient, GitHubAppId, Installation, InstallationId,
-    InstallationToken, JwtSigner, JsonWebToken, PrivateKey, Repository, SecretProvider,
-    TokenCache,
+    AuthenticationProvider, GitHubApiClient, Installation, InstallationId, InstallationToken,
+    JsonWebToken, JwtClaims, JwtSigner, Repository, SecretProvider, TokenCache,
 };
 use crate::error::AuthError;
 
@@ -41,7 +40,6 @@ pub struct AuthConfig {
 impl Default for AuthConfig {
     fn default() -> Self {
         Self {
-            // TODO: implement
             jwt_expiration: Duration::minutes(10),
             jwt_refresh_margin: Duration::minutes(2),
             token_cache_ttl: Duration::minutes(55),
@@ -85,7 +83,6 @@ where
         token_cache: C,
         config: AuthConfig,
     ) -> Self {
-        // TODO: implement
         Self {
             secret_provider: Arc::new(secret_provider),
             jwt_signer: Arc::new(jwt_signer),
@@ -110,37 +107,136 @@ where
     C: TokenCache + 'static,
 {
     async fn app_token(&self) -> Result<JsonWebToken, AuthError> {
-        // TODO: implement
-        todo!("Implement app_token()")
+        // Get app ID from secret provider
+        let app_id = self
+            .secret_provider
+            .get_app_id()
+            .await
+            .map_err(AuthError::SecretError)?;
+
+        // Check cache first
+        if let Some(jwt) = self
+            .token_cache
+            .get_jwt(app_id)
+            .await
+            .map_err(AuthError::CacheError)?
+        {
+            // Return cached token if it's not expired and not expiring soon
+            if !jwt.expires_soon(self.config.jwt_refresh_margin) {
+                return Ok(jwt);
+            }
+        }
+
+        // Generate new JWT
+        let private_key = self
+            .secret_provider
+            .get_private_key()
+            .await
+            .map_err(AuthError::SecretError)?;
+
+        let now = chrono::Utc::now();
+        let expiration = now + self.config.jwt_expiration;
+
+        let claims = JwtClaims {
+            iss: app_id,
+            iat: now.timestamp(),
+            exp: expiration.timestamp(),
+        };
+
+        let jwt = self
+            .jwt_signer
+            .sign_jwt(claims, &private_key)
+            .await
+            .map_err(AuthError::SigningError)?;
+
+        // Store in cache (ignore cache errors, we have the token)
+        let _ = self.token_cache.store_jwt(jwt.clone()).await;
+
+        Ok(jwt)
     }
 
     async fn installation_token(
         &self,
         installation_id: InstallationId,
     ) -> Result<InstallationToken, AuthError> {
-        // TODO: implement
-        todo!("Implement installation_token()")
+        // Check cache first
+        if let Some(token) = self
+            .token_cache
+            .get_installation_token(installation_id)
+            .await
+            .map_err(AuthError::CacheError)?
+        {
+            // Return cached token if it's not expired and not expiring soon
+            if !token.expires_soon(self.config.token_refresh_margin) {
+                return Ok(token);
+            }
+        }
+
+        // Get fresh token from GitHub API
+        let jwt = self.app_token().await?;
+
+        let token = self
+            .api_client
+            .create_installation_access_token(installation_id, &jwt)
+            .await
+            .map_err(AuthError::ApiError)?;
+
+        // Store in cache (ignore cache errors, we have the token)
+        let _ = self
+            .token_cache
+            .store_installation_token(token.clone())
+            .await;
+
+        Ok(token)
     }
 
     async fn refresh_installation_token(
         &self,
         installation_id: InstallationId,
     ) -> Result<InstallationToken, AuthError> {
-        // TODO: implement
-        todo!("Implement refresh_installation_token()")
+        // Invalidate cache first
+        let _ = self
+            .token_cache
+            .invalidate_installation_token(installation_id)
+            .await;
+
+        // Get fresh token (bypasses cache since we just invalidated)
+        let jwt = self.app_token().await?;
+
+        let token = self
+            .api_client
+            .create_installation_access_token(installation_id, &jwt)
+            .await
+            .map_err(AuthError::ApiError)?;
+
+        // Store in cache
+        let _ = self
+            .token_cache
+            .store_installation_token(token.clone())
+            .await;
+
+        Ok(token)
     }
 
     async fn list_installations(&self) -> Result<Vec<Installation>, AuthError> {
-        // TODO: implement
-        todo!("Implement list_installations()")
+        let jwt = self.app_token().await?;
+
+        self.api_client
+            .list_app_installations(&jwt)
+            .await
+            .map_err(AuthError::ApiError)
     }
 
     async fn get_installation_repositories(
         &self,
         installation_id: InstallationId,
     ) -> Result<Vec<Repository>, AuthError> {
-        // TODO: implement
-        todo!("Implement get_installation_repositories()")
+        let token = self.installation_token(installation_id).await?;
+
+        self.api_client
+            .list_installation_repositories(installation_id, &token)
+            .await
+            .map_err(AuthError::ApiError)
     }
 }
 

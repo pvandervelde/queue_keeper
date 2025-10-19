@@ -1,9 +1,11 @@
 //! Tests for GitHub App token management.
 
+use super::super::{GitHubAppId, KeyAlgorithm, PrivateKey};
 use super::*;
 use crate::error::{ApiError, CacheError, SecretError, SigningError, ValidationError};
 use async_trait::async_trait;
 use chrono::{Duration, Utc};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 // ============================================================================
@@ -21,10 +23,7 @@ impl MockSecretProvider {
     fn new(app_id: u64) -> Self {
         Self {
             app_id: GitHubAppId::new(app_id),
-            private_key: PrivateKey::new(
-                b"mock-private-key-data".to_vec(),
-                super::super::KeyAlgorithm::RS256,
-            ),
+            private_key: PrivateKey::new(b"mock-private-key-data".to_vec(), KeyAlgorithm::RS256),
             webhook_secret: "mock-webhook-secret".to_string(),
         }
     }
@@ -68,7 +67,7 @@ impl MockJwtSigner {
 impl JwtSigner for MockJwtSigner {
     async fn sign_jwt(
         &self,
-        claims: super::super::JwtClaims,
+        claims: super::JwtClaims,
         _private_key: &PrivateKey,
     ) -> Result<JsonWebToken, SigningError> {
         if self.should_fail {
@@ -224,7 +223,7 @@ impl MockTokenCache {
 impl TokenCache for MockTokenCache {
     async fn get_jwt(&self, app_id: GitHubAppId) -> Result<Option<JsonWebToken>, CacheError> {
         if self.should_fail {
-            return Err(CacheError::AccessError {
+            return Err(CacheError::OperationFailed {
                 message: "Mock cache failure".to_string(),
             });
         }
@@ -234,7 +233,7 @@ impl TokenCache for MockTokenCache {
 
     async fn store_jwt(&self, jwt: JsonWebToken) -> Result<(), CacheError> {
         if self.should_fail {
-            return Err(CacheError::AccessError {
+            return Err(CacheError::OperationFailed {
                 message: "Mock cache failure".to_string(),
             });
         }
@@ -251,7 +250,7 @@ impl TokenCache for MockTokenCache {
         installation_id: InstallationId,
     ) -> Result<Option<InstallationToken>, CacheError> {
         if self.should_fail {
-            return Err(CacheError::AccessError {
+            return Err(CacheError::OperationFailed {
                 message: "Mock cache failure".to_string(),
             });
         }
@@ -266,7 +265,7 @@ impl TokenCache for MockTokenCache {
 
     async fn store_installation_token(&self, token: InstallationToken) -> Result<(), CacheError> {
         if self.should_fail {
-            return Err(CacheError::AccessError {
+            return Err(CacheError::OperationFailed {
                 message: "Mock cache failure".to_string(),
             });
         }
@@ -283,12 +282,15 @@ impl TokenCache for MockTokenCache {
         installation_id: InstallationId,
     ) -> Result<(), CacheError> {
         if self.should_fail {
-            return Err(CacheError::AccessError {
+            return Err(CacheError::OperationFailed {
                 message: "Mock cache failure".to_string(),
             });
         }
 
-        self.installation_cache.lock().unwrap().remove(&installation_id);
+        self.installation_cache
+            .lock()
+            .unwrap()
+            .remove(&installation_id);
         Ok(())
     }
 
@@ -301,12 +303,8 @@ impl TokenCache for MockTokenCache {
 // Test Helper Functions
 // ============================================================================
 
-fn create_test_auth() -> GitHubAppAuth<
-    MockSecretProvider,
-    MockJwtSigner,
-    MockGitHubApiClient,
-    MockTokenCache,
-> {
+fn create_test_auth(
+) -> GitHubAppAuth<MockSecretProvider, MockJwtSigner, MockGitHubApiClient, MockTokenCache> {
     let config = AuthConfig::default();
     GitHubAppAuth::new(
         MockSecretProvider::new(12345),
