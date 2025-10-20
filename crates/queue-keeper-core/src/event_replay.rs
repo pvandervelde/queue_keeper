@@ -1474,6 +1474,7 @@ impl ReplayExecutor for DefaultReplayExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{CorrelationId, RepositoryId, User, UserId, UserType};
 
     #[test]
     fn test_replay_id_creation() {
@@ -1533,16 +1534,24 @@ mod tests {
             envelope: EventEnvelope {
                 event_id: EventId::new(),
                 event_type: "push".to_string(),
+                action: None,
                 repository: crate::Repository {
-                    owner: "owner".to_string(),
+                    id: RepositoryId::new(123),
+                    owner: User {
+                        id: UserId::new(456),
+                        login: "owner".to_string(),
+                        user_type: UserType::User,
+                    },
                     name: "repo".to_string(),
                     full_name: "owner/repo".to_string(),
+                    private: false,
                 },
-                session_id: SessionId::new(),
-                received_at: Timestamp::now(),
-                signature_valid: true,
-                payload_hash: "hash".to_string(),
-                blob_reference: None,
+                entity: crate::webhook::EventEntity::Repository,
+                session_id: SessionId::from_parts("owner", "repo", "push", "event1"),
+                correlation_id: CorrelationId::new(),
+                occurred_at: Timestamp::now(),
+                processed_at: Timestamp::now(),
+                payload: serde_json::json!({}),
             },
             storage_metadata: StorageMetadata {
                 blob_path: "path".to_string(),

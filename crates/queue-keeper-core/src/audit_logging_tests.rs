@@ -1,6 +1,7 @@
-//! Tests for authentication module.
+//! Tests for audit logging module.
 
 use super::*;
+use crate::{RepositoryId, User, UserId, UserType};
 
 #[test]
 fn test_audit_log_id_creation() {

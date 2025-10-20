@@ -1482,7 +1482,7 @@ mod tests {
         );
         let app = create_router(state);
 
-        let server = TestServer::new(app).unwrap();
+        let _server = TestServer::new(app).unwrap();
 
         // TODO: Fix test once health checker is implemented
         // let response = server.get("/health").await;
