@@ -531,6 +531,7 @@ impl BotConfigError {
 /// See specs/interfaces/bot-configuration.md
 pub struct DefaultBotConfigurationProvider {
     configuration: BotConfiguration,
+    #[allow(dead_code)]
     event_matcher: Box<dyn EventMatcher>,
 }
 

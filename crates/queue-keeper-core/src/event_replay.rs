@@ -174,31 +174,31 @@ impl ReplayType {
     /// Get estimated event count for this replay type
     pub async fn estimate_event_count(
         &self,
-        event_store: &dyn EventStore,
+        _event_store: &dyn EventStore,
     ) -> Result<usize, ReplayError> {
         match self {
             ReplayType::SingleEvent { .. } => Ok(1),
-            ReplayType::Session { session_id } => {
+            ReplayType::Session { session_id: _ } => {
                 // TODO: Implement session event count estimation
                 unimplemented!("Session event count estimation not yet implemented")
             }
             ReplayType::Repository {
-                repository,
-                start_time,
-                end_time,
+                repository: _,
+                start_time: _,
+                end_time: _,
             } => {
                 // TODO: Implement repository event count estimation
                 unimplemented!("Repository event count estimation not yet implemented")
             }
             ReplayType::Filtered {
-                filter,
-                start_time,
-                end_time,
+                filter: _,
+                start_time: _,
+                end_time: _,
             } => {
                 // TODO: Implement filtered event count estimation
                 unimplemented!("Filtered event count estimation not yet implemented")
             }
-            ReplayType::DeadLetterQueue { queue_name, .. } => {
+            ReplayType::DeadLetterQueue { .. } => {
                 // TODO: Implement DLQ event count estimation
                 unimplemented!("DLQ event count estimation not yet implemented")
             }
@@ -236,7 +236,7 @@ impl ReplayType {
                 )
             }
             ReplayType::Filtered {
-                filter,
+                filter: _,
                 start_time,
                 end_time,
             } => {
@@ -1504,7 +1504,7 @@ mod tests {
 
     #[test]
     fn test_replay_status_progress() {
-        let mut status = ReplayStatus {
+        let status = ReplayStatus {
             replay_id: ReplayId::new(),
             state: ReplayState::Replaying,
             progress: ReplayProgress {

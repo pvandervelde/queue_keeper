@@ -677,6 +677,7 @@ impl StandardSecrets {
 ///
 /// See specs/interfaces/key-vault.md
 pub struct DefaultKeyVaultProvider {
+    #[allow(dead_code)]
     config: KeyVaultConfiguration,
     cache: Box<dyn SecretCache>,
 }
