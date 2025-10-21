@@ -14,7 +14,7 @@
 use crate::auth::{GitHubAppId, JsonWebToken, JwtClaims, KeyAlgorithm, PrivateKey};
 use crate::error::{AuthError, ValidationError};
 use chrono::{Duration, Utc};
-use jsonwebtoken::{encode, EncodingKey, Header, Algorithm};
+use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use rsa::pkcs1::DecodeRsaPrivateKey;
 use rsa::RsaPrivateKey;
 
@@ -185,19 +185,21 @@ impl JwtGenerator for RS256JwtGenerator {
         let expires_at = Utc::now() + self.expiration_duration;
 
         // Create encoding key from private key
-        let encoding_key = EncodingKey::from_rsa_pem(self.private_key.key_data())
-            .map_err(|e| AuthError::InvalidPrivateKey {
+        let encoding_key = EncodingKey::from_rsa_pem(self.private_key.key_data()).map_err(|e| {
+            AuthError::InvalidPrivateKey {
                 message: format!("Failed to create encoding key: {}", e),
-            })?;
+            }
+        })?;
 
         // Set up JWT header for RS256
         let header = Header::new(Algorithm::RS256);
 
         // Encode the JWT
-        let token_string = encode(&header, &claims, &encoding_key)
-            .map_err(|e| AuthError::JwtGenerationFailed {
+        let token_string = encode(&header, &claims, &encoding_key).map_err(|e| {
+            AuthError::JwtGenerationFailed {
                 message: format!("Failed to encode JWT: {}", e),
-            })?;
+            }
+        })?;
 
         Ok(JsonWebToken::new(token_string, app_id, expires_at))
     }
@@ -251,11 +253,10 @@ impl PrivateKey {
         }
 
         // Attempt to parse the RSA private key to validate it
-        RsaPrivateKey::from_pkcs1_pem(pem)
-            .map_err(|e| ValidationError::InvalidFormat {
-                field: "private_key".to_string(),
-                message: format!("Failed to parse RSA private key: {}", e),
-            })?;
+        RsaPrivateKey::from_pkcs1_pem(pem).map_err(|e| ValidationError::InvalidFormat {
+            field: "private_key".to_string(),
+            message: format!("Failed to parse RSA private key: {}", e),
+        })?;
 
         // Store the PEM bytes
         Ok(Self {
@@ -279,11 +280,10 @@ impl PrivateKey {
     pub fn from_pkcs8_der(der: &[u8]) -> Result<Self, ValidationError> {
         // Validate by attempting to parse
         use rsa::pkcs8::DecodePrivateKey;
-        RsaPrivateKey::from_pkcs8_der(der)
-            .map_err(|e| ValidationError::InvalidFormat {
-                field: "private_key".to_string(),
-                message: format!("Failed to parse PKCS#8 DER private key: {}", e),
-            })?;
+        RsaPrivateKey::from_pkcs8_der(der).map_err(|e| ValidationError::InvalidFormat {
+            field: "private_key".to_string(),
+            message: format!("Failed to parse PKCS#8 DER private key: {}", e),
+        })?;
 
         Ok(Self {
             key_data: der.to_vec(),

@@ -174,31 +174,31 @@ impl ReplayType {
     /// Get estimated event count for this replay type
     pub async fn estimate_event_count(
         &self,
-        event_store: &dyn EventStore,
+        _event_store: &dyn EventStore,
     ) -> Result<usize, ReplayError> {
         match self {
             ReplayType::SingleEvent { .. } => Ok(1),
-            ReplayType::Session { session_id } => {
+            ReplayType::Session { session_id: _ } => {
                 // TODO: Implement session event count estimation
                 unimplemented!("Session event count estimation not yet implemented")
             }
             ReplayType::Repository {
-                repository,
-                start_time,
-                end_time,
+                repository: _,
+                start_time: _,
+                end_time: _,
             } => {
                 // TODO: Implement repository event count estimation
                 unimplemented!("Repository event count estimation not yet implemented")
             }
             ReplayType::Filtered {
-                filter,
-                start_time,
-                end_time,
+                filter: _,
+                start_time: _,
+                end_time: _,
             } => {
                 // TODO: Implement filtered event count estimation
                 unimplemented!("Filtered event count estimation not yet implemented")
             }
-            ReplayType::DeadLetterQueue { queue_name, .. } => {
+            ReplayType::DeadLetterQueue { .. } => {
                 // TODO: Implement DLQ event count estimation
                 unimplemented!("DLQ event count estimation not yet implemented")
             }
@@ -236,7 +236,7 @@ impl ReplayType {
                 )
             }
             ReplayType::Filtered {
-                filter,
+                filter: _,
                 start_time,
                 end_time,
             } => {
@@ -1474,6 +1474,7 @@ impl ReplayExecutor for DefaultReplayExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{CorrelationId, RepositoryId, User, UserId, UserType};
 
     #[test]
     fn test_replay_id_creation() {
@@ -1504,7 +1505,7 @@ mod tests {
 
     #[test]
     fn test_replay_status_progress() {
-        let mut status = ReplayStatus {
+        let status = ReplayStatus {
             replay_id: ReplayId::new(),
             state: ReplayState::Replaying,
             progress: ReplayProgress {
@@ -1533,16 +1534,24 @@ mod tests {
             envelope: EventEnvelope {
                 event_id: EventId::new(),
                 event_type: "push".to_string(),
+                action: None,
                 repository: crate::Repository {
-                    owner: "owner".to_string(),
+                    id: RepositoryId::new(123),
+                    owner: User {
+                        id: UserId::new(456),
+                        login: "owner".to_string(),
+                        user_type: UserType::User,
+                    },
                     name: "repo".to_string(),
                     full_name: "owner/repo".to_string(),
+                    private: false,
                 },
-                session_id: SessionId::new(),
-                received_at: Timestamp::now(),
-                signature_valid: true,
-                payload_hash: "hash".to_string(),
-                blob_reference: None,
+                entity: crate::webhook::EventEntity::Repository,
+                session_id: SessionId::from_parts("owner", "repo", "push", "event1"),
+                correlation_id: CorrelationId::new(),
+                occurred_at: Timestamp::now(),
+                processed_at: Timestamp::now(),
+                payload: serde_json::json!({}),
             },
             storage_metadata: StorageMetadata {
                 blob_path: "path".to_string(),
