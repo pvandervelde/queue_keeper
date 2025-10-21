@@ -39,6 +39,17 @@ pub enum AuthError {
     #[error("JWT generation failed: {message}")]
     JwtGenerationFailed { message: String },
 
+    /// Token generation failed (non-retryable).
+    #[error("Token generation failed: {message}")]
+    TokenGenerationFailed { message: String },
+
+    /// Token exchange with GitHub API failed.
+    #[error("Token exchange failed for installation {installation_id}: {message}")]
+    TokenExchangeFailed {
+        installation_id: InstallationId,
+        message: String,
+    },
+
     /// GitHub API returned an error response.
     #[error("GitHub API error: {status} - {message}")]
     GitHubApiError { status: u16, message: String },
@@ -87,6 +98,8 @@ impl AuthError {
             Self::InsufficientPermissions { .. } => false,
             Self::InvalidPrivateKey { .. } => false,
             Self::JwtGenerationFailed { .. } => false,
+            Self::TokenGenerationFailed { .. } => false,
+            Self::TokenExchangeFailed { .. } => false,
             Self::GitHubApiError { status, .. } => *status >= 500 || *status == 429,
             Self::SigningError(_) => false,
             Self::SecretError(e) => e.is_transient(),
@@ -227,6 +240,10 @@ pub enum ApiError {
     /// HTTP client error (network, TLS, etc.).
     #[error("HTTP client error: {0}")]
     HttpClientError(#[from] reqwest::Error),
+
+    /// Client configuration error.
+    #[error("Configuration error: {message}")]
+    Configuration { message: String },
 }
 
 impl ApiError {
@@ -248,6 +265,7 @@ impl ApiError {
             Self::NotFound => false,
             Self::JsonError(_) => false,
             Self::HttpClientError(_) => true, // Network issues are transient
+            Self::Configuration { .. } => false, // Configuration errors are permanent
         }
     }
 }
