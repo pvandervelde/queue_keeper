@@ -573,7 +573,7 @@ pub enum UserType {
 }
 
 /// User information from GitHub API.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct User {
     pub id: UserId,
     pub login: String,

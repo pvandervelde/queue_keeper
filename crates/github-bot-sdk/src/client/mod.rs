@@ -6,6 +6,8 @@
 //!
 //! See `github-bot-sdk-specs/modules/client.md` for complete specification.
 
+mod app;
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -13,6 +15,8 @@ use reqwest;
 
 use crate::auth::AuthenticationProvider;
 use crate::error::ApiError;
+
+pub use app::App;
 
 /// Configuration for GitHub API client behavior.
 ///
