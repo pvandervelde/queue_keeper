@@ -373,9 +373,11 @@ mod construction_tests {
     /// Verify custom configuration is preserved.
     #[test]
     fn test_create_with_custom_config() {
-        let mut config = AuthConfig::default();
-        config.github_api_url = "https://github.enterprise.local/api/v3".to_string();
-        config.user_agent = "my-bot/1.0".to_string();
+        let config = AuthConfig {
+            github_api_url: "https://github.enterprise.local/api/v3".to_string(),
+            user_agent: "my-bot/1.0".to_string(),
+            ..Default::default()
+        };
 
         let auth = GitHubAppAuth::new(
             MockSecretProvider::new(12345),

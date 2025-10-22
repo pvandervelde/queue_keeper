@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use reqwest;
 
-use crate::auth::AuthenticationProvider;
+use crate::auth::{AuthenticationProvider, Installation, InstallationId};
 use crate::error::ApiError;
 
 pub use app::App;
@@ -289,6 +289,169 @@ impl GitHubClient {
             })?;
 
         Ok(app)
+    }
+
+    /// List all installations for the authenticated GitHub App.
+    ///
+    /// Fetches all installations where this app is installed, including organizations
+    /// and user accounts.
+    ///
+    /// # Authentication
+    ///
+    /// Requires app-level JWT authentication.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use github_bot_sdk::client::GitHubClient;
+    /// # async fn example(client: &GitHubClient) -> Result<(), Box<dyn std::error::Error>> {
+    /// let installations = client.list_installations().await?;
+    /// for installation in installations {
+    ///     println!("Installation ID: {} for {}", installation.id.value(), installation.account.login);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns `ApiError` if:
+    /// - JWT generation fails
+    /// - HTTP request fails
+    /// - Response cannot be parsed
+    pub async fn list_installations(&self) -> Result<Vec<Installation>, ApiError> {
+        // Get JWT token from auth provider
+        let jwt = self
+            .auth
+            .app_token()
+            .await
+            .map_err(|e| ApiError::TokenGenerationFailed {
+                message: format!("Failed to generate JWT: {}", e),
+            })?;
+
+        // Build request URL
+        let url = format!("{}/app/installations", self.config.github_api_url);
+
+        // Make authenticated request
+        let response = self
+            .http_client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", jwt.token()))
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .map_err(|e| ApiError::Configuration {
+                message: format!("HTTP request failed: {}", e),
+            })?;
+
+        // Check for errors
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unable to read error body".to_string());
+            return Err(ApiError::Configuration {
+                message: format!("API request failed with status {}: {}", status, error_text),
+            });
+        }
+
+        // Parse response
+        let installations = response
+            .json::<Vec<Installation>>()
+            .await
+            .map_err(|e| ApiError::Configuration {
+                message: format!("Failed to parse installations response: {}", e),
+            })?;
+
+        Ok(installations)
+    }
+
+    /// Get a specific installation by ID.
+    ///
+    /// Fetches detailed information about a specific installation of this GitHub App.
+    ///
+    /// # Authentication
+    ///
+    /// Requires app-level JWT authentication.
+    ///
+    /// # Arguments
+    ///
+    /// * `installation_id` - The unique identifier for the installation
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use github_bot_sdk::client::GitHubClient;
+    /// # use github_bot_sdk::auth::InstallationId;
+    /// # async fn example(client: &GitHubClient) -> Result<(), Box<dyn std::error::Error>> {
+    /// let installation_id = InstallationId::new(12345);
+    /// let installation = client.get_installation(installation_id).await?;
+    /// println!("Installation for: {}", installation.account.login);
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns `ApiError` if:
+    /// - JWT generation fails
+    /// - HTTP request fails
+    /// - Installation not found (404)
+    /// - Response cannot be parsed
+    pub async fn get_installation(
+        &self,
+        installation_id: InstallationId,
+    ) -> Result<Installation, ApiError> {
+        // Get JWT token from auth provider
+        let jwt = self
+            .auth
+            .app_token()
+            .await
+            .map_err(|e| ApiError::TokenGenerationFailed {
+                message: format!("Failed to generate JWT: {}", e),
+            })?;
+
+        // Build request URL
+        let url = format!(
+            "{}/app/installations/{}",
+            self.config.github_api_url,
+            installation_id.as_u64()
+        );
+
+        // Make authenticated request
+        let response = self
+            .http_client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", jwt.token()))
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .map_err(|e| ApiError::Configuration {
+                message: format!("HTTP request failed: {}", e),
+            })?;
+
+        // Check for errors
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unable to read error body".to_string());
+            return Err(ApiError::Configuration {
+                message: format!("API request failed with status {}: {}", status, error_text),
+            });
+        }
+
+        // Parse response
+        let installation = response
+            .json::<Installation>()
+            .await
+            .map_err(|e| ApiError::Configuration {
+                message: format!("Failed to parse installation response: {}", e),
+            })?;
+
+        Ok(installation)
     }
 
     // Installation-level operations will be implemented in task 5.0

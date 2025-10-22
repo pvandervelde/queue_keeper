@@ -521,4 +521,190 @@ mod app_operations_tests {
 
         assert!(result.is_err());
     }
+
+    #[tokio::test]
+    async fn test_list_installations_success() {
+        let mock_server = MockServer::start().await;
+
+        // Mock response with installations array
+        let installations_json = serde_json::json!([
+            {
+                "id": 1,
+                "account": {
+                    "id": 100,
+                    "login": "octocat",
+                    "type": "User",
+                    "avatar_url": null,
+                    "html_url": "https://github.com/octocat"
+                },
+                "repository_selection": "all",
+                "permissions": {
+                    "issues": "write",
+                    "pull_requests": "write",
+                    "contents": "read",
+                    "metadata": "read",
+                    "checks": "write",
+                    "actions": "read"
+                },
+                "created_at": "2024-01-01T00:00:00Z",
+                "updated_at": "2024-01-02T00:00:00Z",
+                "suspended_at": null
+            },
+            {
+                "id": 2,
+                "account": {
+                    "id": 200,
+                    "login": "another-user",
+                    "type": "Organization",
+                    "avatar_url": null,
+                    "html_url": "https://github.com/another-user"
+                },
+                "repository_selection": "selected",
+                "permissions": {
+                    "issues": "read",
+                    "pull_requests": "read",
+                    "contents": "read",
+                    "metadata": "read",
+                    "checks": "read",
+                    "actions": "none"
+                },
+                "created_at": "2024-02-01T00:00:00Z",
+                "updated_at": "2024-02-02T00:00:00Z",
+                "suspended_at": null
+            }
+        ]);
+
+        Mock::given(method("GET"))
+            .and(path("/app/installations"))
+            .and(header("Authorization", "Bearer test-jwt-token"))
+            .and(header("Accept", "application/vnd.github+json"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&installations_json))
+            .mount(&mock_server)
+            .await;
+
+        let jwt = JsonWebToken::new(
+            "test-jwt-token".to_string(),
+            GitHubAppId::new(12345),
+            Utc::now() + ChronoDuration::hours(1),
+        );
+        let auth = MockAuthProvider::with_jwt(jwt);
+        let config = ClientConfig::default().with_github_api_url(mock_server.uri());
+
+        let client = GitHubClient::builder(auth).config(config).build().unwrap();
+
+        let result = client.list_installations().await;
+
+        assert!(result.is_ok());
+        let installations = result.unwrap();
+        assert_eq!(installations.len(), 2);
+        assert_eq!(installations[0].id.as_u64(), 1);
+        assert_eq!(installations[0].account.login, "octocat");
+        assert_eq!(installations[1].id.as_u64(), 2);
+        assert_eq!(installations[1].account.login, "another-user");
+    }
+
+    #[tokio::test]
+    async fn test_list_installations_empty() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/app/installations"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .mount(&mock_server)
+            .await;
+
+        let jwt = JsonWebToken::new(
+            "test-jwt-token".to_string(),
+            GitHubAppId::new(12345),
+            Utc::now() + ChronoDuration::hours(1),
+        );
+        let auth = MockAuthProvider::with_jwt(jwt);
+        let config = ClientConfig::default().with_github_api_url(mock_server.uri());
+
+        let client = GitHubClient::builder(auth).config(config).build().unwrap();
+
+        let result = client.list_installations().await;
+
+        assert!(result.is_ok());
+        let installations = result.unwrap();
+        assert_eq!(installations.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_get_installation_success() {
+        let mock_server = MockServer::start().await;
+
+        let installation_json = serde_json::json!({
+            "id": 12345,
+            "account": {
+                "id": 100,
+                "login": "octocat",
+                "type": "User",
+                "avatar_url": null,
+                "html_url": "https://github.com/octocat"
+            },
+            "repository_selection": "all",
+            "permissions": {
+                "issues": "write",
+                "pull_requests": "write",
+                "contents": "write",
+                "metadata": "read",
+                "checks": "write",
+                "actions": "read"
+            },
+            "created_at": "2024-01-01T00:00:00Z",
+            "updated_at": "2024-01-02T00:00:00Z",
+            "suspended_at": null
+        });
+
+        Mock::given(method("GET"))
+            .and(path("/app/installations/12345"))
+            .and(header("Authorization", "Bearer test-jwt-token"))
+            .and(header("Accept", "application/vnd.github+json"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&installation_json))
+            .mount(&mock_server)
+            .await;
+
+        let jwt = JsonWebToken::new(
+            "test-jwt-token".to_string(),
+            GitHubAppId::new(12345),
+            Utc::now() + ChronoDuration::hours(1),
+        );
+        let auth = MockAuthProvider::with_jwt(jwt);
+        let config = ClientConfig::default().with_github_api_url(mock_server.uri());
+
+        let client = GitHubClient::builder(auth).config(config).build().unwrap();
+
+        let result = client.get_installation(InstallationId::new(12345)).await;
+
+        assert!(result.is_ok());
+        let installation = result.unwrap();
+        assert_eq!(installation.id.as_u64(), 12345);
+        assert_eq!(installation.account.login, "octocat");
+    }
+
+    #[tokio::test]
+    async fn test_get_installation_not_found() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/app/installations/99999"))
+            .respond_with(ResponseTemplate::new(404).set_body_string("Not Found"))
+            .mount(&mock_server)
+            .await;
+
+        let jwt = JsonWebToken::new(
+            "test-jwt-token".to_string(),
+            GitHubAppId::new(12345),
+            Utc::now() + ChronoDuration::hours(1),
+        );
+        let auth = MockAuthProvider::with_jwt(jwt);
+        let config = ClientConfig::default().with_github_api_url(mock_server.uri());
+
+        let client = GitHubClient::builder(auth).config(config).build().unwrap();
+
+        let result = client.get_installation(InstallationId::new(99999)).await;
+
+        assert!(result.is_err());
+    }
 }

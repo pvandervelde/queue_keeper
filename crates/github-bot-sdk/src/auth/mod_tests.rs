@@ -309,7 +309,7 @@ fn test_repository_selection_variants() {
 /// are properly defined and each variant is unique (equal to itself, unequal to others).
 #[test]
 fn test_permission_enum_all_variants() {
-    let permissions = vec![
+    let permissions = [
         Permission::ReadIssues,
         Permission::WriteIssues,
         Permission::ReadPullRequests,
