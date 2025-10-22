@@ -214,7 +214,83 @@ impl GitHubClient {
         self.auth.as_ref()
     }
 
-    // App-level operations will be implemented in subsequent tasks
+    // ========================================================================
+    // App-Level Operations (authenticated with JWT)
+    // ========================================================================
+
+    /// Get details about the authenticated GitHub App.
+    ///
+    /// Fetches metadata about the app including ID, name, owner, and permissions.
+    ///
+    /// # Authentication
+    ///
+    /// Requires app-level JWT authentication.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use github_bot_sdk::client::GitHubClient;
+    /// # async fn example(client: &GitHubClient) -> Result<(), Box<dyn std::error::Error>> {
+    /// let app = client.get_app().await?;
+    /// println!("App: {} (ID: {})", app.name, app.id);
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns `ApiError` if:
+    /// - JWT generation fails
+    /// - HTTP request fails
+    /// - Response cannot be parsed
+    pub async fn get_app(&self) -> Result<App, ApiError> {
+        // Get JWT token from auth provider
+        let jwt = self
+            .auth
+            .app_token()
+            .await
+            .map_err(|e| ApiError::TokenGenerationFailed {
+                message: format!("Failed to generate JWT: {}", e),
+            })?;
+
+        // Build request URL
+        let url = format!("{}/app", self.config.github_api_url);
+
+        // Make authenticated request
+        let response = self
+            .http_client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", jwt.token()))
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .map_err(|e| ApiError::Configuration {
+                message: format!("HTTP request failed: {}", e),
+            })?;
+
+        // Check for errors
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unable to read error body".to_string());
+            return Err(ApiError::Configuration {
+                message: format!("API request failed with status {}: {}", status, error_text),
+            });
+        }
+
+        // Parse response
+        let app = response
+            .json::<App>()
+            .await
+            .map_err(|e| ApiError::Configuration {
+                message: format!("Failed to parse App response: {}", e),
+            })?;
+
+        Ok(app)
+    }
+
     // Installation-level operations will be implemented in task 5.0
 }
 

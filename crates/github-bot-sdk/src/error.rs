@@ -244,6 +244,14 @@ pub enum ApiError {
     /// Client configuration error.
     #[error("Configuration error: {message}")]
     Configuration { message: String },
+
+    /// Failed to generate authentication token.
+    #[error("Token generation failed: {message}")]
+    TokenGenerationFailed { message: String },
+
+    /// Failed to exchange token.
+    #[error("Token exchange failed: {message}")]
+    TokenExchangeFailed { message: String },
 }
 
 impl ApiError {
@@ -266,6 +274,8 @@ impl ApiError {
             Self::JsonError(_) => false,
             Self::HttpClientError(_) => true, // Network issues are transient
             Self::Configuration { .. } => false, // Configuration errors are permanent
+            Self::TokenGenerationFailed { .. } => false, // Token generation errors are auth errors
+            Self::TokenExchangeFailed { .. } => false, // Token exchange errors are auth errors
         }
     }
 }
