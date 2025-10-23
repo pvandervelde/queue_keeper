@@ -7,6 +7,7 @@
 //! See `github-bot-sdk-specs/modules/client.md` for complete specification.
 
 mod app;
+mod rate_limit;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -17,6 +18,7 @@ use crate::auth::{AuthenticationProvider, Installation, InstallationId};
 use crate::error::ApiError;
 
 pub use app::App;
+pub use rate_limit::{parse_rate_limit_from_headers, RateLimit, RateLimiter};
 
 /// Configuration for GitHub API client behavior.
 ///
