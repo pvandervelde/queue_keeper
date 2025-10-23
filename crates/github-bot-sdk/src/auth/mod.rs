@@ -513,7 +513,30 @@ impl std::fmt::Debug for InstallationToken {
 ///
 /// Each permission can be set to None, Read, Write, or Admin level.
 /// See GitHub's documentation for details on what each permission allows.
+///
+/// # GitHub API Compatibility
+///
+/// The GitHub API returns permissions as optional fields - installations only
+/// include permissions they were granted during installation. This struct uses
+/// `#[serde(default)]` to automatically default missing fields to `PermissionLevel::None`,
+/// which provides better ergonomics than `Option<PermissionLevel>` while accurately
+/// representing the API semantics (missing permission = no permission).
+///
+/// # Examples
+///
+/// ```
+/// # use github_bot_sdk::auth::{InstallationPermissions, PermissionLevel};
+/// // Partial permissions from GitHub API (only metadata and contents)
+/// let json = r#"{"metadata": "read", "contents": "read"}"#;
+/// let perms: InstallationPermissions = serde_json::from_str(json).unwrap();
+///
+/// assert_eq!(perms.metadata, PermissionLevel::Read);
+/// assert_eq!(perms.contents, PermissionLevel::Read);
+/// assert_eq!(perms.issues, PermissionLevel::None);  // Defaulted
+/// assert_eq!(perms.pull_requests, PermissionLevel::None);  // Defaulted
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct InstallationPermissions {
     pub issues: PermissionLevel,
     pub pull_requests: PermissionLevel,
@@ -529,7 +552,7 @@ impl Default for InstallationPermissions {
             issues: PermissionLevel::None,
             pull_requests: PermissionLevel::None,
             contents: PermissionLevel::None,
-            metadata: PermissionLevel::Read, // Usually granted by default
+            metadata: PermissionLevel::None,
             checks: PermissionLevel::None,
             actions: PermissionLevel::None,
         }
@@ -537,6 +560,9 @@ impl Default for InstallationPermissions {
 }
 
 /// Permission level for GitHub resources.
+///
+/// Represents the access level granted for a specific permission.
+/// Defaults to `None` when not specified.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PermissionLevel {
@@ -544,6 +570,12 @@ pub enum PermissionLevel {
     Read,
     Write,
     Admin,
+}
+
+impl Default for PermissionLevel {
+    fn default() -> Self {
+        Self::None
+    }
 }
 
 /// Specific permissions that can be checked on tokens.

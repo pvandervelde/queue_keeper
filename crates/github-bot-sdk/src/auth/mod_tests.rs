@@ -223,15 +223,15 @@ fn test_repository_helpers() {
 /// Verify InstallationPermissions default values.
 ///
 /// Tests the Default trait implementation to ensure:
-/// - Most permissions default to None
-/// - Metadata permission defaults to Read (GitHub requirement)
+/// - All permissions default to None
+/// - This aligns with GitHub API where missing permissions mean no access
 #[test]
 fn test_default_permissions() {
     let perms = InstallationPermissions::default();
     assert_eq!(perms.issues, PermissionLevel::None);
     assert_eq!(perms.pull_requests, PermissionLevel::None);
     assert_eq!(perms.contents, PermissionLevel::None);
-    assert_eq!(perms.metadata, PermissionLevel::Read); // Default for metadata
+    assert_eq!(perms.metadata, PermissionLevel::None);
     assert_eq!(perms.checks, PermissionLevel::None);
     assert_eq!(perms.actions, PermissionLevel::None);
 }

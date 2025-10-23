@@ -144,6 +144,25 @@ Update this when creating new shared abstractions.
 - **Security**: Token redacted in debug, permission checking
 - **Lifetime**: 1 hour, refresh 5 minutes before expiry
 
+### InstallationPermissions
+
+- **Purpose**: Permissions granted to a GitHub App installation
+- **Location**: `crates/github-bot-sdk/src/auth/mod.rs`
+- **Spec**: `specs/interfaces/github-auth.md`
+- **Design**: Uses `#[serde(default)]` to handle optional GitHub API fields
+- **Semantics**: Missing permissions default to `PermissionLevel::None`
+- **Fields**: issues, pull_requests, contents, metadata, checks, actions
+- **Note**: GitHub API returns only granted permissions; this struct defaults missing fields
+
+### PermissionLevel
+
+- **Purpose**: Access level for a specific permission type
+- **Location**: `crates/github-bot-sdk/src/auth/mod.rs`
+- **Spec**: `specs/interfaces/github-auth.md`
+- **Variants**: None, Read, Write, Admin
+- **Default**: `None` (used when GitHub API omits permission field)
+- **Serialization**: Lowercase strings ("none", "read", "write", "admin")
+
 ### AuthError
 
 - **Purpose**: Authentication-related errors with retry classification
