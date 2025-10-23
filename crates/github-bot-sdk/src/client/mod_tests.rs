@@ -177,7 +177,10 @@ mod client_config_tests {
         let config =
             ClientConfig::default().with_github_api_url("https://github.enterprise.com/api/v3");
 
-        assert_eq!(config.github_api_url, "https://github.enterprise.com/api/v3");
+        assert_eq!(
+            config.github_api_url,
+            "https://github.enterprise.com/api/v3"
+        );
     }
 
     #[test]
@@ -377,7 +380,10 @@ mod github_client_tests {
         let auth = MockAuthProvider::new();
         let config = ClientConfig::default().with_timeout(Duration::from_secs(60));
 
-        let client = GitHubClient::builder(auth).config(config.clone()).build().unwrap();
+        let client = GitHubClient::builder(auth)
+            .config(config.clone())
+            .build()
+            .unwrap();
 
         // Original config should not affect client
         let _modified_config = config.with_timeout(Duration::from_secs(120));
@@ -706,5 +712,235 @@ mod app_operations_tests {
         let result = client.get_installation(InstallationId::new(99999)).await;
 
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_get_as_app_success() {
+        let mock_server = MockServer::start().await;
+
+        // Mock custom endpoint response
+        let custom_json = serde_json::json!({
+            "custom_field": "custom_value",
+            "data": [1, 2, 3]
+        });
+
+        Mock::given(method("GET"))
+            .and(path("/app/custom/endpoint"))
+            .and(header("Authorization", "Bearer test-jwt-token"))
+            .and(header("Accept", "application/vnd.github+json"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&custom_json))
+            .mount(&mock_server)
+            .await;
+
+        let jwt = JsonWebToken::new(
+            "test-jwt-token".to_string(),
+            GitHubAppId::new(12345),
+            Utc::now() + ChronoDuration::hours(1),
+        );
+        let auth = MockAuthProvider::with_jwt(jwt);
+        let config = ClientConfig::default().with_github_api_url(mock_server.uri());
+
+        let client = GitHubClient::builder(auth).config(config).build().unwrap();
+
+        let result = client.get_as_app("/app/custom/endpoint").await;
+
+        assert!(result.is_ok());
+        let response = result.unwrap();
+        assert_eq!(response.status(), 200);
+
+        // Verify we can parse the response
+        let body: serde_json::Value = response.json().await.unwrap();
+        assert_eq!(body["custom_field"], "custom_value");
+    }
+
+    #[tokio::test]
+    async fn test_get_as_app_with_leading_slash() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/app/endpoint"))
+            .and(header("Authorization", "Bearer test-jwt-token"))
+            .and(header("Accept", "application/vnd.github+json"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("OK"))
+            .mount(&mock_server)
+            .await;
+
+        let jwt = JsonWebToken::new(
+            "test-jwt-token".to_string(),
+            GitHubAppId::new(12345),
+            Utc::now() + ChronoDuration::hours(1),
+        );
+        let auth = MockAuthProvider::with_jwt(jwt);
+        let config = ClientConfig::default().with_github_api_url(mock_server.uri());
+
+        let client = GitHubClient::builder(auth).config(config).build().unwrap();
+
+        // Path with leading slash should work
+        let result = client.get_as_app("/app/endpoint").await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_get_as_app_returns_error_responses() {
+        let mock_server = MockServer::start().await;
+
+        // Mock 404 response - should return response, not error
+        Mock::given(method("GET"))
+            .and(path("/app/not-found"))
+            .respond_with(ResponseTemplate::new(404).set_body_string("Not Found"))
+            .mount(&mock_server)
+            .await;
+
+        let jwt = JsonWebToken::new(
+            "test-jwt-token".to_string(),
+            GitHubAppId::new(12345),
+            Utc::now() + ChronoDuration::hours(1),
+        );
+        let auth = MockAuthProvider::with_jwt(jwt);
+        let config = ClientConfig::default().with_github_api_url(mock_server.uri());
+
+        let client = GitHubClient::builder(auth).config(config).build().unwrap();
+
+        let result = client.get_as_app("/app/not-found").await;
+
+        // Should succeed and return the response (caller handles status)
+        assert!(result.is_ok());
+        let response = result.unwrap();
+        assert_eq!(response.status(), 404);
+    }
+
+    #[tokio::test]
+    async fn test_get_as_app_jwt_generation_failure() {
+        let auth = MockAuthProvider::failing();
+        let client = GitHubClient::builder(auth).build().unwrap();
+
+        let result = client.get_as_app("/app/test").await;
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ApiError::TokenGenerationFailed { .. } => (),
+            other => panic!("Expected TokenGenerationFailed, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_post_as_app_success() {
+        let mock_server = MockServer::start().await;
+
+        // Mock POST endpoint
+        let response_json = serde_json::json!({
+            "id": 123,
+            "status": "created"
+        });
+
+        Mock::given(method("POST"))
+            .and(path("/app/custom/create"))
+            .and(header("Authorization", "Bearer test-jwt-token"))
+            .and(header("Accept", "application/vnd.github+json"))
+            .and(header("Content-Type", "application/json"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(&response_json))
+            .mount(&mock_server)
+            .await;
+
+        let jwt = JsonWebToken::new(
+            "test-jwt-token".to_string(),
+            GitHubAppId::new(12345),
+            Utc::now() + ChronoDuration::hours(1),
+        );
+        let auth = MockAuthProvider::with_jwt(jwt);
+        let config = ClientConfig::default().with_github_api_url(mock_server.uri());
+
+        let client = GitHubClient::builder(auth).config(config).build().unwrap();
+
+        let body = serde_json::json!({
+            "name": "test",
+            "value": 42
+        });
+
+        let result = client.post_as_app("/app/custom/create", &body).await;
+
+        assert!(result.is_ok());
+        let response = result.unwrap();
+        assert_eq!(response.status(), 201);
+
+        // Verify response body
+        let response_body: serde_json::Value = response.json().await.unwrap();
+        assert_eq!(response_body["id"], 123);
+        assert_eq!(response_body["status"], "created");
+    }
+
+    #[tokio::test]
+    async fn test_post_as_app_with_empty_body() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/app/action"))
+            .and(header("Authorization", "Bearer test-jwt-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("OK"))
+            .mount(&mock_server)
+            .await;
+
+        let jwt = JsonWebToken::new(
+            "test-jwt-token".to_string(),
+            GitHubAppId::new(12345),
+            Utc::now() + ChronoDuration::hours(1),
+        );
+        let auth = MockAuthProvider::with_jwt(jwt);
+        let config = ClientConfig::default().with_github_api_url(mock_server.uri());
+
+        let client = GitHubClient::builder(auth).config(config).build().unwrap();
+
+        let empty_body = serde_json::json!({});
+
+        let result = client.post_as_app("/app/action", &empty_body).await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_post_as_app_returns_error_responses() {
+        let mock_server = MockServer::start().await;
+
+        // Mock 400 Bad Request
+        Mock::given(method("POST"))
+            .and(path("/app/bad-request"))
+            .respond_with(ResponseTemplate::new(400).set_body_string("Bad Request"))
+            .mount(&mock_server)
+            .await;
+
+        let jwt = JsonWebToken::new(
+            "test-jwt-token".to_string(),
+            GitHubAppId::new(12345),
+            Utc::now() + ChronoDuration::hours(1),
+        );
+        let auth = MockAuthProvider::with_jwt(jwt);
+        let config = ClientConfig::default().with_github_api_url(mock_server.uri());
+
+        let client = GitHubClient::builder(auth).config(config).build().unwrap();
+
+        let body = serde_json::json!({"invalid": "data"});
+
+        let result = client.post_as_app("/app/bad-request", &body).await;
+
+        // Should succeed and return the response (caller handles status)
+        assert!(result.is_ok());
+        let response = result.unwrap();
+        assert_eq!(response.status(), 400);
+    }
+
+    #[tokio::test]
+    async fn test_post_as_app_jwt_generation_failure() {
+        let auth = MockAuthProvider::failing();
+        let client = GitHubClient::builder(auth).build().unwrap();
+
+        let body = serde_json::json!({"test": "data"});
+
+        let result = client.post_as_app("/app/test", &body).await;
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ApiError::TokenGenerationFailed { .. } => (),
+            other => panic!("Expected TokenGenerationFailed, got {:?}", other),
+        }
     }
 }
