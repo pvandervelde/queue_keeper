@@ -253,6 +253,90 @@ fn test_jwt_token_time_until_expiry() {
 }
 
 /// Verify InstallationToken expiry detection and soon-to-expire warnings.
+
+/// Verify TargetType enum variants and serialization.
+///
+/// Tests that TargetType variants (Organization, User) are correctly
+/// defined and serialize to PascalCase as expected by GitHub API.
+#[test]
+fn test_target_type() {
+    use serde_json;
+
+    let org = TargetType::Organization;
+    let user = TargetType::User;
+
+    assert_eq!(format!("{:?}", org), "Organization");
+    assert_eq!(format!("{:?}", user), "User");
+
+    // Verify serialization format (PascalCase)
+    let org_json = serde_json::to_string(&org).unwrap();
+    assert_eq!(org_json, "\"Organization\"");
+
+    let user_json = serde_json::to_string(&user).unwrap();
+    assert_eq!(user_json, "\"User\"");
+}
+
+/// Verify Account struct creation and field access.
+///
+/// Tests that Account type correctly represents installation account
+/// information with proper field access and type safety.
+#[test]
+fn test_account_type() {
+    let account = Account {
+        id: UserId::new(12345),
+        login: "octocat".to_string(),
+        account_type: TargetType::Organization,
+        avatar_url: Some("https://github.com/octocat.png".to_string()),
+        html_url: "https://github.com/octocat".to_string(),
+    };
+
+    assert_eq!(account.id, UserId::new(12345));
+    assert_eq!(account.login, "octocat");
+    assert_eq!(account.account_type, TargetType::Organization);
+}
+
+/// Verify Installation struct includes all required fields.
+///
+/// Tests that Installation type correctly represents all fields from
+/// GitHub API including URLs, permissions, and metadata.
+#[test]
+fn test_installation_structure() {
+    let account = Account {
+        id: UserId::new(1),
+        login: "octocat".to_string(),
+        account_type: TargetType::Organization,
+        avatar_url: Some("https://github.com/octocat.png".to_string()),
+        html_url: "https://github.com/octocat".to_string(),
+    };
+
+    let installation = Installation {
+        id: InstallationId::new(123),
+        account,
+        access_tokens_url: "https://api.github.com/app/installations/123/access_tokens"
+            .to_string(),
+        repositories_url: "https://api.github.com/installation/repositories".to_string(),
+        html_url: "https://github.com/settings/installations/123".to_string(),
+        app_id: GitHubAppId::new(456),
+        target_type: TargetType::Organization,
+        repository_selection: RepositorySelection::All,
+        permissions: InstallationPermissions::default(),
+        events: vec!["push".to_string(), "pull_request".to_string()],
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+        single_file_name: None,
+        has_multiple_single_files: false,
+        suspended_at: None,
+        suspended_by: None,
+    };
+
+    assert_eq!(installation.id, InstallationId::new(123));
+    assert_eq!(installation.app_id, GitHubAppId::new(456));
+    assert_eq!(installation.target_type, TargetType::Organization);
+    assert_eq!(installation.repository_selection, RepositorySelection::All);
+    assert_eq!(installation.events.len(), 2);
+}
+
+/// Verify InstallationToken expiry detection and soon-to-expire warnings.
 ///
 /// Tests token expiry logic to ensure:
 /// - Tokens with future expiry are not marked as expired

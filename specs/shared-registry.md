@@ -163,6 +163,33 @@ Update this when creating new shared abstractions.
 - **Default**: `None` (used when GitHub API omits permission field)
 - **Serialization**: Lowercase strings ("none", "read", "write", "admin")
 
+### TargetType
+
+- **Purpose**: Installation target classification (Organization vs User)
+- **Location**: `crates/github-bot-sdk/src/auth/mod.rs`
+- **Spec**: `github-bot-sdk-specs/modules/client.md`
+- **Variants**: Organization, User
+- **Serialization**: PascalCase strings ("Organization", "User")
+- **Usage**: Indicates where a GitHub App is installed (org or user account)
+
+### Account
+
+- **Purpose**: Account information for GitHub App installations
+- **Location**: `crates/github-bot-sdk/src/auth/mod.rs`
+- **Spec**: `github-bot-sdk-specs/modules/client.md`
+- **Fields**: id (UserId), login, account_type (TargetType), avatar_url, html_url
+- **Usage**: Represents the organization or user account where app is installed
+- **Note**: Similar to User but specific to installation context
+
+### Installation
+
+- **Purpose**: Complete GitHub App installation metadata
+- **Location**: `crates/github-bot-sdk/src/auth/mod.rs`
+- **Spec**: `github-bot-sdk-specs/modules/client.md`
+- **Fields**: id, account, URLs, app_id, target_type, repository_selection, permissions, events, timestamps
+- **Usage**: Represents an app installation with all associated metadata
+- **Design**: Uses newtype wrappers (InstallationId, GitHubAppId) for type safety
+
 ### AuthError
 
 - **Purpose**: Authentication-related errors with retry classification

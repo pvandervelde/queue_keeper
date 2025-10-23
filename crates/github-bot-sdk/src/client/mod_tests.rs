@@ -543,6 +543,11 @@ mod app_operations_tests {
                     "avatar_url": null,
                     "html_url": "https://github.com/octocat"
                 },
+                "access_tokens_url": "https://api.github.com/app/installations/1/access_tokens",
+                "repositories_url": "https://api.github.com/installation/repositories",
+                "html_url": "https://github.com/settings/installations/1",
+                "app_id": 12345,
+                "target_type": "User",
                 "repository_selection": "all",
                 "permissions": {
                     "issues": "write",
@@ -552,9 +557,11 @@ mod app_operations_tests {
                     "checks": "write",
                     "actions": "read"
                 },
+                "events": ["push", "pull_request"],
                 "created_at": "2024-01-01T00:00:00Z",
                 "updated_at": "2024-01-02T00:00:00Z",
-                "suspended_at": null
+                "suspended_at": null,
+                "suspended_by": null
             },
             {
                 "id": 2,
@@ -565,6 +572,11 @@ mod app_operations_tests {
                     "avatar_url": null,
                     "html_url": "https://github.com/another-user"
                 },
+                "access_tokens_url": "https://api.github.com/app/installations/2/access_tokens",
+                "repositories_url": "https://api.github.com/installation/repositories",
+                "html_url": "https://github.com/settings/installations/2",
+                "app_id": 12345,
+                "target_type": "Organization",
                 "repository_selection": "selected",
                 "permissions": {
                     "issues": "read",
@@ -574,9 +586,11 @@ mod app_operations_tests {
                     "checks": "read",
                     "actions": "none"
                 },
+                "events": ["issues", "pull_request"],
                 "created_at": "2024-02-01T00:00:00Z",
                 "updated_at": "2024-02-02T00:00:00Z",
-                "suspended_at": null
+                "suspended_at": null,
+                "suspended_by": null
             }
         ]);
 
@@ -649,6 +663,11 @@ mod app_operations_tests {
                 "avatar_url": null,
                 "html_url": "https://github.com/octocat"
             },
+            "access_tokens_url": "https://api.github.com/app/installations/12345/access_tokens",
+            "repositories_url": "https://api.github.com/installation/repositories",
+            "html_url": "https://github.com/settings/installations/12345",
+            "app_id": 12345,
+            "target_type": "User",
             "repository_selection": "all",
             "permissions": {
                 "issues": "write",
@@ -658,9 +677,11 @@ mod app_operations_tests {
                 "checks": "write",
                 "actions": "read"
             },
+            "events": ["push", "pull_request", "issues"],
             "created_at": "2024-01-01T00:00:00Z",
             "updated_at": "2024-01-02T00:00:00Z",
-            "suspended_at": null
+            "suspended_at": null,
+            "suspended_by": null
         });
 
         Mock::given(method("GET"))
