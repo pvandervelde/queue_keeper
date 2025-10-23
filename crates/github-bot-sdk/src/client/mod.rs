@@ -307,7 +307,7 @@ impl GitHubClient {
     /// # async fn example(client: &GitHubClient) -> Result<(), Box<dyn std::error::Error>> {
     /// let installations = client.list_installations().await?;
     /// for installation in installations {
-    ///     println!("Installation ID: {} for {}", installation.id.value(), installation.account.login);
+    ///     println!("Installation ID: {} for {}", installation.id.as_u64(), installation.account.login);
     /// }
     /// # Ok(())
     /// # }
@@ -357,12 +357,13 @@ impl GitHubClient {
         }
 
         // Parse response
-        let installations = response
-            .json::<Vec<Installation>>()
-            .await
-            .map_err(|e| ApiError::Configuration {
-                message: format!("Failed to parse installations response: {}", e),
-            })?;
+        let installations =
+            response
+                .json::<Vec<Installation>>()
+                .await
+                .map_err(|e| ApiError::Configuration {
+                    message: format!("Failed to parse installations response: {}", e),
+                })?;
 
         Ok(installations)
     }
@@ -444,14 +445,158 @@ impl GitHubClient {
         }
 
         // Parse response
-        let installation = response
-            .json::<Installation>()
-            .await
-            .map_err(|e| ApiError::Configuration {
-                message: format!("Failed to parse installation response: {}", e),
-            })?;
+        let installation =
+            response
+                .json::<Installation>()
+                .await
+                .map_err(|e| ApiError::Configuration {
+                    message: format!("Failed to parse installation response: {}", e),
+                })?;
 
         Ok(installation)
+    }
+
+    /// Make a raw authenticated GET request as the GitHub App.
+    ///
+    /// This is a generic method for making custom API requests that aren't covered
+    /// by the specific methods. Returns the raw response for flexible handling by the caller.
+    ///
+    /// # Authentication
+    ///
+    /// Requires app-level JWT authentication.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - The API path (e.g., "/app/installations" or "app/installations")
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use github_bot_sdk::client::GitHubClient;
+    /// # async fn example(client: &GitHubClient) -> Result<(), Box<dyn std::error::Error>> {
+    /// // Make a custom GET request
+    /// let response = client.get_as_app("/app/hook/config").await?;
+    ///
+    /// if response.status().is_success() {
+    ///     let data: serde_json::Value = response.json().await?;
+    ///     println!("Response: {:?}", data);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns `ApiError` if:
+    /// - JWT generation fails
+    /// - HTTP request fails (network error, timeout, etc.)
+    ///
+    /// Note: Does NOT return an error for non-2xx status codes. The caller is responsible
+    /// for checking the response status.
+    pub async fn get_as_app(&self, path: &str) -> Result<reqwest::Response, ApiError> {
+        // Get JWT token from auth provider
+        let jwt = self
+            .auth
+            .app_token()
+            .await
+            .map_err(|e| ApiError::TokenGenerationFailed {
+                message: format!("Failed to generate JWT: {}", e),
+            })?;
+
+        // Normalize path - remove leading slash if present for consistent URL building
+        let normalized_path = path.strip_prefix('/').unwrap_or(path);
+
+        // Build request URL
+        let url = format!("{}/{}", self.config.github_api_url, normalized_path);
+
+        // Make authenticated request
+        let response = self
+            .http_client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", jwt.token()))
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .map_err(|e| ApiError::Configuration {
+                message: format!("HTTP request failed: {}", e),
+            })?;
+
+        Ok(response)
+    }
+
+    /// Make a raw authenticated POST request as the GitHub App.
+    ///
+    /// This is a generic method for making custom API requests that aren't covered
+    /// by the specific methods. Returns the raw response for flexible handling by the caller.
+    ///
+    /// # Authentication
+    ///
+    /// Requires app-level JWT authentication.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - The API path (e.g., "/app/installations/{id}/suspended")
+    /// * `body` - The request body to serialize as JSON
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use github_bot_sdk::client::GitHubClient;
+    /// # async fn example(client: &GitHubClient) -> Result<(), Box<dyn std::error::Error>> {
+    /// // Make a custom POST request
+    /// let body = serde_json::json!({"reason": "Violation of terms"});
+    /// let response = client.post_as_app("/app/installations/123/suspended", &body).await?;
+    ///
+    /// if response.status().is_success() {
+    ///     println!("Installation suspended");
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns `ApiError` if:
+    /// - JWT generation fails
+    /// - Body serialization fails
+    /// - HTTP request fails (network error, timeout, etc.)
+    ///
+    /// Note: Does NOT return an error for non-2xx status codes. The caller is responsible
+    /// for checking the response status.
+    pub async fn post_as_app(
+        &self,
+        path: &str,
+        body: &impl serde::Serialize,
+    ) -> Result<reqwest::Response, ApiError> {
+        // Get JWT token from auth provider
+        let jwt = self
+            .auth
+            .app_token()
+            .await
+            .map_err(|e| ApiError::TokenGenerationFailed {
+                message: format!("Failed to generate JWT: {}", e),
+            })?;
+
+        // Normalize path - remove leading slash if present for consistent URL building
+        let normalized_path = path.strip_prefix('/').unwrap_or(path);
+
+        // Build request URL
+        let url = format!("{}/{}", self.config.github_api_url, normalized_path);
+
+        // Make authenticated request with JSON body
+        let response = self
+            .http_client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", jwt.token()))
+            .header("Accept", "application/vnd.github+json")
+            .json(body)
+            .send()
+            .await
+            .map_err(|e| ApiError::Configuration {
+                message: format!("HTTP request failed: {}", e),
+            })?;
+
+        Ok(response)
     }
 
     // Installation-level operations will be implemented in task 5.0
