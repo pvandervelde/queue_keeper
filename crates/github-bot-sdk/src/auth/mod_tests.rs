@@ -312,8 +312,7 @@ fn test_installation_structure() {
     let installation = Installation {
         id: InstallationId::new(123),
         account,
-        access_tokens_url: "https://api.github.com/app/installations/123/access_tokens"
-            .to_string(),
+        access_tokens_url: "https://api.github.com/app/installations/123/access_tokens".to_string(),
         repositories_url: "https://api.github.com/installation/repositories".to_string(),
         html_url: "https://github.com/settings/installations/123".to_string(),
         app_id: GitHubAppId::new(456),
