@@ -147,8 +147,27 @@ impl RateLimit {
 /// # }
 /// ```
 pub fn parse_rate_limit_from_headers(headers: &HeaderMap) -> Option<RateLimit> {
-    // TODO: implement
-    None
+    // Extract required headers
+    let limit_str = headers.get("x-ratelimit-limit")?.to_str().ok()?;
+    let remaining_str = headers.get("x-ratelimit-remaining")?.to_str().ok()?;
+    let reset_str = headers.get("x-ratelimit-reset")?.to_str().ok()?;
+
+    // Parse numeric values
+    let limit = limit_str.parse::<u32>().ok()?;
+    let remaining = remaining_str.parse::<u32>().ok()?;
+    let reset_timestamp = reset_str.parse::<i64>().ok()?;
+
+    // Convert Unix timestamp to DateTime
+    let reset_at = DateTime::from_timestamp(reset_timestamp, 0)?;
+
+    // Get resource type (defaults to "core" if not present)
+    let resource = headers
+        .get("x-ratelimit-resource")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("core")
+        .to_string();
+
+    Some(RateLimit::new(limit, remaining, reset_at, resource))
 }
 
 /// Thread-safe rate limit tracker for GitHub API operations.
@@ -204,7 +223,12 @@ impl RateLimiter {
     ///
     /// * `headers` - HTTP response headers containing rate limit info
     pub fn update_from_headers(&self, headers: &HeaderMap) {
-        // TODO: implement
+        if let Some(rate_limit) = parse_rate_limit_from_headers(headers) {
+            let resource = rate_limit.resource().to_string();
+            if let Ok(mut limits) = self.limits.write() {
+                limits.insert(resource, rate_limit);
+            }
+        }
     }
 
     /// Check if we can proceed with a request for the given resource.
@@ -218,8 +242,25 @@ impl RateLimiter {
     /// `true` if we have sufficient rate limit remaining (considering safety margin),
     /// `false` if we're at or near the rate limit.
     pub fn can_proceed(&self, resource: &str) -> bool {
-        // TODO: implement
-        true
+        // If we don't have rate limit data yet, allow the request
+        let limits = match self.limits.read() {
+            Ok(limits) => limits,
+            Err(_) => return true, // Lock poisoned, allow request
+        };
+
+        // If we don't have data for this resource, allow the request
+        let rate_limit = match limits.get(resource) {
+            Some(limit) => limit,
+            None => return true,
+        };
+
+        // If the rate limit has reset, allow the request
+        if rate_limit.has_reset() {
+            return true;
+        }
+
+        // Check if we're exhausted or near exhaustion
+        !rate_limit.is_exhausted() && !rate_limit.is_near_exhaustion(self.margin)
     }
 
     /// Get the current rate limit for a resource.
@@ -233,8 +274,7 @@ impl RateLimiter {
     /// `Some(RateLimit)` if we have rate limit data for this resource,
     /// `None` if we haven't received rate limit headers yet.
     pub fn get_limit(&self, resource: &str) -> Option<RateLimit> {
-        // TODO: implement
-        None
+        self.limits.read().ok()?.get(resource).cloned()
     }
 }
 
