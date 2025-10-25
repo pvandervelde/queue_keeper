@@ -23,7 +23,7 @@ dirs = "6.0"
 
 # Configuration
 config = "0.15"
-toml = "0.8"
+toml = "0.9"
 
 # Error handling
 anyhow = "1.0"
