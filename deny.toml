@@ -16,11 +16,6 @@ ignore = [
     # Tracked: https://github.com/RustCrypto/RSA/issues/19
     "RUSTSEC-2023-0071",
 
-    # opentelemetry_api merged into opentelemetry crate (RUSTSEC-2024-0387)
-    # Used transitively through opentelemetry-otlp dependencies
-    # Will be resolved when opentelemetry ecosystem updates
-    "RUSTSEC-2024-0387",
-
     # paste crate no longer maintained (RUSTSEC-2024-0436)
     # Used transitively through azure_core v0.21.0
     # Will be resolved when Azure SDK updates their dependencies
@@ -30,13 +25,6 @@ ignore = [
     # Used transitively through azure_core v0.21.0 -> http-types -> fastrand -> instant
     # Will be resolved when Azure SDK updates to newer versions
     "RUSTSEC-2024-0384",
-
-    # protobuf stack overflow vulnerability (RUSTSEC-2024-0437)
-    # Used transitively through prometheus v0.13.4 and opentelemetry-prometheus v0.13.0
-    # Cannot upgrade without updating entire prometheus/opentelemetry stack
-    # Mitigation: We control all protobuf inputs (internal metrics only)
-    # Will be resolved when upgrading to newer opentelemetry versions
-    "RUSTSEC-2024-0437",
 ]
 
 [licenses]
