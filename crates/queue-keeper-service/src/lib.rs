@@ -249,9 +249,9 @@ pub fn create_router(state: AppState) -> Router {
 
     let api_routes = Router::new()
         .route("/api/events", get(list_events))
-        .route("/api/events/:event_id", get(get_event))
+        .route("/api/events/{event_id}", get(get_event))
         .route("/api/sessions", get(list_sessions))
-        .route("/api/sessions/:session_id", get(get_session))
+        .route("/api/sessions/{session_id}", get(get_session))
         .route("/api/stats", get(get_statistics));
 
     let observability_routes = Router::new()
@@ -260,8 +260,8 @@ pub fn create_router(state: AppState) -> Router {
         .route("/debug/vars", get(debug_vars));
 
     let admin_routes = Router::new()
-        .route("/admin/events/:event_id/replay", post(replay_event))
-        .route("/admin/sessions/:session_id/reset", post(reset_session))
+        .route("/admin/events/{event_id}/replay", post(replay_event))
+        .route("/admin/sessions/{session_id}/reset", post(reset_session))
         .route("/admin/config", get(get_config))
         .route("/admin/logging/level", get(get_log_level))
         .route("/admin/logging/level", put(set_log_level))
@@ -270,11 +270,11 @@ pub fn create_router(state: AppState) -> Router {
         .route("/admin/metrics/reset", post(reset_metrics));
 
     Router::new()
-        .nest("/", webhook_routes)
-        .nest("/", health_routes)
-        .nest("/", api_routes)
-        .nest("/", observability_routes)
-        .nest("/", admin_routes)
+        .merge(webhook_routes)
+        .merge(health_routes)
+        .merge(api_routes)
+        .merge(observability_routes)
+        .merge(admin_routes)
         .layer(
             ServiceBuilder::new()
                 .layer(TraceLayer::new_for_http())

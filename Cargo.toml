@@ -10,7 +10,7 @@ resolver = "2"
 
 [workspace.dependencies]
 # Async runtime
-tokio = { version = "1.35", features = ["full"] }
+tokio = { version = "1.48", features = ["full"] }
 async-trait = "0.1"
 
 # Serialization
@@ -21,7 +21,12 @@ serde_json = "1.0"
 reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
 hyper = { version = "1.0", features = ["full"] }
 tower = "0.4"
-tower-http = { version = "0.6", features = ["cors", "trace"] }
+tower-http = { version = "0.6", features = [
+    "cors",
+    "trace",
+    "compression-br",
+    "compression-gzip",
+] }
 
 # Error handling
 thiserror = "1.0"
@@ -30,19 +35,20 @@ anyhow = "1.0"
 # Logging and tracing
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-opentelemetry = "0.21"
+opentelemetry = "0.31"
+opentelemetry-otlp = { version = "0.31", features = ["metrics", "trace"] }
 
 # Time handling
 chrono = { version = "0.4", features = ["serde"] }
 
 # Cryptography
-jsonwebtoken = "10.0"
+jsonwebtoken = { version = "10.0", features = ["rust_crypto"] }
 hmac = "0.12"
 sha2 = "0.10"
 
 # Configuration
 config = "0.15"
-clap = { version = "4.4", features = ["derive"] }
+clap = { version = "4.4", features = ["derive", "env"] }
 
 # Azure integrations
 azure_core = "0.29"

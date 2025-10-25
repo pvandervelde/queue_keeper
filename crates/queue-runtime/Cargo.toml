@@ -8,37 +8,37 @@ repository = "https://github.com/pvandervelde/queue_keeper"
 
 [dependencies]
 # Core dependencies
-tokio = { version = "1.0", features = ["full"] }
-tracing = "0.1"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-uuid = { version = "1.0", features = ["v4", "serde"] }
+tokio = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
 
 # Date/time
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { workspace = true }
 
 # Error handling
-thiserror = "1.0"
-anyhow = "1.0"
+thiserror = { workspace = true }
+anyhow = { workspace = true }
 
 # Async traits
-async-trait = "0.1"
+async-trait = { workspace = true }
 
 # Azure Service Bus
-azure_messaging_servicebus = "0.21"
-azure_core = "0.29"
-azure_identity = "0.29"
+azure_messaging_servicebus = { workspace = true }
+azure_core = { workspace = true }
+azure_identity = { workspace = true }
 
 # AWS SQS
-aws-config = "1.0"
-aws-sdk-sqs = "1.0"
+aws-config = { workspace = true }
+aws-sdk-sqs = { workspace = true }
 
 # Configuration
-config = "0.15"
+config = { workspace = true }
 
 # Utilities
-url = "2.0"
-bytes = "1.0"
+url = { workspace = true }
+bytes = { workspace = true }
 base64 = "0.22"
 
 [dev-dependencies]
