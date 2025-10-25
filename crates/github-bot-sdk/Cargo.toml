@@ -8,36 +8,36 @@ repository = "https://github.com/pvandervelde/queue_keeper"
 
 [dependencies]
 # Core dependencies
-tokio = { version = "1.0", features = ["full"] }
-tracing = "0.1"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-uuid = { version = "1.0", features = ["v4", "serde"] }
+tokio = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
 
 # HTTP client
-reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
+reqwest = { workspace = true }
 
 # JWT and crypto
-jsonwebtoken = { version = "10.0", features = ["rust_crypto"] }
-hmac = "0.12"
-sha2 = "0.10"
+jsonwebtoken = { workspace = true }
+hmac = { workspace = true }
+sha2 = { workspace = true }
 rsa = "0.9"
 
 # Date/time
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { workspace = true }
 
 # Error handling
-thiserror = "1.0"
-anyhow = "1.0"
+thiserror = { workspace = true }
+anyhow = { workspace = true }
 
 # Async traits
-async-trait = "0.1"
+async-trait = { workspace = true }
 
 # Base64 encoding
 base64 = "0.22"
 
 # URL handling
-url = "2.0"
+url = { workspace = true }
 
 [dev-dependencies]
 tempfile = "=3.23.0"
