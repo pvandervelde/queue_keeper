@@ -312,25 +312,28 @@ pub struct App {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Installation {
-    pub id: u64,
+    pub id: InstallationId,  // Newtype wrapper for type safety
     pub account: Account,
     pub access_tokens_url: String,
     pub repositories_url: String,
     pub html_url: String,
-    pub app_id: u64,
+    pub app_id: GitHubAppId,  // Newtype wrapper for type safety
     pub target_type: TargetType,
-    pub permissions: Permissions,
+    pub repository_selection: RepositorySelection,
+    pub permissions: InstallationPermissions,  // Structured enum-based permissions
     pub events: Vec<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    #[serde(default)]
     pub single_file_name: Option<String>,
+    #[serde(default)]
     pub has_multiple_single_files: bool,
     pub suspended_at: Option<DateTime<Utc>>,
     pub suspended_by: Option<User>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "PascalCase")]
 pub enum TargetType {
     Organization,
     User,
@@ -338,22 +341,18 @@ pub enum TargetType {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Account {
-    pub id: u64,
+    pub id: UserId,  // Newtype wrapper for type safety
     pub login: String,
-    pub avatar_url: String,
-    pub html_url: String,
     #[serde(rename = "type")]
-    pub account_type: String,
+    pub account_type: TargetType,
+    pub avatar_url: Option<String>,
+    pub html_url: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Permissions {
-    pub metadata: Option<String>,
-    pub contents: Option<String>,
-    pub issues: Option<String>,
-    pub pull_requests: Option<String>,
-    // Additional permission fields as needed
-}
+// Note: InstallationPermissions uses structured enum-based permission levels
+// See auth.md for InstallationPermissions definition with PermissionLevel enum
+// This provides better type safety than Option<String> and defaults missing
+// permissions to None via #[serde(default)]
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Repository {

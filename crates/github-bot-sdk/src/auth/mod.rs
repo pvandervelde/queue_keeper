@@ -513,7 +513,30 @@ impl std::fmt::Debug for InstallationToken {
 ///
 /// Each permission can be set to None, Read, Write, or Admin level.
 /// See GitHub's documentation for details on what each permission allows.
+///
+/// # GitHub API Compatibility
+///
+/// The GitHub API returns permissions as optional fields - installations only
+/// include permissions they were granted during installation. This struct uses
+/// `#[serde(default)]` to automatically default missing fields to `PermissionLevel::None`,
+/// which provides better ergonomics than `Option<PermissionLevel>` while accurately
+/// representing the API semantics (missing permission = no permission).
+///
+/// # Examples
+///
+/// ```
+/// # use github_bot_sdk::auth::{InstallationPermissions, PermissionLevel};
+/// // Partial permissions from GitHub API (only metadata and contents)
+/// let json = r#"{"metadata": "read", "contents": "read"}"#;
+/// let perms: InstallationPermissions = serde_json::from_str(json).unwrap();
+///
+/// assert_eq!(perms.metadata, PermissionLevel::Read);
+/// assert_eq!(perms.contents, PermissionLevel::Read);
+/// assert_eq!(perms.issues, PermissionLevel::None);  // Defaulted
+/// assert_eq!(perms.pull_requests, PermissionLevel::None);  // Defaulted
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct InstallationPermissions {
     pub issues: PermissionLevel,
     pub pull_requests: PermissionLevel,
@@ -529,7 +552,7 @@ impl Default for InstallationPermissions {
             issues: PermissionLevel::None,
             pull_requests: PermissionLevel::None,
             contents: PermissionLevel::None,
-            metadata: PermissionLevel::Read, // Usually granted by default
+            metadata: PermissionLevel::None,
             checks: PermissionLevel::None,
             actions: PermissionLevel::None,
         }
@@ -537,6 +560,9 @@ impl Default for InstallationPermissions {
 }
 
 /// Permission level for GitHub resources.
+///
+/// Represents the access level granted for a specific permission.
+/// Defaults to `None` when not specified.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PermissionLevel {
@@ -544,6 +570,12 @@ pub enum PermissionLevel {
     Read,
     Write,
     Admin,
+}
+
+impl Default for PermissionLevel {
+    fn default() -> Self {
+        Self::None
+    }
 }
 
 /// Specific permissions that can be checked on tokens.
@@ -572,13 +604,37 @@ pub enum UserType {
     Organization,
 }
 
+/// Installation target type (where the app is installed).
+///
+/// Indicates whether the GitHub App is installed on an organization or user account.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub enum TargetType {
+    Organization,
+    User,
+}
+
 /// User information from GitHub API.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct User {
     pub id: UserId,
     pub login: String,
     #[serde(rename = "type")]
     pub user_type: UserType,
+    pub avatar_url: Option<String>,
+    pub html_url: String,
+}
+
+/// Account information for installations.
+///
+/// Similar to User but represents the account where a GitHub App is installed.
+/// This can be either an organization or a user account.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Account {
+    pub id: UserId,
+    pub login: String,
+    #[serde(rename = "type")]
+    pub account_type: TargetType,
     pub avatar_url: Option<String>,
     pub html_url: String,
 }
@@ -632,15 +688,45 @@ impl Repository {
 }
 
 /// Installation information from GitHub API.
+///
+/// Represents a GitHub App installation on an organization or user account.
+/// Includes permissions, repository access, and subscription information.
+///
+/// # Examples
+///
+/// ```no_run
+/// # use github_bot_sdk::auth::{Installation, TargetType};
+/// # fn example(installation: Installation) {
+/// match installation.target_type {
+///     TargetType::Organization => {
+///         println!("Installed on organization: {}", installation.account.login);
+///     }
+///     TargetType::User => {
+///         println!("Installed on user: {}", installation.account.login);
+///     }
+/// }
+/// # }
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Installation {
     pub id: InstallationId,
-    pub account: User,
+    pub account: Account,
+    pub access_tokens_url: String,
+    pub repositories_url: String,
+    pub html_url: String,
+    pub app_id: GitHubAppId,
+    pub target_type: TargetType,
     pub repository_selection: RepositorySelection,
     pub permissions: InstallationPermissions,
+    pub events: Vec<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    #[serde(default)]
+    pub single_file_name: Option<String>,
+    #[serde(default)]
+    pub has_multiple_single_files: bool,
     pub suspended_at: Option<DateTime<Utc>>,
+    pub suspended_by: Option<User>,
 }
 
 /// Repository selection for an installation.

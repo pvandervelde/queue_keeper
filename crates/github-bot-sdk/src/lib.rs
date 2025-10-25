@@ -47,6 +47,7 @@
 
 // Public modules
 pub mod auth;
+pub mod client;
 pub mod error;
 
 // Re-export commonly used types at crate root for convenience
@@ -58,3 +59,5 @@ pub use auth::{
     Permission, PermissionLevel, PrivateKey, RateLimitInfo, Repository, RepositoryId,
     RepositorySelection, SecretProvider, TokenCache, User, UserId, UserType,
 };
+
+pub use client::{ClientConfig, ClientConfigBuilder, GitHubClient, GitHubClientBuilder};

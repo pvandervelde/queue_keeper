@@ -316,22 +316,34 @@ fn create_test_auth(
 }
 
 fn create_mock_installation(id: u64) -> Installation {
-    use super::super::{RepositorySelection, User, UserType};
+    use super::super::{Account, GitHubAppId, RepositorySelection, TargetType};
 
     Installation {
         id: InstallationId::new(id),
-        account: User {
+        account: Account {
             id: super::super::UserId::new(1),
-            login: "test-user".to_string(),
-            user_type: UserType::User,
-            avatar_url: None,
-            html_url: "https://github.com/test-user".to_string(),
+            login: "test-org".to_string(),
+            account_type: TargetType::Organization,
+            avatar_url: Some("https://github.com/test-org.png".to_string()),
+            html_url: "https://github.com/test-org".to_string(),
         },
+        access_tokens_url: format!(
+            "https://api.github.com/app/installations/{}/access_tokens",
+            id
+        ),
+        repositories_url: "https://api.github.com/installation/repositories".to_string(),
+        html_url: format!("https://github.com/settings/installations/{}", id),
+        app_id: GitHubAppId::new(123),
+        target_type: TargetType::Organization,
         repository_selection: RepositorySelection::All,
         permissions: super::super::InstallationPermissions::default(),
+        events: vec!["push".to_string(), "pull_request".to_string()],
         created_at: Utc::now(),
         updated_at: Utc::now(),
+        single_file_name: None,
+        has_multiple_single_files: false,
         suspended_at: None,
+        suspended_by: None,
     }
 }
 
@@ -373,9 +385,11 @@ mod construction_tests {
     /// Verify custom configuration is preserved.
     #[test]
     fn test_create_with_custom_config() {
-        let mut config = AuthConfig::default();
-        config.github_api_url = "https://github.enterprise.local/api/v3".to_string();
-        config.user_agent = "my-bot/1.0".to_string();
+        let config = AuthConfig {
+            github_api_url: "https://github.enterprise.local/api/v3".to_string(),
+            user_agent: "my-bot/1.0".to_string(),
+            ..Default::default()
+        };
 
         let auth = GitHubAppAuth::new(
             MockSecretProvider::new(12345),

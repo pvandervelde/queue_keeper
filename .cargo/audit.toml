@@ -1,0 +1,22 @@
+# cargo-audit configuration
+# See https://github.com/rustsec/rustsec/blob/main/cargo-audit/audit.toml.example
+
+[advisories]
+# Ignore specific advisories (use with caution and document why)
+ignore = [
+    # RSA timing vulnerability (RUSTSEC-2023-0071)
+    # Required for GitHub JWT generation. No practical mitigation available yet.
+    # Risk is acceptable for our use case (bot authentication, not user secrets)
+    # Tracked: https://github.com/RustCrypto/RSA/issues/19
+    "RUSTSEC-2023-0071",
+
+    # paste crate no longer maintained (RUSTSEC-2024-0436)
+    # Used transitively through azure_core v0.21.0
+    # Will be resolved when Azure SDK updates their dependencies
+    "RUSTSEC-2024-0436",
+
+    # instant crate unmaintained (RUSTSEC-2024-0384)
+    # Used transitively through azure_core v0.21.0 -> http-types -> fastrand -> instant
+    # Will be resolved when Azure SDK updates to newer versions
+    "RUSTSEC-2024-0384",
+]
