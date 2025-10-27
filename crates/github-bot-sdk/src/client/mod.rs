@@ -29,8 +29,8 @@ use crate::error::ApiError;
 pub use app::App;
 pub use installation::InstallationClient;
 pub use issue::{
-    Comment, CreateCommentRequest, CreateIssueRequest, CreateLabelRequest, Issue, IssueUser,
-    Label, Milestone, SetIssueMilestoneRequest, UpdateCommentRequest, UpdateIssueRequest,
+    Comment, CreateCommentRequest, CreateIssueRequest, CreateLabelRequest, Issue, IssueUser, Label,
+    Milestone, SetIssueMilestoneRequest, UpdateCommentRequest, UpdateIssueRequest,
     UpdateLabelRequest,
 };
 pub use pagination::{parse_link_header, PagedResponse, Pagination};
@@ -42,9 +42,7 @@ pub use pull_request::{
     UpdatePullRequestRequest, UpdateReviewRequest,
 };
 pub use rate_limit::{parse_rate_limit_from_headers, RateLimit, RateLimiter};
-pub use release::{
-    CreateReleaseRequest, Release, ReleaseAsset, UpdateReleaseRequest,
-};
+pub use release::{CreateReleaseRequest, Release, ReleaseAsset, UpdateReleaseRequest};
 pub use repository::{Branch, Commit, GitRef, Repository, RepositoryOwner, Tag};
 pub use retry::{RateLimitInfo, RetryPolicy};
 pub use workflow::{TriggerWorkflowRequest, Workflow, WorkflowRun};
