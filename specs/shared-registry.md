@@ -190,6 +190,319 @@ Update this when creating new shared abstractions.
 - **Usage**: Represents an app installation with all associated metadata
 - **Design**: Uses newtype wrappers (InstallationId, GitHubAppId) for type safety
 
+### InstallationClient
+
+- **Purpose**: Installation-scoped GitHub API client for repository operations
+- **Location**: `crates/github-bot-sdk/src/client/installation.rs`
+- **Spec**: `github-bot-sdk-specs/interfaces/installation-client.md`
+- **Operations**: Repository, issue, PR, milestone, workflow, release management
+- **Authentication**: Uses installation tokens (not JWTs)
+- **Design**: Holds Arc<GitHubClient> for shared HTTP client and auth provider
+
+### Repository
+
+- **Purpose**: GitHub repository metadata and configuration
+- **Location**: `crates/github-bot-sdk/src/client/repository.rs`
+- **Spec**: `github-bot-sdk-specs/interfaces/repository-operations.md`
+- **Fields**: id, name, full_name, owner, description, default_branch, URLs, timestamps
+- **Usage**: Repository information from GitHub API
+
+### Branch
+
+- **Purpose**: Git branch information with commit SHA
+- **Location**: `crates/github-bot-sdk/src/client/repository.rs`
+- **Spec**: `github-bot-sdk-specs/interfaces/repository-operations.md`
+- **Fields**: name, commit (sha, url), protected
+- **Usage**: Branch management and Git reference operations
+
+### GitRef
+
+- **Purpose**: Git reference (branch or tag) with object information
+- **Location**: `crates/github-bot-sdk/src/client/repository.rs`
+- **Spec**: `github-bot-sdk-specs/interfaces/repository-operations.md`
+- **Fields**: ref_name, node_id, url, object (sha, type, url)
+- **Usage**: Low-level Git reference operations
+
+### Issue
+
+- **Purpose**: GitHub issue with metadata, labels, and state
+- **Location**: `crates/github-bot-sdk/src/client/issue.rs`
+- **Spec**: `github-bot-sdk-specs/interfaces/issue-operations.md`
+- **Fields**: id, node_id, number, title, body, state, user, assignees, labels, milestone, comments, timestamps, html_url
+- **Operations**: list, get, create, update, set_milestone
+
+### IssueUser
+
+- **Purpose**: User information associated with issues, PRs, and comments
+- **Location**: `crates/github-bot-sdk/src/client/issue.rs`
+- **Spec**: `github-bot-sdk-specs/interfaces/issue-operations.md`
+- **Fields**: login, id, node_id, user_type
+- **Usage**: Shared across Issue, PullRequest, Comment, Review types
+
+### Label
+
+- **Purpose**: Repository label for categorizing issues and pull requests
+- **Location**: `crates/github-bot-sdk/src/client/issue.rs`
+- **Spec**: `github-bot-sdk-specs/interfaces/issue-operations.md`
+- **Fields**: id, node_id, name, description, color (hex), default flag
+- **Operations**: list, get, create, update, delete, add to issue, remove from issue
+
+### Comment
+
+- **Purpose**: Comment on an issue or pull request discussion thread
+- **Location**: `crates/github-bot-sdk/src/client/issue.rs`
+- **Spec**: `github-bot-sdk-specs/interfaces/issue-operations.md`
+- **Fields**: id, node_id, body, user, timestamps, html_url
+- **Operations**: list, get, create, update, delete
+
+### Milestone
+
+- **Purpose**: Project milestone for grouping issues and PRs
+- **Location**: `crates/github-bot-sdk/src/client/issue.rs`
+- **Spec**: `github-bot-sdk-specs/interfaces/issue-operations.md` and `additional-operations.md`
+- **Fields**: id, node_id, number, title, description, state, open_issues, closed_issues, due_on, timestamps
+- **Operations**: Assigned to issues and pull requests via set_issue_milestone/set_pull_request_milestone
+
+### PullRequest
+
+- **Purpose**: GitHub pull request with review state and merge information
+- **Location**: `crates/github-bot-sdk/src/client/pull_request.rs`
+- **Spec**: `github-bot-sdk-specs/interfaces/pull-request-operations.md`
+- **Fields**: id, node_id, number, title, body, state, user, head, base, draft, merged, mergeable, merge_commit_sha, assignees, requested_reviewers, labels, milestone, timestamps, html_url
+- **Operations**: list, get, create, update, merge, set_milestone
+
+### PullRequestBranch
+
+- **Purpose**: Branch information in pull request (head/base)
+- **Location**: `crates/github-bot-sdk/src/client/pull_request.rs`
+- **Spec**: `github-bot-sdk-specs/interfaces/pull-request-operations.md`
+- **Fields**: branch_ref, sha, repo (PullRequestRepo)
+- **Note**: Uses Commit type (shared with Branch and Tag)
+
+### PullRequestRepo
+
+- **Purpose**: Repository information in pull request branch
+- **Location**: `crates/github-bot-sdk/src/client/pull_request.rs`
+- **Spec**: `github-bot-sdk-specs/interfaces/pull-request-operations.md`
+- **Fields**: id, name, full_name
+- **Usage**: Repository context for PR head/base branches
+
+### Review
+
+- **Purpose**: Pull request review with approval/changes state
+- **Location**: `crates/github-bot-sdk/src/client/pull_request.rs`
+- **Spec**: `github-bot-sdk-specs/interfaces/pull-request-operations.md`
+- **Fields**: id, node_id, user, body, state (APPROVED/CHANGES_REQUESTED/COMMENTED/DISMISSED/PENDING), commit_id, submitted_at, html_url
+- **Operations**: list, get, create, update, dismiss
+
+### PullRequestComment
+
+- **Purpose**: Review comment on specific code in pull request
+- **Location**: `crates/github-bot-sdk/src/client/pull_request.rs`
+- **Spec**: `github-bot-sdk-specs/interfaces/pull-request-operations.md`
+- **Fields**: id, node_id, body, user, path, line, commit_id, timestamps, html_url
+- **Operations**: list, create
+- **Note**: Different from issue Comment (code-specific vs discussion)
+
+### MergeResult
+
+- **Purpose**: Result of pull request merge operation
+- **Location**: `crates/github-bot-sdk/src/client/pull_request.rs`
+- **Spec**: `github-bot-sdk-specs/interfaces/pull-request-operations.md`
+- **Fields**: merged (bool), sha, message
+- **Usage**: Returned by merge_pull_request operation
+
+### Workflow
+
+- **Purpose**: GitHub Actions workflow file and metadata
+- **Location**: `crates/github-bot-sdk/src/client/workflow.rs`
+- **Spec**: `github-bot-sdk-specs/interfaces/additional-operations.md`
+- **Fields**: id, node_id, name, path, state (active/disabled), timestamps, URLs, badge_url
+- **Operations**: list, get, trigger
+
+### WorkflowRun
+
+- **Purpose**: Execution instance of a GitHub Actions workflow
+- **Location**: `crates/github-bot-sdk/src/client/workflow.rs`
+- **Spec**: `github-bot-sdk-specs/interfaces/additional-operations.md`
+- **Fields**: id, node_id, name, run_number, event, status (queued/in_progress/completed), conclusion, workflow_id, head_branch, head_sha, timestamps, URLs
+- **Operations**: list, get, cancel, rerun
+
+### Release
+
+- **Purpose**: GitHub release with tag, assets, and release notes
+- **Location**: `crates/github-bot-sdk/src/client/release.rs`
+- **Spec**: `github-bot-sdk-specs/interfaces/additional-operations.md`
+- **Fields**: id, node_id, tag_name, target_commitish, name, body, draft, prerelease, author, assets, timestamps, URLs
+- **Operations**: list, get by tag, get by ID, get latest, create, update, delete
+
+### ReleaseAsset
+
+- **Purpose**: File attached to a GitHub release
+- **Location**: `crates/github-bot-sdk/src/client/release.rs`
+- **Spec**: `github-bot-sdk-specs/interfaces/additional-operations.md`
+- **Fields**: id, node_id, name, label, content_type, state, size, download_count, uploader, timestamps, browser_download_url
+- **Usage**: Embedded in Release.assets
+
+### ProjectV2
+
+- **Purpose**: GitHub Projects v2 project board
+- **Location**: `crates/github-bot-sdk/src/client/project.rs`
+- **Spec**: `github-bot-sdk-specs/interfaces/project-operations.md`
+- **Fields**: id, node_id, number, title, description, owner, public, timestamps, url
+- **Operations**: list (org/user), get, add item, remove item
+- **Note**: Projects v2 only (not Classic Projects v1)
+
+### ProjectOwner
+
+- **Purpose**: Owner of a GitHub Projects v2 project
+- **Location**: `crates/github-bot-sdk/src/client/project.rs`
+- **Spec**: `github-bot-sdk-specs/interfaces/project-operations.md`
+- **Fields**: login, owner_type (Organization/User), id, node_id
+- **Usage**: Embedded in ProjectV2
+
+### ProjectV2Item
+
+- **Purpose**: Issue or pull request added to a Projects v2 board
+- **Location**: `crates/github-bot-sdk/src/client/project.rs`
+- **Spec**: `github-bot-sdk-specs/interfaces/project-operations.md`
+- **Fields**: id, node_id, content_type (Issue/PullRequest), content_node_id, timestamps
+- **Usage**: Represents items on project board
+
+### PagedResponse<T>
+
+- **Purpose**: Wrapper for paginated API responses
+- **Location**: `crates/github-bot-sdk/src/client/pagination.rs`
+- **Spec**: `github-bot-sdk-specs/interfaces/pagination.md`
+- **Fields**: items (Vec<T>), total_count, pagination (Pagination)
+- **Usage**: Future pagination support for list operations
+
+### Pagination
+
+- **Purpose**: Pagination metadata from Link headers
+- **Location**: `crates/github-bot-sdk/src/client/pagination.rs`
+- **Spec**: `github-bot-sdk-specs/interfaces/pagination.md`
+- **Fields**: next, prev, first, last (URLs), page, per_page
+- **Methods**: has_next(), has_prev(), next_page(), prev_page()
+- **Parser**: parse_link_header() function
+
+### RateLimitInfo
+
+- **Purpose**: GitHub API rate limit status
+- **Location**: `crates/github-bot-sdk/src/client/retry.rs`
+- **Spec**: `github-bot-sdk-specs/interfaces/rate-limiting-retry.md`
+- **Fields**: limit, remaining, reset_at, is_limited
+- **Methods**: from_headers(), is_near_limit(), time_until_reset()
+- **Usage**: Track API rate limits and prevent exceeding quota
+
+### RetryPolicy
+
+- **Purpose**: Exponential backoff retry configuration
+- **Location**: `crates/github-bot-sdk/src/client/retry.rs`
+- **Spec**: `github-bot-sdk-specs/interfaces/rate-limiting-retry.md`
+- **Fields**: max_retries, initial_delay, max_delay, backoff_multiplier, use_jitter
+- **Methods**: calculate_delay(), should_retry()
+- **Default**: 3 retries, 100ms initial, 60s max, 2.0 multiplier, jitter enabled
+
+### Commit
+
+- **Purpose**: Git commit information (SHA and URL)
+- **Location**: `crates/github-bot-sdk/src/client/repository.rs`
+- **Spec**: `github-bot-sdk-specs/interfaces/repository-operations.md`
+- **Fields**: sha, url
+- **Usage**: Shared across Branch, Tag, and PullRequestBranch types
+- **Design**: Unified type (previously BranchCommit and TagCommit were separate but identical)
+- **Fields**: id, number, title, body, state, user, labels, assignees, timestamps
+- **Usage**: Issue CRUD operations and tracking
+
+### Label
+
+- **Purpose**: Issue/PR label with color and description
+- **Location**: `crates/github-bot-sdk/src/client/issue.rs`
+- **Spec**: `github-bot-sdk-specs/interfaces/issue-operations.md`
+- **Fields**: id, name, description, color
+- **Usage**: Label management and issue categorization
+
+### Comment
+
+- **Purpose**: Issue or PR comment with user attribution
+- **Location**: `crates/github-bot-sdk/src/client/issue.rs`
+- **Spec**: `github-bot-sdk-specs/interfaces/issue-operations.md`
+- **Fields**: id, body, user, html_url, timestamps
+- **Usage**: Comment CRUD operations
+
+### PullRequest
+
+- **Purpose**: GitHub pull request with branch information and merge state
+- **Location**: `crates/github-bot-sdk/src/client/pull_request.rs`
+- **Spec**: `github-bot-sdk-specs/interfaces/pull-request-operations.md`
+- **Fields**: id, number, title, state, head, base, draft, merged, mergeable, timestamps
+- **Usage**: PR management, review workflows, merge operations
+
+### Review
+
+- **Purpose**: Pull request review with approval/rejection state
+- **Location**: `crates/github-bot-sdk/src/client/pull_request.rs`
+- **Spec**: `github-bot-sdk-specs/interfaces/pull-request-operations.md`
+- **Fields**: id, user, body, state (approved, changes_requested, commented), timestamps
+- **Usage**: PR review operations and approval workflows
+
+### Milestone
+
+- **Purpose**: Project milestone with issue tracking
+- **Location**: `crates/github-bot-sdk/src/client/milestone.rs`
+- **Spec**: `github-bot-sdk-specs/interfaces/additional-operations.md`
+- **Fields**: id, number, title, description, state, open/closed issue counts, due date, timestamps
+- **Usage**: Project planning and milestone management
+
+### Workflow
+
+- **Purpose**: GitHub Actions workflow configuration
+- **Location**: `crates/github-bot-sdk/src/client/workflow.rs`
+- **Spec**: `github-bot-sdk-specs/interfaces/additional-operations.md`
+- **Fields**: id, name, path, state (active, disabled), timestamps
+- **Usage**: Workflow automation and CI/CD management
+
+### WorkflowRun
+
+- **Purpose**: GitHub Actions workflow execution instance
+- **Location**: `crates/github-bot-sdk/src/client/workflow.rs`
+- **Spec**: `github-bot-sdk-specs/interfaces/additional-operations.md`
+- **Fields**: id, name, workflow_id, status, conclusion, timestamps
+- **Usage**: Workflow run tracking and status monitoring
+
+### Release
+
+- **Purpose**: GitHub release with tag and artifact information
+- **Location**: `crates/github-bot-sdk/src/client/release.rs`
+- **Spec**: `github-bot-sdk-specs/interfaces/additional-operations.md`
+- **Fields**: id, tag_name, name, body, draft, prerelease, URLs, timestamps
+- **Usage**: Release management and version tracking
+
+### PagedResponse<T>
+
+- **Purpose**: Generic paginated API response with navigation links
+- **Location**: `crates/github-bot-sdk/src/client/pagination.rs`
+- **Spec**: `github-bot-sdk-specs/interfaces/pagination.md`
+- **Fields**: items, next_page, prev_page, first_page, last_page
+- **Usage**: Iterate through multi-page API responses
+
+### RetryPolicy
+
+- **Purpose**: Configuration for exponential backoff and retry behavior
+- **Location**: `crates/github-bot-sdk/src/client/retry.rs`
+- **Spec**: `github-bot-sdk-specs/interfaces/rate-limiting-retry.md`
+- **Fields**: max_retries, initial_backoff, max_backoff, backoff_multiplier
+- **Usage**: Resilient API request handling with automatic retries
+
+### RateLimitInfo
+
+- **Purpose**: Parsed GitHub API rate limit information from headers
+- **Location**: `crates/github-bot-sdk/src/client/retry.rs`
+- **Spec**: `github-bot-sdk-specs/interfaces/rate-limiting-retry.md`
+- **Fields**: limit, remaining, reset (Unix timestamp)
+- **Usage**: Proactive rate limit management and request throttling
+
 ### AuthError
 
 - **Purpose**: Authentication-related errors with retry classification

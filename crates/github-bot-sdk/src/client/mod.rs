@@ -7,7 +7,16 @@
 //! See `github-bot-sdk-specs/modules/client.md` for complete specification.
 
 mod app;
+mod installation;
+mod issue;
+mod pagination;
+mod project;
+mod pull_request;
 mod rate_limit;
+mod release;
+mod repository;
+mod retry;
+mod workflow;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -18,7 +27,27 @@ use crate::auth::{AuthenticationProvider, Installation, InstallationId};
 use crate::error::ApiError;
 
 pub use app::App;
+pub use installation::InstallationClient;
+pub use issue::{
+    Comment, CreateCommentRequest, CreateIssueRequest, CreateLabelRequest, Issue, IssueUser,
+    Label, Milestone, SetIssueMilestoneRequest, UpdateCommentRequest, UpdateIssueRequest,
+    UpdateLabelRequest,
+};
+pub use pagination::{parse_link_header, PagedResponse, Pagination};
+pub use project::{AddProjectV2ItemRequest, ProjectOwner, ProjectV2, ProjectV2Item};
+pub use pull_request::{
+    CreatePullRequestCommentRequest, CreatePullRequestRequest, CreateReviewRequest,
+    DismissReviewRequest, MergePullRequestRequest, MergeResult, PullRequest, PullRequestBranch,
+    PullRequestComment, PullRequestRepo, Review, SetPullRequestMilestoneRequest,
+    UpdatePullRequestRequest, UpdateReviewRequest,
+};
 pub use rate_limit::{parse_rate_limit_from_headers, RateLimit, RateLimiter};
+pub use release::{
+    CreateReleaseRequest, Release, ReleaseAsset, UpdateReleaseRequest,
+};
+pub use repository::{Branch, Commit, GitRef, Repository, RepositoryOwner, Tag};
+pub use retry::{RateLimitInfo, RetryPolicy};
+pub use workflow::{TriggerWorkflowRequest, Workflow, WorkflowRun};
 
 /// Configuration for GitHub API client behavior.
 ///
