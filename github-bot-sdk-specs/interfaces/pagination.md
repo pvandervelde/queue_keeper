@@ -6,7 +6,7 @@
 
 ## Overview
 
-Pagination support for GitHub API list operations that return multiple pages of results. GitHub uses RFC 5988 Link headers for pagination.
+Pagination support for GitHub API list operations that return multiple pages of results. GitHub uses RFC 8288 Link headers for pagination.
 
 ## Architectural Location
 
