@@ -33,12 +33,15 @@ impl InstallationClient {
     /// * `client` - Parent GitHubClient
     /// * `installation_id` - Installation ID to bind to
     pub fn new(client: Arc<GitHubClient>, installation_id: InstallationId) -> Self {
-        unimplemented!("See github-bot-sdk-specs/interfaces/installation-client.md")
+        Self {
+            client,
+            installation_id,
+        }
     }
 
     /// Get the installation ID this client is bound to.
     pub fn installation_id(&self) -> InstallationId {
-        unimplemented!("See github-bot-sdk-specs/interfaces/installation-client.md")
+        self.installation_id
     }
 
     /// Make an authenticated GET request to the GitHub API.
@@ -57,7 +60,36 @@ impl InstallationClient {
     ///
     /// Returns `ApiError` for HTTP errors, authentication failures, or network issues.
     pub async fn get(&self, path: &str) -> Result<reqwest::Response, ApiError> {
-        unimplemented!("See github-bot-sdk-specs/interfaces/installation-client.md")
+        // Get installation token from auth provider
+        let token = self
+            .client
+            .auth_provider()
+            .installation_token(self.installation_id)
+            .await
+            .map_err(|e| ApiError::TokenGenerationFailed {
+                message: format!("Failed to get installation token: {}", e),
+            })?;
+
+        // Normalize path - remove leading slash if present
+        let normalized_path = path.strip_prefix('/').unwrap_or(path);
+
+        // Build request URL
+        let url = format!("{}/{}", self.client.config().github_api_url, normalized_path);
+
+        // Make authenticated request
+        let response = self
+            .client
+            .http_client()
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", token.token()))
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .map_err(|e| ApiError::Configuration {
+                message: format!("HTTP request failed: {}", e),
+            })?;
+
+        Ok(response)
     }
 
     /// Make an authenticated POST request to the GitHub API.
@@ -75,7 +107,37 @@ impl InstallationClient {
         path: &str,
         body: &T,
     ) -> Result<reqwest::Response, ApiError> {
-        unimplemented!("See github-bot-sdk-specs/interfaces/installation-client.md")
+        // Get installation token from auth provider
+        let token = self
+            .client
+            .auth_provider()
+            .installation_token(self.installation_id)
+            .await
+            .map_err(|e| ApiError::TokenGenerationFailed {
+                message: format!("Failed to get installation token: {}", e),
+            })?;
+
+        // Normalize path - remove leading slash if present
+        let normalized_path = path.strip_prefix('/').unwrap_or(path);
+
+        // Build request URL
+        let url = format!("{}/{}", self.client.config().github_api_url, normalized_path);
+
+        // Make authenticated request with JSON body
+        let response = self
+            .client
+            .http_client()
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", token.token()))
+            .header("Accept", "application/vnd.github+json")
+            .json(body)
+            .send()
+            .await
+            .map_err(|e| ApiError::Configuration {
+                message: format!("HTTP request failed: {}", e),
+            })?;
+
+        Ok(response)
     }
 
     /// Make an authenticated PUT request to the GitHub API.
@@ -84,12 +146,71 @@ impl InstallationClient {
         path: &str,
         body: &T,
     ) -> Result<reqwest::Response, ApiError> {
-        unimplemented!("See github-bot-sdk-specs/interfaces/installation-client.md")
+        // Get installation token from auth provider
+        let token = self
+            .client
+            .auth_provider()
+            .installation_token(self.installation_id)
+            .await
+            .map_err(|e| ApiError::TokenGenerationFailed {
+                message: format!("Failed to get installation token: {}", e),
+            })?;
+
+        // Normalize path - remove leading slash if present
+        let normalized_path = path.strip_prefix('/').unwrap_or(path);
+
+        // Build request URL
+        let url = format!("{}/{}", self.client.config().github_api_url, normalized_path);
+
+        // Make authenticated request with JSON body
+        let response = self
+            .client
+            .http_client()
+            .put(&url)
+            .header("Authorization", format!("Bearer {}", token.token()))
+            .header("Accept", "application/vnd.github+json")
+            .json(body)
+            .send()
+            .await
+            .map_err(|e| ApiError::Configuration {
+                message: format!("HTTP request failed: {}", e),
+            })?;
+
+        Ok(response)
     }
 
     /// Make an authenticated DELETE request to the GitHub API.
     pub async fn delete(&self, path: &str) -> Result<reqwest::Response, ApiError> {
-        unimplemented!("See github-bot-sdk-specs/interfaces/installation-client.md")
+        // Get installation token from auth provider
+        let token = self
+            .client
+            .auth_provider()
+            .installation_token(self.installation_id)
+            .await
+            .map_err(|e| ApiError::TokenGenerationFailed {
+                message: format!("Failed to get installation token: {}", e),
+            })?;
+
+        // Normalize path - remove leading slash if present
+        let normalized_path = path.strip_prefix('/').unwrap_or(path);
+
+        // Build request URL
+        let url = format!("{}/{}", self.client.config().github_api_url, normalized_path);
+
+        // Make authenticated request
+        let response = self
+            .client
+            .http_client()
+            .delete(&url)
+            .header("Authorization", format!("Bearer {}", token.token()))
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .map_err(|e| ApiError::Configuration {
+                message: format!("HTTP request failed: {}", e),
+            })?;
+
+        Ok(response)
     }
 
     /// Make an authenticated PATCH request to the GitHub API.
@@ -98,7 +219,37 @@ impl InstallationClient {
         path: &str,
         body: &T,
     ) -> Result<reqwest::Response, ApiError> {
-        unimplemented!("See github-bot-sdk-specs/interfaces/installation-client.md")
+        // Get installation token from auth provider
+        let token = self
+            .client
+            .auth_provider()
+            .installation_token(self.installation_id)
+            .await
+            .map_err(|e| ApiError::TokenGenerationFailed {
+                message: format!("Failed to get installation token: {}", e),
+            })?;
+
+        // Normalize path - remove leading slash if present
+        let normalized_path = path.strip_prefix('/').unwrap_or(path);
+
+        // Build request URL
+        let url = format!("{}/{}", self.client.config().github_api_url, normalized_path);
+
+        // Make authenticated request with JSON body
+        let response = self
+            .client
+            .http_client()
+            .patch(&url)
+            .header("Authorization", format!("Bearer {}", token.token()))
+            .header("Accept", "application/vnd.github+json")
+            .json(body)
+            .send()
+            .await
+            .map_err(|e| ApiError::Configuration {
+                message: format!("HTTP request failed: {}", e),
+            })?;
+
+        Ok(response)
     }
 }
 
@@ -120,6 +271,8 @@ impl GitHubClient {
         &self,
         installation_id: InstallationId,
     ) -> Result<InstallationClient, ApiError> {
-        unimplemented!("See github-bot-sdk-specs/interfaces/installation-client.md")
+        // Create installation client immediately
+        // Token validation will happen on first API call
+        Ok(InstallationClient::new(Arc::new(self.clone()), installation_id))
     }
 }
