@@ -118,7 +118,7 @@ impl InstallationClient {
             .header("Accept", "application/vnd.github+json")
             .send()
             .await
-            .map_err(|e| ApiError::HttpClientError(e))
+            .map_err(ApiError::HttpClientError)
     }
 
     /// Make an authenticated POST request to the GitHub API.
@@ -147,7 +147,7 @@ impl InstallationClient {
             .json(body)
             .send()
             .await
-            .map_err(|e| ApiError::HttpClientError(e))
+            .map_err(ApiError::HttpClientError)
     }
 
     /// Make an authenticated PUT request to the GitHub API.
@@ -167,7 +167,7 @@ impl InstallationClient {
             .json(body)
             .send()
             .await
-            .map_err(|e| ApiError::HttpClientError(e))
+            .map_err(ApiError::HttpClientError)
     }
 
     /// Make an authenticated DELETE request to the GitHub API.
@@ -182,7 +182,7 @@ impl InstallationClient {
             .header("Accept", "application/vnd.github+json")
             .send()
             .await
-            .map_err(|e| ApiError::HttpClientError(e))
+            .map_err(ApiError::HttpClientError)
     }
 
     /// Make an authenticated PATCH request to the GitHub API.
@@ -202,7 +202,7 @@ impl InstallationClient {
             .json(body)
             .send()
             .await
-            .map_err(|e| ApiError::HttpClientError(e))
+            .map_err(ApiError::HttpClientError)
     }
 }
 
