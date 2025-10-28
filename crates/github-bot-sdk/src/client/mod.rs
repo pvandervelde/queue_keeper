@@ -207,6 +207,7 @@ impl Default for ClientConfigBuilder {
 /// # Ok(())
 /// # }
 /// ```
+#[derive(Clone)]
 pub struct GitHubClient {
     auth: Arc<dyn AuthenticationProvider>,
     http_client: reqwest::Client,
@@ -241,6 +242,11 @@ impl GitHubClient {
     /// Get the authentication provider.
     pub fn auth_provider(&self) -> &dyn AuthenticationProvider {
         self.auth.as_ref()
+    }
+
+    /// Get the HTTP client (internal use by InstallationClient).
+    pub(crate) fn http_client(&self) -> &reqwest::Client {
+        &self.http_client
     }
 
     // ========================================================================
