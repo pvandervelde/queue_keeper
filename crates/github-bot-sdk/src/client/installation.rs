@@ -44,6 +44,54 @@ impl InstallationClient {
         self.installation_id
     }
 
+    /// Prepare a request with installation token authentication and normalized path.
+    ///
+    /// This helper extracts common logic for token retrieval, path normalization,
+    /// and URL construction used by all HTTP methods.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - API path (leading slash optional)
+    /// * `method` - HTTP method name for error messages
+    ///
+    /// # Returns
+    ///
+    /// Returns `(token, url)` tuple with the installation token and complete URL.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ApiError::TokenGenerationFailed` if token retrieval fails.
+    async fn prepare_request(
+        &self,
+        path: &str,
+        method: &str,
+    ) -> Result<(String, String), ApiError> {
+        // Get installation token from auth provider
+        let token = self
+            .client
+            .auth_provider()
+            .installation_token(self.installation_id)
+            .await
+            .map_err(|e| ApiError::TokenGenerationFailed {
+                message: format!(
+                    "{} request to {}: failed to get installation token: {}",
+                    method, path, e
+                ),
+            })?;
+
+        // Normalize path - remove leading slash if present
+        let normalized_path = path.strip_prefix('/').unwrap_or(path);
+
+        // Build request URL
+        let url = format!(
+            "{}/{}",
+            self.client.config().github_api_url,
+            normalized_path
+        );
+
+        Ok((token.token().to_string(), url))
+    }
+
     /// Make an authenticated GET request to the GitHub API.
     ///
     /// Uses installation token for authentication.
@@ -60,36 +108,17 @@ impl InstallationClient {
     ///
     /// Returns `ApiError` for HTTP errors, authentication failures, or network issues.
     pub async fn get(&self, path: &str) -> Result<reqwest::Response, ApiError> {
-        // Get installation token from auth provider
-        let token = self
-            .client
-            .auth_provider()
-            .installation_token(self.installation_id)
-            .await
-            .map_err(|e| ApiError::TokenGenerationFailed {
-                message: format!("Failed to get installation token: {}", e),
-            })?;
-
-        // Normalize path - remove leading slash if present
-        let normalized_path = path.strip_prefix('/').unwrap_or(path);
-
-        // Build request URL
-        let url = format!("{}/{}", self.client.config().github_api_url, normalized_path);
+        let (token, url) = self.prepare_request(path, "GET").await?;
 
         // Make authenticated request
-        let response = self
-            .client
+        self.client
             .http_client()
             .get(&url)
-            .header("Authorization", format!("Bearer {}", token.token()))
+            .header("Authorization", format!("Bearer {}", token))
             .header("Accept", "application/vnd.github+json")
             .send()
             .await
-            .map_err(|e| ApiError::Configuration {
-                message: format!("HTTP request failed: {}", e),
-            })?;
-
-        Ok(response)
+            .map_err(|e| ApiError::HttpClientError(e))
     }
 
     /// Make an authenticated POST request to the GitHub API.
@@ -107,37 +136,18 @@ impl InstallationClient {
         path: &str,
         body: &T,
     ) -> Result<reqwest::Response, ApiError> {
-        // Get installation token from auth provider
-        let token = self
-            .client
-            .auth_provider()
-            .installation_token(self.installation_id)
-            .await
-            .map_err(|e| ApiError::TokenGenerationFailed {
-                message: format!("Failed to get installation token: {}", e),
-            })?;
-
-        // Normalize path - remove leading slash if present
-        let normalized_path = path.strip_prefix('/').unwrap_or(path);
-
-        // Build request URL
-        let url = format!("{}/{}", self.client.config().github_api_url, normalized_path);
+        let (token, url) = self.prepare_request(path, "POST").await?;
 
         // Make authenticated request with JSON body
-        let response = self
-            .client
+        self.client
             .http_client()
             .post(&url)
-            .header("Authorization", format!("Bearer {}", token.token()))
+            .header("Authorization", format!("Bearer {}", token))
             .header("Accept", "application/vnd.github+json")
             .json(body)
             .send()
             .await
-            .map_err(|e| ApiError::Configuration {
-                message: format!("HTTP request failed: {}", e),
-            })?;
-
-        Ok(response)
+            .map_err(|e| ApiError::HttpClientError(e))
     }
 
     /// Make an authenticated PUT request to the GitHub API.
@@ -146,71 +156,33 @@ impl InstallationClient {
         path: &str,
         body: &T,
     ) -> Result<reqwest::Response, ApiError> {
-        // Get installation token from auth provider
-        let token = self
-            .client
-            .auth_provider()
-            .installation_token(self.installation_id)
-            .await
-            .map_err(|e| ApiError::TokenGenerationFailed {
-                message: format!("Failed to get installation token: {}", e),
-            })?;
-
-        // Normalize path - remove leading slash if present
-        let normalized_path = path.strip_prefix('/').unwrap_or(path);
-
-        // Build request URL
-        let url = format!("{}/{}", self.client.config().github_api_url, normalized_path);
+        let (token, url) = self.prepare_request(path, "PUT").await?;
 
         // Make authenticated request with JSON body
-        let response = self
-            .client
+        self.client
             .http_client()
             .put(&url)
-            .header("Authorization", format!("Bearer {}", token.token()))
+            .header("Authorization", format!("Bearer {}", token))
             .header("Accept", "application/vnd.github+json")
             .json(body)
             .send()
             .await
-            .map_err(|e| ApiError::Configuration {
-                message: format!("HTTP request failed: {}", e),
-            })?;
-
-        Ok(response)
+            .map_err(|e| ApiError::HttpClientError(e))
     }
 
     /// Make an authenticated DELETE request to the GitHub API.
     pub async fn delete(&self, path: &str) -> Result<reqwest::Response, ApiError> {
-        // Get installation token from auth provider
-        let token = self
-            .client
-            .auth_provider()
-            .installation_token(self.installation_id)
-            .await
-            .map_err(|e| ApiError::TokenGenerationFailed {
-                message: format!("Failed to get installation token: {}", e),
-            })?;
-
-        // Normalize path - remove leading slash if present
-        let normalized_path = path.strip_prefix('/').unwrap_or(path);
-
-        // Build request URL
-        let url = format!("{}/{}", self.client.config().github_api_url, normalized_path);
+        let (token, url) = self.prepare_request(path, "DELETE").await?;
 
         // Make authenticated request
-        let response = self
-            .client
+        self.client
             .http_client()
             .delete(&url)
-            .header("Authorization", format!("Bearer {}", token.token()))
+            .header("Authorization", format!("Bearer {}", token))
             .header("Accept", "application/vnd.github+json")
             .send()
             .await
-            .map_err(|e| ApiError::Configuration {
-                message: format!("HTTP request failed: {}", e),
-            })?;
-
-        Ok(response)
+            .map_err(|e| ApiError::HttpClientError(e))
     }
 
     /// Make an authenticated PATCH request to the GitHub API.
@@ -219,37 +191,18 @@ impl InstallationClient {
         path: &str,
         body: &T,
     ) -> Result<reqwest::Response, ApiError> {
-        // Get installation token from auth provider
-        let token = self
-            .client
-            .auth_provider()
-            .installation_token(self.installation_id)
-            .await
-            .map_err(|e| ApiError::TokenGenerationFailed {
-                message: format!("Failed to get installation token: {}", e),
-            })?;
-
-        // Normalize path - remove leading slash if present
-        let normalized_path = path.strip_prefix('/').unwrap_or(path);
-
-        // Build request URL
-        let url = format!("{}/{}", self.client.config().github_api_url, normalized_path);
+        let (token, url) = self.prepare_request(path, "PATCH").await?;
 
         // Make authenticated request with JSON body
-        let response = self
-            .client
+        self.client
             .http_client()
             .patch(&url)
-            .header("Authorization", format!("Bearer {}", token.token()))
+            .header("Authorization", format!("Bearer {}", token))
             .header("Accept", "application/vnd.github+json")
             .json(body)
             .send()
             .await
-            .map_err(|e| ApiError::Configuration {
-                message: format!("HTTP request failed: {}", e),
-            })?;
-
-        Ok(response)
+            .map_err(|e| ApiError::HttpClientError(e))
     }
 }
 
@@ -273,6 +226,9 @@ impl GitHubClient {
     ) -> Result<InstallationClient, ApiError> {
         // Create installation client immediately
         // Token validation will happen on first API call
-        Ok(InstallationClient::new(Arc::new(self.clone()), installation_id))
+        Ok(InstallationClient::new(
+            Arc::new(self.clone()),
+            installation_id,
+        ))
     }
 }
