@@ -274,44 +274,88 @@ impl InstallationClient {
     // ========================================================================
 
     /// List issues in a repository.
-    ///
-    /// See github-bot-sdk-specs/interfaces/issue-operations.md
     pub async fn list_issues(
         &self,
         owner: &str,
         repo: &str,
         state: Option<&str>,
     ) -> Result<Vec<Issue>, ApiError> {
-        unimplemented!("See github-bot-sdk-specs/interfaces/issue-operations.md")
+        let mut path = format!("/repos/{}/{}/issues", owner, repo);
+        if let Some(state_value) = state {
+            path = format!("{}?state={}", path, state_value);
+        }
+
+        let response = self.get(&path).await?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(match status.as_u16() {
+                404 => ApiError::NotFound,
+                403 => ApiError::AuthorizationFailed,
+                401 => ApiError::AuthenticationFailed,
+                _ => {
+                    let message = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError { status: status.as_u16(), message }
+                }
+            });
+        }
+        response.json().await.map_err(|e| ApiError::from(e))
     }
 
     /// Get a specific issue by number.
-    ///
-    /// See github-bot-sdk-specs/interfaces/issue-operations.md
     pub async fn get_issue(
         &self,
         owner: &str,
         repo: &str,
         issue_number: u64,
     ) -> Result<Issue, ApiError> {
-        unimplemented!("See github-bot-sdk-specs/interfaces/issue-operations.md")
+        let path = format!("/repos/{}/{}/issues/{}", owner, repo, issue_number);
+        let response = self.get(&path).await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            return Err(match status.as_u16() {
+                404 => ApiError::NotFound,
+                403 => ApiError::AuthorizationFailed,
+                401 => ApiError::AuthenticationFailed,
+                _ => {
+                    let message = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError { status: status.as_u16(), message }
+                }
+            });
+        }
+        response.json().await.map_err(|e| ApiError::from(e))
     }
 
     /// Create a new issue.
-    ///
-    /// See github-bot-sdk-specs/interfaces/issue-operations.md
     pub async fn create_issue(
         &self,
         owner: &str,
         repo: &str,
         request: CreateIssueRequest,
     ) -> Result<Issue, ApiError> {
-        unimplemented!("See github-bot-sdk-specs/interfaces/issue-operations.md")
+        let path = format!("/repos/{}/{}/issues", owner, repo);
+        let response = self.post(&path, &request).await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            return Err(match status.as_u16() {
+                422 => {
+                    let message = response.text().await.unwrap_or_else(|_| "Validation failed".to_string());
+                    ApiError::InvalidRequest { message }
+                }
+                404 => ApiError::NotFound,
+                403 => ApiError::AuthorizationFailed,
+                401 => ApiError::AuthenticationFailed,
+                _ => {
+                    let message = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError { status: status.as_u16(), message }
+                }
+            });
+        }
+        response.json().await.map_err(|e| ApiError::from(e))
     }
 
     /// Update an existing issue.
-    ///
-    /// See github-bot-sdk-specs/interfaces/issue-operations.md
     pub async fn update_issue(
         &self,
         owner: &str,
@@ -319,12 +363,29 @@ impl InstallationClient {
         issue_number: u64,
         request: UpdateIssueRequest,
     ) -> Result<Issue, ApiError> {
-        unimplemented!("See github-bot-sdk-specs/interfaces/issue-operations.md")
+        let path = format!("/repos/{}/{}/issues/{}", owner, repo, issue_number);
+        let response = self.patch(&path, &request).await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            return Err(match status.as_u16() {
+                422 => {
+                    let message = response.text().await.unwrap_or_else(|_| "Validation failed".to_string());
+                    ApiError::InvalidRequest { message }
+                }
+                404 => ApiError::NotFound,
+                403 => ApiError::AuthorizationFailed,
+                401 => ApiError::AuthenticationFailed,
+                _ => {
+                    let message = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError { status: status.as_u16(), message }
+                }
+            });
+        }
+        response.json().await.map_err(|e| ApiError::from(e))
     }
 
     /// Set the milestone on an issue.
-    ///
-    /// See github-bot-sdk-specs/interfaces/issue-operations.md
     pub async fn set_issue_milestone(
         &self,
         owner: &str,
@@ -332,7 +393,11 @@ impl InstallationClient {
         issue_number: u64,
         milestone_number: Option<u64>,
     ) -> Result<Issue, ApiError> {
-        unimplemented!("See github-bot-sdk-specs/interfaces/issue-operations.md")
+        let request = UpdateIssueRequest {
+            milestone: Some(milestone_number.unwrap_or(0)),
+            ..Default::default()
+        };
+        self.update_issue(owner, repo, issue_number, request).await
     }
 
     // ========================================================================
