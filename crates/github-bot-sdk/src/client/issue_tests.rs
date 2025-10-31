@@ -132,9 +132,21 @@ mod construction {
         assert!(request.assignees.is_none());
     }
 
+    /// Verify CreateLabelRequest construction with all fields.
     #[test]
     fn test_create_label_request() {
-        todo!("Verify CreateLabelRequest creation")
+        let request = CreateLabelRequest {
+            name: "priority-high".to_string(),
+            description: Some("High priority issue".to_string()),
+            color: "ff0000".to_string(),
+        };
+
+        assert_eq!(request.name, "priority-high");
+        assert_eq!(
+            request.description,
+            Some("High priority issue".to_string())
+        );
+        assert_eq!(request.color, "ff0000");
     }
 
     #[test]
@@ -668,39 +680,370 @@ mod issue_operations {
 mod label_operations {
     use super::*;
 
+    /// Verify list_labels returns all repository labels.
+    ///
+    /// Tests GET /repos/{owner}/{repo}/labels endpoint.
     #[tokio::test]
     async fn test_list_labels() {
-        todo!("Mock: GET /repos/:owner/:repo/labels")
+        let mock_server = MockServer::start().await;
+        let test_token = "ghs_test_token";
+
+        let labels_json = serde_json::json!([
+            {
+                "id": 1,
+                "node_id": "MDU6TGFiZWwx",
+                "name": "bug",
+                "description": "Something isn't working",
+                "color": "d73a4a",
+                "default": true
+            },
+            {
+                "id": 2,
+                "node_id": "MDU6TGFiZWwy",
+                "name": "enhancement",
+                "description": "New feature or request",
+                "color": "a2eeef",
+                "default": true
+            }
+        ]);
+
+        Mock::given(method("GET"))
+            .and(path("/repos/octocat/Hello-World/labels"))
+            .and(header("Authorization", format!("Bearer {}", test_token)))
+            .respond_with(ResponseTemplate::new(200).set_body_json(labels_json))
+            .mount(&mock_server)
+            .await;
+
+        let auth = MockAuthProvider::new_with_token(test_token);
+        let github_client = GitHubClient::builder(auth)
+            .config(ClientConfig::default().with_github_api_url(mock_server.uri()))
+            .build()
+            .unwrap();
+
+        let client = github_client
+            .installation_by_id(InstallationId::new(12345))
+            .await
+            .unwrap();
+
+        let result = client.list_labels("octocat", "Hello-World").await;
+
+        assert!(result.is_ok());
+        let labels = result.unwrap();
+        assert_eq!(labels.len(), 2);
+        assert_eq!(labels[0].name, "bug");
+        assert_eq!(labels[1].name, "enhancement");
     }
 
+    /// Verify get_label returns a specific label by name.
+    ///
+    /// Tests GET /repos/{owner}/{repo}/labels/{name} endpoint.
     #[tokio::test]
     async fn test_get_label() {
-        todo!("Mock: GET /repos/:owner/:repo/labels/:name")
+        let mock_server = MockServer::start().await;
+        let test_token = "ghs_test_token";
+
+        let label_json = serde_json::json!({
+            "id": 1,
+            "node_id": "MDU6TGFiZWwx",
+            "name": "bug",
+            "description": "Something isn't working",
+            "color": "d73a4a",
+            "default": true
+        });
+
+        Mock::given(method("GET"))
+            .and(path("/repos/octocat/Hello-World/labels/bug"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(label_json))
+            .mount(&mock_server)
+            .await;
+
+        let auth = MockAuthProvider::new_with_token(test_token);
+        let github_client = GitHubClient::builder(auth)
+            .config(ClientConfig::default().with_github_api_url(mock_server.uri()))
+            .build()
+            .unwrap();
+
+        let client = github_client
+            .installation_by_id(InstallationId::new(12345))
+            .await
+            .unwrap();
+
+        let result = client.get_label("octocat", "Hello-World", "bug").await;
+
+        assert!(result.is_ok());
+        let label = result.unwrap();
+        assert_eq!(label.name, "bug");
+        assert_eq!(label.color, "d73a4a");
     }
 
+    /// Verify get_label returns NotFound for non-existent label.
+    #[tokio::test]
+    async fn test_get_label_not_found() {
+        let mock_server = MockServer::start().await;
+        let test_token = "ghs_test_token";
+
+        Mock::given(method("GET"))
+            .and(path("/repos/octocat/Hello-World/labels/nonexistent"))
+            .respond_with(
+                ResponseTemplate::new(404).set_body_json(serde_json::json!({
+                    "message": "Not Found"
+                })),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let auth = MockAuthProvider::new_with_token(test_token);
+        let github_client = GitHubClient::builder(auth)
+            .config(ClientConfig::default().with_github_api_url(mock_server.uri()))
+            .build()
+            .unwrap();
+
+        let client = github_client
+            .installation_by_id(InstallationId::new(12345))
+            .await
+            .unwrap();
+
+        let result = client
+            .get_label("octocat", "Hello-World", "nonexistent")
+            .await;
+
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), ApiError::NotFound));
+    }
+
+    /// Verify create_label creates a new label.
+    ///
+    /// Tests POST /repos/{owner}/{repo}/labels endpoint.
     #[tokio::test]
     async fn test_create_label() {
-        todo!("Mock: POST /repos/:owner/:repo/labels")
+        let mock_server = MockServer::start().await;
+        let test_token = "ghs_test_token";
+
+        let created_label_json = serde_json::json!({
+            "id": 3,
+            "node_id": "MDU6TGFiZWwz",
+            "name": "priority-high",
+            "description": "High priority issue",
+            "color": "ff0000",
+            "default": false
+        });
+
+        Mock::given(method("POST"))
+            .and(path("/repos/octocat/Hello-World/labels"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(created_label_json))
+            .mount(&mock_server)
+            .await;
+
+        let auth = MockAuthProvider::new_with_token(test_token);
+        let github_client = GitHubClient::builder(auth)
+            .config(ClientConfig::default().with_github_api_url(mock_server.uri()))
+            .build()
+            .unwrap();
+
+        let client = github_client
+            .installation_by_id(InstallationId::new(12345))
+            .await
+            .unwrap();
+
+        let request = CreateLabelRequest {
+            name: "priority-high".to_string(),
+            description: Some("High priority issue".to_string()),
+            color: "ff0000".to_string(),
+        };
+
+        let result = client
+            .create_label("octocat", "Hello-World", request)
+            .await;
+
+        assert!(result.is_ok());
+        let label = result.unwrap();
+        assert_eq!(label.name, "priority-high");
+        assert_eq!(label.color, "ff0000");
     }
 
+    /// Verify update_label modifies an existing label.
+    ///
+    /// Tests PATCH /repos/{owner}/{repo}/labels/{name} endpoint.
     #[tokio::test]
     async fn test_update_label() {
-        todo!("Mock: PATCH /repos/:owner/:repo/labels/:name")
+        let mock_server = MockServer::start().await;
+        let test_token = "ghs_test_token";
+
+        let updated_label_json = serde_json::json!({
+            "id": 1,
+            "node_id": "MDU6TGFiZWwx",
+            "name": "bug-critical",
+            "description": "Critical bug requiring immediate attention",
+            "color": "ff0000",
+            "default": false
+        });
+
+        Mock::given(method("PATCH"))
+            .and(path("/repos/octocat/Hello-World/labels/bug"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(updated_label_json))
+            .mount(&mock_server)
+            .await;
+
+        let auth = MockAuthProvider::new_with_token(test_token);
+        let github_client = GitHubClient::builder(auth)
+            .config(ClientConfig::default().with_github_api_url(mock_server.uri()))
+            .build()
+            .unwrap();
+
+        let client = github_client
+            .installation_by_id(InstallationId::new(12345))
+            .await
+            .unwrap();
+
+        let request = UpdateLabelRequest {
+            new_name: Some("bug-critical".to_string()),
+            description: Some("Critical bug requiring immediate attention".to_string()),
+            color: Some("ff0000".to_string()),
+        };
+
+        let result = client
+            .update_label("octocat", "Hello-World", "bug", request)
+            .await;
+
+        assert!(result.is_ok());
+        let label = result.unwrap();
+        assert_eq!(label.name, "bug-critical");
+        assert_eq!(label.color, "ff0000");
     }
 
+    /// Verify delete_label removes a label.
+    ///
+    /// Tests DELETE /repos/{owner}/{repo}/labels/{name} endpoint.
     #[tokio::test]
     async fn test_delete_label() {
-        todo!("Mock: DELETE /repos/:owner/:repo/labels/:name")
+        let mock_server = MockServer::start().await;
+        let test_token = "ghs_test_token";
+
+        Mock::given(method("DELETE"))
+            .and(path("/repos/octocat/Hello-World/labels/deprecated"))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&mock_server)
+            .await;
+
+        let auth = MockAuthProvider::new_with_token(test_token);
+        let github_client = GitHubClient::builder(auth)
+            .config(ClientConfig::default().with_github_api_url(mock_server.uri()))
+            .build()
+            .unwrap();
+
+        let client = github_client
+            .installation_by_id(InstallationId::new(12345))
+            .await
+            .unwrap();
+
+        let result = client
+            .delete_label("octocat", "Hello-World", "deprecated")
+            .await;
+
+        assert!(result.is_ok());
     }
 
+    /// Verify add_labels_to_issue adds labels to an issue.
+    ///
+    /// Tests POST /repos/{owner}/{repo}/issues/{number}/labels endpoint.
     #[tokio::test]
     async fn test_add_labels_to_issue() {
-        todo!("Mock: POST /repos/:owner/:repo/issues/:number/labels")
+        let mock_server = MockServer::start().await;
+        let test_token = "ghs_test_token";
+
+        let updated_labels_json = serde_json::json!([
+            {
+                "id": 1,
+                "node_id": "MDU6TGFiZWwx",
+                "name": "bug",
+                "description": "Something isn't working",
+                "color": "d73a4a",
+                "default": true
+            },
+            {
+                "id": 2,
+                "node_id": "MDU6TGFiZWwy",
+                "name": "high-priority",
+                "description": "High priority",
+                "color": "ff0000",
+                "default": false
+            }
+        ]);
+
+        Mock::given(method("POST"))
+            .and(path("/repos/octocat/Hello-World/issues/1347/labels"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(updated_labels_json))
+            .mount(&mock_server)
+            .await;
+
+        let auth = MockAuthProvider::new_with_token(test_token);
+        let github_client = GitHubClient::builder(auth)
+            .config(ClientConfig::default().with_github_api_url(mock_server.uri()))
+            .build()
+            .unwrap();
+
+        let client = github_client
+            .installation_by_id(InstallationId::new(12345))
+            .await
+            .unwrap();
+
+        let labels = vec!["bug".to_string(), "high-priority".to_string()];
+
+        let result = client
+            .add_labels_to_issue("octocat", "Hello-World", 1347, labels)
+            .await;
+
+        assert!(result.is_ok());
+        let updated_labels = result.unwrap();
+        assert_eq!(updated_labels.len(), 2);
+        assert_eq!(updated_labels[0].name, "bug");
+        assert_eq!(updated_labels[1].name, "high-priority");
     }
 
+    /// Verify remove_label_from_issue removes a specific label from an issue.
+    ///
+    /// Tests DELETE /repos/{owner}/{repo}/issues/{number}/labels/{name} endpoint.
     #[tokio::test]
     async fn test_remove_label_from_issue() {
-        todo!("Mock: DELETE /repos/:owner/:repo/issues/:number/labels/:name")
+        let mock_server = MockServer::start().await;
+        let test_token = "ghs_test_token";
+
+        let remaining_labels_json = serde_json::json!([
+            {
+                "id": 1,
+                "node_id": "MDU6TGFiZWwx",
+                "name": "bug",
+                "description": "Something isn't working",
+                "color": "d73a4a",
+                "default": true
+            }
+        ]);
+
+        Mock::given(method("DELETE"))
+            .and(path("/repos/octocat/Hello-World/issues/1347/labels/high-priority"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(remaining_labels_json))
+            .mount(&mock_server)
+            .await;
+
+        let auth = MockAuthProvider::new_with_token(test_token);
+        let github_client = GitHubClient::builder(auth)
+            .config(ClientConfig::default().with_github_api_url(mock_server.uri()))
+            .build()
+            .unwrap();
+
+        let client = github_client
+            .installation_by_id(InstallationId::new(12345))
+            .await
+            .unwrap();
+
+        let result = client
+            .remove_label_from_issue("octocat", "Hello-World", 1347, "high-priority")
+            .await;
+
+        assert!(result.is_ok());
+        let remaining_labels = result.unwrap();
+        assert_eq!(remaining_labels.len(), 1);
+        assert_eq!(remaining_labels[0].name, "bug");
     }
 }
 
@@ -823,9 +1166,29 @@ mod serialization {
         assert_eq!(issue.comments, 5);
     }
 
+    /// Verify Label can be deserialized from GitHub API response.
     #[test]
     fn test_label_deserialize() {
-        todo!("Verify Label can be deserialized from GitHub API response")
+        let json = r#"{
+            "id": 208045946,
+            "node_id": "MDU6TGFiZWwyMDgwNDU5NDY=",
+            "name": "bug",
+            "description": "Something isn't working",
+            "color": "d73a4a",
+            "default": true
+        }"#;
+
+        let label: Label = serde_json::from_str(json).unwrap();
+
+        assert_eq!(label.id, 208045946);
+        assert_eq!(label.node_id, "MDU6TGFiZWwyMDgwNDU5NDY=");
+        assert_eq!(label.name, "bug");
+        assert_eq!(
+            label.description,
+            Some("Something isn't working".to_string())
+        );
+        assert_eq!(label.color, "d73a4a");
+        assert_eq!(label.default, true);
     }
 
     #[test]
