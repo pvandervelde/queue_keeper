@@ -408,14 +408,44 @@ impl InstallationClient {
     ///
     /// See github-bot-sdk-specs/interfaces/issue-operations.md
     pub async fn list_labels(&self, owner: &str, repo: &str) -> Result<Vec<Label>, ApiError> {
-        unimplemented!("See github-bot-sdk-specs/interfaces/issue-operations.md")
+        let path = format!("/repos/{}/{}/labels", owner, repo);
+        let response = self.get(&path).await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            return Err(match status.as_u16() {
+                404 => ApiError::NotFound,
+                403 => ApiError::AuthorizationFailed,
+                401 => ApiError::AuthenticationFailed,
+                _ => {
+                    let message = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError { status: status.as_u16(), message }
+                }
+            });
+        }
+        response.json().await.map_err(|e| ApiError::from(e))
     }
 
     /// Get a specific label by name.
     ///
     /// See github-bot-sdk-specs/interfaces/issue-operations.md
     pub async fn get_label(&self, owner: &str, repo: &str, name: &str) -> Result<Label, ApiError> {
-        unimplemented!("See github-bot-sdk-specs/interfaces/issue-operations.md")
+        let path = format!("/repos/{}/{}/labels/{}", owner, repo, name);
+        let response = self.get(&path).await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            return Err(match status.as_u16() {
+                404 => ApiError::NotFound,
+                403 => ApiError::AuthorizationFailed,
+                401 => ApiError::AuthenticationFailed,
+                _ => {
+                    let message = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError { status: status.as_u16(), message }
+                }
+            });
+        }
+        response.json().await.map_err(|e| ApiError::from(e))
     }
 
     /// Create a new label.
@@ -427,7 +457,26 @@ impl InstallationClient {
         repo: &str,
         request: CreateLabelRequest,
     ) -> Result<Label, ApiError> {
-        unimplemented!("See github-bot-sdk-specs/interfaces/issue-operations.md")
+        let path = format!("/repos/{}/{}/labels", owner, repo);
+        let response = self.post(&path, &request).await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            return Err(match status.as_u16() {
+                422 => {
+                    let message = response.text().await.unwrap_or_else(|_| "Validation failed".to_string());
+                    ApiError::InvalidRequest { message }
+                }
+                404 => ApiError::NotFound,
+                403 => ApiError::AuthorizationFailed,
+                401 => ApiError::AuthenticationFailed,
+                _ => {
+                    let message = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError { status: status.as_u16(), message }
+                }
+            });
+        }
+        response.json().await.map_err(|e| ApiError::from(e))
     }
 
     /// Update an existing label.
@@ -440,14 +489,48 @@ impl InstallationClient {
         name: &str,
         request: UpdateLabelRequest,
     ) -> Result<Label, ApiError> {
-        unimplemented!("See github-bot-sdk-specs/interfaces/issue-operations.md")
+        let path = format!("/repos/{}/{}/labels/{}", owner, repo, name);
+        let response = self.patch(&path, &request).await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            return Err(match status.as_u16() {
+                422 => {
+                    let message = response.text().await.unwrap_or_else(|_| "Validation failed".to_string());
+                    ApiError::InvalidRequest { message }
+                }
+                404 => ApiError::NotFound,
+                403 => ApiError::AuthorizationFailed,
+                401 => ApiError::AuthenticationFailed,
+                _ => {
+                    let message = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError { status: status.as_u16(), message }
+                }
+            });
+        }
+        response.json().await.map_err(|e| ApiError::from(e))
     }
 
     /// Delete a label.
     ///
     /// See github-bot-sdk-specs/interfaces/issue-operations.md
     pub async fn delete_label(&self, owner: &str, repo: &str, name: &str) -> Result<(), ApiError> {
-        unimplemented!("See github-bot-sdk-specs/interfaces/issue-operations.md")
+        let path = format!("/repos/{}/{}/labels/{}", owner, repo, name);
+        let response = self.delete(&path).await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            return Err(match status.as_u16() {
+                404 => ApiError::NotFound,
+                403 => ApiError::AuthorizationFailed,
+                401 => ApiError::AuthenticationFailed,
+                _ => {
+                    let message = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError { status: status.as_u16(), message }
+                }
+            });
+        }
+        Ok(())
     }
 
     /// Add labels to an issue.
@@ -460,7 +543,26 @@ impl InstallationClient {
         issue_number: u64,
         labels: Vec<String>,
     ) -> Result<Vec<Label>, ApiError> {
-        unimplemented!("See github-bot-sdk-specs/interfaces/issue-operations.md")
+        let path = format!("/repos/{}/{}/issues/{}/labels", owner, repo, issue_number);
+        let response = self.post(&path, &labels).await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            return Err(match status.as_u16() {
+                422 => {
+                    let message = response.text().await.unwrap_or_else(|_| "Validation failed".to_string());
+                    ApiError::InvalidRequest { message }
+                }
+                404 => ApiError::NotFound,
+                403 => ApiError::AuthorizationFailed,
+                401 => ApiError::AuthenticationFailed,
+                _ => {
+                    let message = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError { status: status.as_u16(), message }
+                }
+            });
+        }
+        response.json().await.map_err(|e| ApiError::from(e))
     }
 
     /// Remove a label from an issue.
@@ -472,8 +574,23 @@ impl InstallationClient {
         repo: &str,
         issue_number: u64,
         name: &str,
-    ) -> Result<(), ApiError> {
-        unimplemented!("See github-bot-sdk-specs/interfaces/issue-operations.md")
+    ) -> Result<Vec<Label>, ApiError> {
+        let path = format!("/repos/{}/{}/issues/{}/labels/{}", owner, repo, issue_number, name);
+        let response = self.delete(&path).await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            return Err(match status.as_u16() {
+                404 => ApiError::NotFound,
+                403 => ApiError::AuthorizationFailed,
+                401 => ApiError::AuthenticationFailed,
+                _ => {
+                    let message = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError { status: status.as_u16(), message }
+                }
+            });
+        }
+        response.json().await.map_err(|e| ApiError::from(e))
     }
 
     // ========================================================================
