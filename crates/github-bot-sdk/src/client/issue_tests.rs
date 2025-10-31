@@ -149,9 +149,14 @@ mod construction {
         assert_eq!(request.color, "ff0000");
     }
 
+    /// Verify CreateCommentRequest construction.
     #[test]
     fn test_create_comment_request() {
-        todo!("Verify CreateCommentRequest creation")
+        let request = CreateCommentRequest {
+            body: "This is a comment".to_string(),
+        };
+
+        assert_eq!(request.body, "This is a comment");
     }
 }
 
@@ -1050,29 +1055,297 @@ mod label_operations {
 mod comment_operations {
     use super::*;
 
+    /// Verify list_issue_comments returns all comments on an issue.
+    ///
+    /// Tests GET /repos/{owner}/{repo}/issues/{number}/comments endpoint.
     #[tokio::test]
     async fn test_list_issue_comments() {
-        todo!("Mock: GET /repos/:owner/:repo/issues/:number/comments")
+        let mock_server = MockServer::start().await;
+        let test_token = "ghs_test_token";
+
+        let comments_json = serde_json::json!([
+            {
+                "id": 1,
+                "node_id": "MDEyOklzc3VlQ29tbWVudDE=",
+                "body": "Great idea!",
+                "user": {
+                    "login": "octocat",
+                    "id": 1,
+                    "node_id": "MDQ6VXNlcjE=",
+                    "type": "User"
+                },
+                "created_at": "2011-04-14T16:00:49Z",
+                "updated_at": "2011-04-14T16:00:49Z",
+                "html_url": "https://github.com/octocat/Hello-World/issues/1347#issuecomment-1"
+            },
+            {
+                "id": 2,
+                "node_id": "MDEyOklzc3VlQ29tbWVudDI=",
+                "body": "I agree!",
+                "user": {
+                    "login": "hubot",
+                    "id": 2,
+                    "node_id": "MDQ6VXNlcjI=",
+                    "type": "Bot"
+                },
+                "created_at": "2011-04-14T17:00:49Z",
+                "updated_at": "2011-04-14T17:00:49Z",
+                "html_url": "https://github.com/octocat/Hello-World/issues/1347#issuecomment-2"
+            }
+        ]);
+
+        Mock::given(method("GET"))
+            .and(path("/repos/octocat/Hello-World/issues/1347/comments"))
+            .and(header("Authorization", format!("Bearer {}", test_token)))
+            .respond_with(ResponseTemplate::new(200).set_body_json(comments_json))
+            .mount(&mock_server)
+            .await;
+
+        let auth = MockAuthProvider::new_with_token(test_token);
+        let github_client = GitHubClient::builder(auth)
+            .config(ClientConfig::default().with_github_api_url(mock_server.uri()))
+            .build()
+            .unwrap();
+
+        let client = github_client
+            .installation_by_id(InstallationId::new(12345))
+            .await
+            .unwrap();
+
+        let result = client
+            .list_issue_comments("octocat", "Hello-World", 1347)
+            .await;
+
+        assert!(result.is_ok());
+        let comments = result.unwrap();
+        assert_eq!(comments.len(), 2);
+        assert_eq!(comments[0].id, 1);
+        assert_eq!(comments[0].body, "Great idea!");
+        assert_eq!(comments[1].id, 2);
     }
 
+    /// Verify get_issue_comment returns a specific comment by ID.
+    ///
+    /// Tests GET /repos/{owner}/{repo}/issues/comments/{id} endpoint.
     #[tokio::test]
     async fn test_get_issue_comment() {
-        todo!("Mock: GET /repos/:owner/:repo/issues/comments/:id")
+        let mock_server = MockServer::start().await;
+        let test_token = "ghs_test_token";
+
+        let comment_json = serde_json::json!({
+            "id": 1,
+            "node_id": "MDEyOklzc3VlQ29tbWVudDE=",
+            "body": "Great idea!",
+            "user": {
+                "login": "octocat",
+                "id": 1,
+                "node_id": "MDQ6VXNlcjE=",
+                "type": "User"
+            },
+            "created_at": "2011-04-14T16:00:49Z",
+            "updated_at": "2011-04-14T16:00:49Z",
+            "html_url": "https://github.com/octocat/Hello-World/issues/1347#issuecomment-1"
+        });
+
+        Mock::given(method("GET"))
+            .and(path("/repos/octocat/Hello-World/issues/comments/1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(comment_json))
+            .mount(&mock_server)
+            .await;
+
+        let auth = MockAuthProvider::new_with_token(test_token);
+        let github_client = GitHubClient::builder(auth)
+            .config(ClientConfig::default().with_github_api_url(mock_server.uri()))
+            .build()
+            .unwrap();
+
+        let client = github_client
+            .installation_by_id(InstallationId::new(12345))
+            .await
+            .unwrap();
+
+        let result = client
+            .get_issue_comment("octocat", "Hello-World", 1)
+            .await;
+
+        assert!(result.is_ok());
+        let comment = result.unwrap();
+        assert_eq!(comment.id, 1);
+        assert_eq!(comment.body, "Great idea!");
     }
 
+    /// Verify get_issue_comment returns NotFound for non-existent comment.
+    #[tokio::test]
+    async fn test_get_issue_comment_not_found() {
+        let mock_server = MockServer::start().await;
+        let test_token = "ghs_test_token";
+
+        Mock::given(method("GET"))
+            .and(path("/repos/octocat/Hello-World/issues/comments/9999"))
+            .respond_with(
+                ResponseTemplate::new(404).set_body_json(serde_json::json!({
+                    "message": "Not Found"
+                })),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let auth = MockAuthProvider::new_with_token(test_token);
+        let github_client = GitHubClient::builder(auth)
+            .config(ClientConfig::default().with_github_api_url(mock_server.uri()))
+            .build()
+            .unwrap();
+
+        let client = github_client
+            .installation_by_id(InstallationId::new(12345))
+            .await
+            .unwrap();
+
+        let result = client
+            .get_issue_comment("octocat", "Hello-World", 9999)
+            .await;
+
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), ApiError::NotFound));
+    }
+
+    /// Verify create_issue_comment creates a new comment.
+    ///
+    /// Tests POST /repos/{owner}/{repo}/issues/{number}/comments endpoint.
     #[tokio::test]
     async fn test_create_issue_comment() {
-        todo!("Mock: POST /repos/:owner/:repo/issues/:number/comments")
+        let mock_server = MockServer::start().await;
+        let test_token = "ghs_test_token";
+
+        let created_comment_json = serde_json::json!({
+            "id": 3,
+            "node_id": "MDEyOklzc3VlQ29tbWVudDM=",
+            "body": "This is a new comment",
+            "user": {
+                "login": "octocat",
+                "id": 1,
+                "node_id": "MDQ6VXNlcjE=",
+                "type": "User"
+            },
+            "created_at": "2011-04-14T18:00:49Z",
+            "updated_at": "2011-04-14T18:00:49Z",
+            "html_url": "https://github.com/octocat/Hello-World/issues/1347#issuecomment-3"
+        });
+
+        Mock::given(method("POST"))
+            .and(path("/repos/octocat/Hello-World/issues/1347/comments"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(created_comment_json))
+            .mount(&mock_server)
+            .await;
+
+        let auth = MockAuthProvider::new_with_token(test_token);
+        let github_client = GitHubClient::builder(auth)
+            .config(ClientConfig::default().with_github_api_url(mock_server.uri()))
+            .build()
+            .unwrap();
+
+        let client = github_client
+            .installation_by_id(InstallationId::new(12345))
+            .await
+            .unwrap();
+
+        let request = CreateCommentRequest {
+            body: "This is a new comment".to_string(),
+        };
+
+        let result = client
+            .create_issue_comment("octocat", "Hello-World", 1347, request)
+            .await;
+
+        assert!(result.is_ok());
+        let comment = result.unwrap();
+        assert_eq!(comment.id, 3);
+        assert_eq!(comment.body, "This is a new comment");
     }
 
+    /// Verify update_issue_comment modifies an existing comment.
+    ///
+    /// Tests PATCH /repos/{owner}/{repo}/issues/comments/{id} endpoint.
     #[tokio::test]
     async fn test_update_issue_comment() {
-        todo!("Mock: PATCH /repos/:owner/:repo/issues/comments/:id")
+        let mock_server = MockServer::start().await;
+        let test_token = "ghs_test_token";
+
+        let updated_comment_json = serde_json::json!({
+            "id": 1,
+            "node_id": "MDEyOklzc3VlQ29tbWVudDE=",
+            "body": "Updated comment text",
+            "user": {
+                "login": "octocat",
+                "id": 1,
+                "node_id": "MDQ6VXNlcjE=",
+                "type": "User"
+            },
+            "created_at": "2011-04-14T16:00:49Z",
+            "updated_at": "2011-04-14T19:00:49Z",
+            "html_url": "https://github.com/octocat/Hello-World/issues/1347#issuecomment-1"
+        });
+
+        Mock::given(method("PATCH"))
+            .and(path("/repos/octocat/Hello-World/issues/comments/1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(updated_comment_json))
+            .mount(&mock_server)
+            .await;
+
+        let auth = MockAuthProvider::new_with_token(test_token);
+        let github_client = GitHubClient::builder(auth)
+            .config(ClientConfig::default().with_github_api_url(mock_server.uri()))
+            .build()
+            .unwrap();
+
+        let client = github_client
+            .installation_by_id(InstallationId::new(12345))
+            .await
+            .unwrap();
+
+        let request = UpdateCommentRequest {
+            body: "Updated comment text".to_string(),
+        };
+
+        let result = client
+            .update_issue_comment("octocat", "Hello-World", 1, request)
+            .await;
+
+        assert!(result.is_ok());
+        let comment = result.unwrap();
+        assert_eq!(comment.body, "Updated comment text");
     }
 
+    /// Verify delete_issue_comment removes a comment.
+    ///
+    /// Tests DELETE /repos/{owner}/{repo}/issues/comments/{id} endpoint.
     #[tokio::test]
     async fn test_delete_issue_comment() {
-        todo!("Mock: DELETE /repos/:owner/:repo/issues/comments/:id")
+        let mock_server = MockServer::start().await;
+        let test_token = "ghs_test_token";
+
+        Mock::given(method("DELETE"))
+            .and(path("/repos/octocat/Hello-World/issues/comments/1"))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&mock_server)
+            .await;
+
+        let auth = MockAuthProvider::new_with_token(test_token);
+        let github_client = GitHubClient::builder(auth)
+            .config(ClientConfig::default().with_github_api_url(mock_server.uri()))
+            .build()
+            .unwrap();
+
+        let client = github_client
+            .installation_by_id(InstallationId::new(12345))
+            .await
+            .unwrap();
+
+        let result = client
+            .delete_issue_comment("octocat", "Hello-World", 1)
+            .await;
+
+        assert!(result.is_ok());
     }
 }
 
@@ -1191,9 +1464,34 @@ mod serialization {
         assert_eq!(label.default, true);
     }
 
+    /// Verify Comment can be deserialized from GitHub API response.
     #[test]
     fn test_comment_deserialize() {
-        todo!("Verify Comment can be deserialized from GitHub API response")
+        let json = r#"{
+            "id": 1,
+            "node_id": "MDEyOklzc3VlQ29tbWVudDE=",
+            "body": "Great idea!",
+            "user": {
+                "login": "octocat",
+                "id": 1,
+                "node_id": "MDQ6VXNlcjE=",
+                "type": "User"
+            },
+            "created_at": "2011-04-14T16:00:49Z",
+            "updated_at": "2011-04-14T16:00:49Z",
+            "html_url": "https://github.com/octocat/Hello-World/issues/1347#issuecomment-1"
+        }"#;
+
+        let comment: Comment = serde_json::from_str(json).unwrap();
+
+        assert_eq!(comment.id, 1);
+        assert_eq!(comment.node_id, "MDEyOklzc3VlQ29tbWVudDE=");
+        assert_eq!(comment.body, "Great idea!");
+        assert_eq!(comment.user.login, "octocat");
+        assert_eq!(
+            comment.html_url,
+            "https://github.com/octocat/Hello-World/issues/1347#issuecomment-1"
+        );
     }
 
     /// Verify Milestone can be deserialized from GitHub API response.
