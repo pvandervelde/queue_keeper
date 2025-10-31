@@ -606,7 +606,22 @@ impl InstallationClient {
         repo: &str,
         issue_number: u64,
     ) -> Result<Vec<Comment>, ApiError> {
-        unimplemented!("See github-bot-sdk-specs/interfaces/issue-operations.md")
+        let path = format!("/repos/{}/{}/issues/{}/comments", owner, repo, issue_number);
+        let response = self.get(&path).await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            return Err(match status.as_u16() {
+                404 => ApiError::NotFound,
+                403 => ApiError::AuthorizationFailed,
+                401 => ApiError::AuthenticationFailed,
+                _ => {
+                    let message = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError { status: status.as_u16(), message }
+                }
+            });
+        }
+        response.json().await.map_err(|e| ApiError::from(e))
     }
 
     /// Get a specific comment by ID.
@@ -618,7 +633,22 @@ impl InstallationClient {
         repo: &str,
         comment_id: u64,
     ) -> Result<Comment, ApiError> {
-        unimplemented!("See github-bot-sdk-specs/interfaces/issue-operations.md")
+        let path = format!("/repos/{}/{}/issues/comments/{}", owner, repo, comment_id);
+        let response = self.get(&path).await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            return Err(match status.as_u16() {
+                404 => ApiError::NotFound,
+                403 => ApiError::AuthorizationFailed,
+                401 => ApiError::AuthenticationFailed,
+                _ => {
+                    let message = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError { status: status.as_u16(), message }
+                }
+            });
+        }
+        response.json().await.map_err(|e| ApiError::from(e))
     }
 
     /// Create a comment on an issue.
@@ -631,7 +661,26 @@ impl InstallationClient {
         issue_number: u64,
         request: CreateCommentRequest,
     ) -> Result<Comment, ApiError> {
-        unimplemented!("See github-bot-sdk-specs/interfaces/issue-operations.md")
+        let path = format!("/repos/{}/{}/issues/{}/comments", owner, repo, issue_number);
+        let response = self.post(&path, &request).await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            return Err(match status.as_u16() {
+                422 => {
+                    let message = response.text().await.unwrap_or_else(|_| "Validation failed".to_string());
+                    ApiError::InvalidRequest { message }
+                }
+                404 => ApiError::NotFound,
+                403 => ApiError::AuthorizationFailed,
+                401 => ApiError::AuthenticationFailed,
+                _ => {
+                    let message = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError { status: status.as_u16(), message }
+                }
+            });
+        }
+        response.json().await.map_err(|e| ApiError::from(e))
     }
 
     /// Update an existing comment.
@@ -644,7 +693,26 @@ impl InstallationClient {
         comment_id: u64,
         request: UpdateCommentRequest,
     ) -> Result<Comment, ApiError> {
-        unimplemented!("See github-bot-sdk-specs/interfaces/issue-operations.md")
+        let path = format!("/repos/{}/{}/issues/comments/{}", owner, repo, comment_id);
+        let response = self.patch(&path, &request).await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            return Err(match status.as_u16() {
+                422 => {
+                    let message = response.text().await.unwrap_or_else(|_| "Validation failed".to_string());
+                    ApiError::InvalidRequest { message }
+                }
+                404 => ApiError::NotFound,
+                403 => ApiError::AuthorizationFailed,
+                401 => ApiError::AuthenticationFailed,
+                _ => {
+                    let message = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError { status: status.as_u16(), message }
+                }
+            });
+        }
+        response.json().await.map_err(|e| ApiError::from(e))
     }
 
     /// Delete a comment.
@@ -656,7 +724,22 @@ impl InstallationClient {
         repo: &str,
         comment_id: u64,
     ) -> Result<(), ApiError> {
-        unimplemented!("See github-bot-sdk-specs/interfaces/issue-operations.md")
+        let path = format!("/repos/{}/{}/issues/comments/{}", owner, repo, comment_id);
+        let response = self.delete(&path).await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            return Err(match status.as_u16() {
+                404 => ApiError::NotFound,
+                403 => ApiError::AuthorizationFailed,
+                401 => ApiError::AuthenticationFailed,
+                _ => {
+                    let message = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError { status: status.as_u16(), message }
+                }
+            });
+        }
+        Ok(())
     }
 }
 
