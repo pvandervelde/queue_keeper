@@ -142,10 +142,7 @@ mod construction {
         };
 
         assert_eq!(request.name, "priority-high");
-        assert_eq!(
-            request.description,
-            Some("High priority issue".to_string())
-        );
+        assert_eq!(request.description, Some("High priority issue".to_string()));
         assert_eq!(request.color, "ff0000");
     }
 
@@ -320,11 +317,9 @@ mod issue_operations {
 
         Mock::given(method("GET"))
             .and(path("/repos/octocat/Hello-World/issues/9999"))
-            .respond_with(
-                ResponseTemplate::new(404).set_body_json(serde_json::json!({
-                    "message": "Not Found"
-                })),
-            )
+            .respond_with(ResponseTemplate::new(404).set_body_json(serde_json::json!({
+                "message": "Not Found"
+            })))
             .mount(&mock_server)
             .await;
 
@@ -401,9 +396,7 @@ mod issue_operations {
             labels: None,
         };
 
-        let result = client
-            .create_issue("octocat", "Hello-World", request)
-            .await;
+        let result = client.create_issue("octocat", "Hello-World", request).await;
 
         assert!(result.is_ok());
         let issue = result.unwrap();
@@ -477,9 +470,7 @@ mod issue_operations {
             labels: Some(vec!["bug".to_string()]),
         };
 
-        let result = client
-            .create_issue("octocat", "Hello-World", request)
-            .await;
+        let result = client.create_issue("octocat", "Hello-World", request).await;
 
         assert!(result.is_ok());
         let issue = result.unwrap();
@@ -789,11 +780,9 @@ mod label_operations {
 
         Mock::given(method("GET"))
             .and(path("/repos/octocat/Hello-World/labels/nonexistent"))
-            .respond_with(
-                ResponseTemplate::new(404).set_body_json(serde_json::json!({
-                    "message": "Not Found"
-                })),
-            )
+            .respond_with(ResponseTemplate::new(404).set_body_json(serde_json::json!({
+                "message": "Not Found"
+            })))
             .mount(&mock_server)
             .await;
 
@@ -856,9 +845,7 @@ mod label_operations {
             color: "ff0000".to_string(),
         };
 
-        let result = client
-            .create_label("octocat", "Hello-World", request)
-            .await;
+        let result = client.create_label("octocat", "Hello-World", request).await;
 
         assert!(result.is_ok());
         let label = result.unwrap();
@@ -1025,7 +1012,9 @@ mod label_operations {
         ]);
 
         Mock::given(method("DELETE"))
-            .and(path("/repos/octocat/Hello-World/issues/1347/labels/high-priority"))
+            .and(path(
+                "/repos/octocat/Hello-World/issues/1347/labels/high-priority",
+            ))
             .respond_with(ResponseTemplate::new(200).set_body_json(remaining_labels_json))
             .mount(&mock_server)
             .await;
@@ -1164,9 +1153,7 @@ mod comment_operations {
             .await
             .unwrap();
 
-        let result = client
-            .get_issue_comment("octocat", "Hello-World", 1)
-            .await;
+        let result = client.get_issue_comment("octocat", "Hello-World", 1).await;
 
         assert!(result.is_ok());
         let comment = result.unwrap();
@@ -1182,11 +1169,9 @@ mod comment_operations {
 
         Mock::given(method("GET"))
             .and(path("/repos/octocat/Hello-World/issues/comments/9999"))
-            .respond_with(
-                ResponseTemplate::new(404).set_body_json(serde_json::json!({
-                    "message": "Not Found"
-                })),
-            )
+            .respond_with(ResponseTemplate::new(404).set_body_json(serde_json::json!({
+                "message": "Not Found"
+            })))
             .mount(&mock_server)
             .await;
 
@@ -1396,7 +1381,10 @@ mod serialization {
         assert_eq!(issue.node_id, "MDU6SXNzdWUx");
         assert_eq!(issue.number, 1347);
         assert_eq!(issue.title, "Found a bug");
-        assert_eq!(issue.body, Some("I'm having a problem with this.".to_string()));
+        assert_eq!(
+            issue.body,
+            Some("I'm having a problem with this.".to_string())
+        );
         assert_eq!(issue.state, "open");
         assert_eq!(issue.user.login, "octocat");
         assert_eq!(issue.labels.len(), 1);

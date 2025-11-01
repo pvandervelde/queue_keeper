@@ -293,8 +293,14 @@ impl InstallationClient {
                 403 => ApiError::AuthorizationFailed,
                 401 => ApiError::AuthenticationFailed,
                 _ => {
-                    let message = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-                    ApiError::HttpError { status: status.as_u16(), message }
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError {
+                        status: status.as_u16(),
+                        message,
+                    }
                 }
             });
         }
@@ -318,8 +324,14 @@ impl InstallationClient {
                 403 => ApiError::AuthorizationFailed,
                 401 => ApiError::AuthenticationFailed,
                 _ => {
-                    let message = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-                    ApiError::HttpError { status: status.as_u16(), message }
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError {
+                        status: status.as_u16(),
+                        message,
+                    }
                 }
             });
         }
@@ -340,15 +352,24 @@ impl InstallationClient {
         if !status.is_success() {
             return Err(match status.as_u16() {
                 422 => {
-                    let message = response.text().await.unwrap_or_else(|_| "Validation failed".to_string());
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Validation failed".to_string());
                     ApiError::InvalidRequest { message }
                 }
                 404 => ApiError::NotFound,
                 403 => ApiError::AuthorizationFailed,
                 401 => ApiError::AuthenticationFailed,
                 _ => {
-                    let message = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-                    ApiError::HttpError { status: status.as_u16(), message }
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError {
+                        status: status.as_u16(),
+                        message,
+                    }
                 }
             });
         }
@@ -370,15 +391,24 @@ impl InstallationClient {
         if !status.is_success() {
             return Err(match status.as_u16() {
                 422 => {
-                    let message = response.text().await.unwrap_or_else(|_| "Validation failed".to_string());
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Validation failed".to_string());
                     ApiError::InvalidRequest { message }
                 }
                 404 => ApiError::NotFound,
                 403 => ApiError::AuthorizationFailed,
                 401 => ApiError::AuthenticationFailed,
                 _ => {
-                    let message = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-                    ApiError::HttpError { status: status.as_u16(), message }
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError {
+                        status: status.as_u16(),
+                        message,
+                    }
                 }
             });
         }
@@ -418,8 +448,14 @@ impl InstallationClient {
                 403 => ApiError::AuthorizationFailed,
                 401 => ApiError::AuthenticationFailed,
                 _ => {
-                    let message = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-                    ApiError::HttpError { status: status.as_u16(), message }
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError {
+                        status: status.as_u16(),
+                        message,
+                    }
                 }
             });
         }
@@ -440,8 +476,14 @@ impl InstallationClient {
                 403 => ApiError::AuthorizationFailed,
                 401 => ApiError::AuthenticationFailed,
                 _ => {
-                    let message = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-                    ApiError::HttpError { status: status.as_u16(), message }
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError {
+                        status: status.as_u16(),
+                        message,
+                    }
                 }
             });
         }
@@ -464,15 +506,24 @@ impl InstallationClient {
         if !status.is_success() {
             return Err(match status.as_u16() {
                 422 => {
-                    let message = response.text().await.unwrap_or_else(|_| "Validation failed".to_string());
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Validation failed".to_string());
                     ApiError::InvalidRequest { message }
                 }
                 404 => ApiError::NotFound,
                 403 => ApiError::AuthorizationFailed,
                 401 => ApiError::AuthenticationFailed,
                 _ => {
-                    let message = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-                    ApiError::HttpError { status: status.as_u16(), message }
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError {
+                        status: status.as_u16(),
+                        message,
+                    }
                 }
             });
         }
@@ -496,15 +547,24 @@ impl InstallationClient {
         if !status.is_success() {
             return Err(match status.as_u16() {
                 422 => {
-                    let message = response.text().await.unwrap_or_else(|_| "Validation failed".to_string());
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Validation failed".to_string());
                     ApiError::InvalidRequest { message }
                 }
                 404 => ApiError::NotFound,
                 403 => ApiError::AuthorizationFailed,
                 401 => ApiError::AuthenticationFailed,
                 _ => {
-                    let message = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-                    ApiError::HttpError { status: status.as_u16(), message }
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError {
+                        status: status.as_u16(),
+                        message,
+                    }
                 }
             });
         }
@@ -525,8 +585,14 @@ impl InstallationClient {
                 403 => ApiError::AuthorizationFailed,
                 401 => ApiError::AuthenticationFailed,
                 _ => {
-                    let message = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-                    ApiError::HttpError { status: status.as_u16(), message }
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError {
+                        status: status.as_u16(),
+                        message,
+                    }
                 }
             });
         }
@@ -550,15 +616,24 @@ impl InstallationClient {
         if !status.is_success() {
             return Err(match status.as_u16() {
                 422 => {
-                    let message = response.text().await.unwrap_or_else(|_| "Validation failed".to_string());
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Validation failed".to_string());
                     ApiError::InvalidRequest { message }
                 }
                 404 => ApiError::NotFound,
                 403 => ApiError::AuthorizationFailed,
                 401 => ApiError::AuthenticationFailed,
                 _ => {
-                    let message = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-                    ApiError::HttpError { status: status.as_u16(), message }
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError {
+                        status: status.as_u16(),
+                        message,
+                    }
                 }
             });
         }
@@ -575,7 +650,10 @@ impl InstallationClient {
         issue_number: u64,
         name: &str,
     ) -> Result<Vec<Label>, ApiError> {
-        let path = format!("/repos/{}/{}/issues/{}/labels/{}", owner, repo, issue_number, name);
+        let path = format!(
+            "/repos/{}/{}/issues/{}/labels/{}",
+            owner, repo, issue_number, name
+        );
         let response = self.delete(&path).await?;
 
         let status = response.status();
@@ -585,8 +663,14 @@ impl InstallationClient {
                 403 => ApiError::AuthorizationFailed,
                 401 => ApiError::AuthenticationFailed,
                 _ => {
-                    let message = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-                    ApiError::HttpError { status: status.as_u16(), message }
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError {
+                        status: status.as_u16(),
+                        message,
+                    }
                 }
             });
         }
@@ -616,8 +700,14 @@ impl InstallationClient {
                 403 => ApiError::AuthorizationFailed,
                 401 => ApiError::AuthenticationFailed,
                 _ => {
-                    let message = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-                    ApiError::HttpError { status: status.as_u16(), message }
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError {
+                        status: status.as_u16(),
+                        message,
+                    }
                 }
             });
         }
@@ -643,8 +733,14 @@ impl InstallationClient {
                 403 => ApiError::AuthorizationFailed,
                 401 => ApiError::AuthenticationFailed,
                 _ => {
-                    let message = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-                    ApiError::HttpError { status: status.as_u16(), message }
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError {
+                        status: status.as_u16(),
+                        message,
+                    }
                 }
             });
         }
@@ -668,15 +764,24 @@ impl InstallationClient {
         if !status.is_success() {
             return Err(match status.as_u16() {
                 422 => {
-                    let message = response.text().await.unwrap_or_else(|_| "Validation failed".to_string());
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Validation failed".to_string());
                     ApiError::InvalidRequest { message }
                 }
                 404 => ApiError::NotFound,
                 403 => ApiError::AuthorizationFailed,
                 401 => ApiError::AuthenticationFailed,
                 _ => {
-                    let message = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-                    ApiError::HttpError { status: status.as_u16(), message }
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError {
+                        status: status.as_u16(),
+                        message,
+                    }
                 }
             });
         }
@@ -700,15 +805,24 @@ impl InstallationClient {
         if !status.is_success() {
             return Err(match status.as_u16() {
                 422 => {
-                    let message = response.text().await.unwrap_or_else(|_| "Validation failed".to_string());
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Validation failed".to_string());
                     ApiError::InvalidRequest { message }
                 }
                 404 => ApiError::NotFound,
                 403 => ApiError::AuthorizationFailed,
                 401 => ApiError::AuthenticationFailed,
                 _ => {
-                    let message = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-                    ApiError::HttpError { status: status.as_u16(), message }
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError {
+                        status: status.as_u16(),
+                        message,
+                    }
                 }
             });
         }
@@ -734,8 +848,14 @@ impl InstallationClient {
                 403 => ApiError::AuthorizationFailed,
                 401 => ApiError::AuthenticationFailed,
                 _ => {
-                    let message = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-                    ApiError::HttpError { status: status.as_u16(), message }
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError {
+                        status: status.as_u16(),
+                        message,
+                    }
                 }
             });
         }

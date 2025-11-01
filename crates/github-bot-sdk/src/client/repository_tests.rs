@@ -155,12 +155,10 @@ mod repository_operations_tests {
 
         Mock::given(method("GET"))
             .and(path("/repos/octocat/NonExistent"))
-            .respond_with(
-                ResponseTemplate::new(404).set_body_json(serde_json::json!({
-                    "message": "Not Found",
-                    "documentation_url": "https://docs.github.com/rest/repos/repos#get-a-repository"
-                })),
-            )
+            .respond_with(ResponseTemplate::new(404).set_body_json(serde_json::json!({
+                "message": "Not Found",
+                "documentation_url": "https://docs.github.com/rest/repos/repos#get-a-repository"
+            })))
             .mount(&mock_server)
             .await;
 
@@ -194,12 +192,10 @@ mod repository_operations_tests {
 
         Mock::given(method("GET"))
             .and(path("/repos/private-org/secret-repo"))
-            .respond_with(
-                ResponseTemplate::new(403).set_body_json(serde_json::json!({
-                    "message": "Resource not accessible by integration",
-                    "documentation_url": "https://docs.github.com/rest/repos/repos#get-a-repository"
-                })),
-            )
+            .respond_with(ResponseTemplate::new(403).set_body_json(serde_json::json!({
+                "message": "Resource not accessible by integration",
+                "documentation_url": "https://docs.github.com/rest/repos/repos#get-a-repository"
+            })))
             .mount(&mock_server)
             .await;
 
@@ -215,9 +211,7 @@ mod repository_operations_tests {
             .await
             .unwrap();
 
-        let result = client
-            .get_repository("private-org", "secret-repo")
-            .await;
+        let result = client.get_repository("private-org", "secret-repo").await;
 
         assert!(result.is_err());
         let err = result.unwrap_err();
@@ -345,11 +339,9 @@ mod branch_operations_tests {
 
         Mock::given(method("GET"))
             .and(path("/repos/octocat/Hello-World/branches/nonexistent"))
-            .respond_with(
-                ResponseTemplate::new(404).set_body_json(serde_json::json!({
-                    "message": "Branch not found"
-                })),
-            )
+            .respond_with(ResponseTemplate::new(404).set_body_json(serde_json::json!({
+                "message": "Branch not found"
+            })))
             .mount(&mock_server)
             .await;
 
@@ -398,9 +390,7 @@ mod git_ref_operations_tests {
         });
 
         Mock::given(method("GET"))
-            .and(path(
-                "/repos/octocat/Hello-World/git/refs/heads/feature-a",
-            ))
+            .and(path("/repos/octocat/Hello-World/git/refs/heads/feature-a"))
             .and(header("Authorization", format!("Bearer {}", test_token)))
             .respond_with(ResponseTemplate::new(200).set_body_json(ref_json))
             .mount(&mock_server)
@@ -493,11 +483,9 @@ mod git_ref_operations_tests {
 
         Mock::given(method("POST"))
             .and(path("/repos/octocat/Hello-World/git/refs"))
-            .respond_with(
-                ResponseTemplate::new(422).set_body_json(serde_json::json!({
-                    "message": "Reference already exists"
-                })),
-            )
+            .respond_with(ResponseTemplate::new(422).set_body_json(serde_json::json!({
+                "message": "Reference already exists"
+            })))
             .mount(&mock_server)
             .await;
 
@@ -547,9 +535,7 @@ mod git_ref_operations_tests {
         });
 
         Mock::given(method("PATCH"))
-            .and(path(
-                "/repos/octocat/Hello-World/git/refs/heads/feature-a",
-            ))
+            .and(path("/repos/octocat/Hello-World/git/refs/heads/feature-a"))
             .and(header("Authorization", format!("Bearer {}", test_token)))
             .respond_with(ResponseTemplate::new(200).set_body_json(updated_ref_json))
             .mount(&mock_server)
@@ -605,9 +591,7 @@ mod git_ref_operations_tests {
         });
 
         Mock::given(method("PATCH"))
-            .and(path(
-                "/repos/octocat/Hello-World/git/refs/heads/feature-a",
-            ))
+            .and(path("/repos/octocat/Hello-World/git/refs/heads/feature-a"))
             .respond_with(ResponseTemplate::new(200).set_body_json(updated_ref_json))
             .mount(&mock_server)
             .await;
@@ -651,9 +635,7 @@ mod git_ref_operations_tests {
         let test_token = "ghs_test_token";
 
         Mock::given(method("DELETE"))
-            .and(path(
-                "/repos/octocat/Hello-World/git/refs/heads/feature-a",
-            ))
+            .and(path("/repos/octocat/Hello-World/git/refs/heads/feature-a"))
             .and(header("Authorization", format!("Bearer {}", test_token)))
             .respond_with(ResponseTemplate::new(204))
             .mount(&mock_server)
@@ -690,11 +672,9 @@ mod git_ref_operations_tests {
             .and(path(
                 "/repos/octocat/Hello-World/git/refs/heads/nonexistent",
             ))
-            .respond_with(
-                ResponseTemplate::new(404).set_body_json(serde_json::json!({
-                    "message": "Not Found"
-                })),
-            )
+            .respond_with(ResponseTemplate::new(404).set_body_json(serde_json::json!({
+                "message": "Not Found"
+            })))
             .mount(&mock_server)
             .await;
 
@@ -956,10 +936,7 @@ mod type_serialization_tests {
         let tag: Tag = serde_json::from_str(json).unwrap();
 
         assert_eq!(tag.name, "v1.0.0");
-        assert_eq!(
-            tag.commit.sha,
-            "c5b97d5ae6c19d5c5df71a34c7fbeeda2479ccbc"
-        );
+        assert_eq!(tag.commit.sha, "c5b97d5ae6c19d5c5df71a34c7fbeeda2479ccbc");
         assert!(tag.zipball_url.contains("zipball/v1.0.0"));
         assert!(tag.tarball_url.contains("tarball/v1.0.0"));
     }
