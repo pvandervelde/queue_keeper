@@ -274,19 +274,60 @@ impl InstallationClient {
     // ========================================================================
 
     /// List issues in a repository.
+    ///
+    /// Returns a paginated response with issues and pagination metadata.
+    /// Use the pagination information to fetch subsequent pages if needed.
+    ///
+    /// # Arguments
+    ///
+    /// * `owner` - Repository owner
+    /// * `repo` - Repository name
+    /// * `state` - Filter by state (`"open"`, `"closed"`, or `"all"`)
+    /// * `page` - Page number (1-indexed, omit for first page)
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use github_bot_sdk::client::InstallationClient;
+    /// # async fn example(client: &InstallationClient) -> Result<(), Box<dyn std::error::Error>> {
+    /// // Get first page
+    /// let response = client.list_issues("owner", "repo", None, None).await?;
+    /// println!("Got {} issues", response.items.len());
+    ///
+    /// // Check if more pages exist
+    /// if response.has_next() {
+    ///     if let Some(next_page) = response.next_page_number() {
+    ///         let next_response = client.list_issues("owner", "repo", None, Some(next_page)).await?;
+    ///         println!("Got {} more issues", next_response.items.len());
+    ///     }
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn list_issues(
         &self,
         owner: &str,
         repo: &str,
         state: Option<&str>,
-    ) -> Result<Vec<Issue>, ApiError> {
+        page: Option<u32>,
+    ) -> Result<crate::client::PagedResponse<Issue>, ApiError> {
         let mut path = format!("/repos/{}/{}/issues", owner, repo);
+        let mut query_params = Vec::new();
+        
         if let Some(state_value) = state {
-            path = format!("{}?state={}", path, state_value);
+            query_params.push(format!("state={}", state_value));
+        }
+        if let Some(page_num) = page {
+            query_params.push(format!("page={}", page_num));
+        }
+        
+        if !query_params.is_empty() {
+            path = format!("{}?{}", path, query_params.join("&"));
         }
 
         let response = self.get(&path).await?;
         let status = response.status();
+        
         if !status.is_success() {
             return Err(match status.as_u16() {
                 404 => ApiError::NotFound,
@@ -304,7 +345,23 @@ impl InstallationClient {
                 }
             });
         }
-        response.json().await.map_err(|e| ApiError::from(e))
+        
+        // Parse Link header for pagination
+        let pagination = response
+            .headers()
+            .get("Link")
+            .and_then(|h| h.to_str().ok())
+            .map(|h| crate::client::parse_link_header(Some(h)))
+            .unwrap_or_default();
+        
+        // Parse response body
+        let items: Vec<Issue> = response.json().await.map_err(|e| ApiError::from(e))?;
+        
+        Ok(crate::client::PagedResponse {
+            items,
+            total_count: None, // GitHub doesn't provide total count in list responses
+            pagination,
+        })
     }
 
     /// Get a specific issue by number.

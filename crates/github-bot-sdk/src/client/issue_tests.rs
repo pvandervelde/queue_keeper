@@ -211,13 +211,15 @@ mod issue_operations {
             .await
             .unwrap();
 
-        let result = client.list_issues("octocat", "Hello-World", None).await;
+        let result = client
+            .list_issues("octocat", "Hello-World", None, None)
+            .await;
 
         assert!(result.is_ok());
-        let issues = result.unwrap();
-        assert_eq!(issues.len(), 1);
-        assert_eq!(issues[0].number, 1347);
-        assert_eq!(issues[0].title, "Found a bug");
+        let response = result.unwrap();
+        assert_eq!(response.items.len(), 1);
+        assert_eq!(response.items[0].number, 1347);
+        assert_eq!(response.items[0].title, "Found a bug");
     }
 
     /// Verify list_issues can filter by state parameter.
@@ -247,7 +249,7 @@ mod issue_operations {
             .unwrap();
 
         let result = client
-            .list_issues("octocat", "Hello-World", Some("open"))
+            .list_issues("octocat", "Hello-World", Some("open"), None)
             .await;
 
         assert!(result.is_ok());
