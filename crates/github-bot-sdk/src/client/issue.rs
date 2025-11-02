@@ -313,21 +313,21 @@ impl InstallationClient {
     ) -> Result<crate::client::PagedResponse<Issue>, ApiError> {
         let mut path = format!("/repos/{}/{}/issues", owner, repo);
         let mut query_params = Vec::new();
-        
+
         if let Some(state_value) = state {
             query_params.push(format!("state={}", state_value));
         }
         if let Some(page_num) = page {
             query_params.push(format!("page={}", page_num));
         }
-        
+
         if !query_params.is_empty() {
             path = format!("{}?{}", path, query_params.join("&"));
         }
 
         let response = self.get(&path).await?;
         let status = response.status();
-        
+
         if !status.is_success() {
             return Err(match status.as_u16() {
                 404 => ApiError::NotFound,
@@ -345,7 +345,7 @@ impl InstallationClient {
                 }
             });
         }
-        
+
         // Parse Link header for pagination
         let pagination = response
             .headers()
@@ -353,10 +353,10 @@ impl InstallationClient {
             .and_then(|h| h.to_str().ok())
             .map(|h| crate::client::parse_link_header(Some(h)))
             .unwrap_or_default();
-        
+
         // Parse response body
         let items: Vec<Issue> = response.json().await.map_err(|e| ApiError::from(e))?;
-        
+
         Ok(crate::client::PagedResponse {
             items,
             total_count: None, // GitHub doesn't provide total count in list responses
