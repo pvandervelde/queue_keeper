@@ -22,3 +22,6 @@ target
 
 # ignore the .llm folder
 .llm/
+
+# ignore the .claude folder
+.claude/
