@@ -318,3 +318,82 @@ mod extract_page_number {
         assert_eq!(page, Some(0));
     }
 }
+
+mod paged_response_helpers {
+    use super::*;
+
+    #[test]
+    fn test_has_next_page() {
+        let mut pagination = Pagination::default();
+        pagination.next = Some("https://api.github.com/repos/o/r/issues?page=2".to_string());
+
+        let response = PagedResponse {
+            items: vec![1, 2, 3],
+            total_count: None,
+            pagination,
+        };
+
+        assert!(response.has_next());
+    }
+
+    #[test]
+    fn test_has_next_page_false() {
+        let response = PagedResponse {
+            items: vec![1, 2, 3],
+            total_count: None,
+            pagination: Pagination::default(),
+        };
+
+        assert!(!response.has_next());
+    }
+
+    #[test]
+    fn test_next_page_number() {
+        let mut pagination = Pagination::default();
+        pagination.next = Some("https://api.github.com/repos/o/r/issues?page=3".to_string());
+
+        let response = PagedResponse {
+            items: vec![1, 2, 3],
+            total_count: None,
+            pagination,
+        };
+
+        assert_eq!(response.next_page_number(), Some(3));
+    }
+
+    #[test]
+    fn test_next_page_number_none() {
+        let response = PagedResponse {
+            items: vec![1, 2, 3],
+            total_count: None,
+            pagination: Pagination::default(),
+        };
+
+        assert_eq!(response.next_page_number(), None);
+    }
+
+    #[test]
+    fn test_is_last_page() {
+        let response = PagedResponse {
+            items: vec![1, 2, 3],
+            total_count: None,
+            pagination: Pagination::default(),
+        };
+
+        assert!(response.is_last_page());
+    }
+
+    #[test]
+    fn test_is_last_page_false() {
+        let mut pagination = Pagination::default();
+        pagination.next = Some("https://api.github.com/repos/o/r/issues?page=2".to_string());
+
+        let response = PagedResponse {
+            items: vec![1, 2, 3],
+            total_count: None,
+            pagination,
+        };
+
+        assert!(!response.is_last_page());
+    }
+}

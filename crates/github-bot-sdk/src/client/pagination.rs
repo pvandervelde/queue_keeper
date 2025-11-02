@@ -78,6 +78,49 @@ impl Default for Pagination {
     }
 }
 
+impl<T> PagedResponse<T> {
+    /// Check if there are more pages available.
+    ///
+    /// Returns true if a next page URL exists in the pagination metadata.
+    pub fn has_next(&self) -> bool {
+        self.pagination.has_next()
+    }
+
+    /// Get the next page number from the pagination URL.
+    ///
+    /// Extracts the page number from the next page URL if available.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use github_bot_sdk::client::{PagedResponse, Pagination};
+    ///
+    /// let mut pagination = Pagination::default();
+    /// pagination.next = Some("https://api.github.com/repos/o/r/issues?page=3".to_string());
+    ///
+    /// let response = PagedResponse {
+    ///     items: vec![1, 2, 3],
+    ///     total_count: None,
+    ///     pagination,
+    /// };
+    ///
+    /// assert_eq!(response.next_page_number(), Some(3));
+    /// ```
+    pub fn next_page_number(&self) -> Option<u32> {
+        self.pagination
+            .next
+            .as_ref()
+            .and_then(|url| extract_page_number(url))
+    }
+
+    /// Check if this is the last page.
+    ///
+    /// Returns true if there is no next page available.
+    pub fn is_last_page(&self) -> bool {
+        !self.has_next()
+    }
+}
+
 /// Parse pagination metadata from Link header.
 ///
 /// GitHub returns Link headers like:
