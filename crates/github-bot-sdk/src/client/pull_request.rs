@@ -311,7 +311,31 @@ impl InstallationClient {
         repo: &str,
         state: Option<&str>,
     ) -> Result<Vec<PullRequest>, ApiError> {
-        unimplemented!("See github-bot-sdk-specs/interfaces/pull-request-operations.md")
+        let mut path = format!("/repos/{}/{}/pulls", owner, repo);
+        if let Some(state_value) = state {
+            path = format!("{}?state={}", path, state_value);
+        }
+
+        let response = self.get(&path).await?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(match status.as_u16() {
+                404 => ApiError::NotFound,
+                403 => ApiError::AuthorizationFailed,
+                401 => ApiError::AuthenticationFailed,
+                _ => {
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError {
+                        status: status.as_u16(),
+                        message,
+                    }
+                }
+            });
+        }
+        response.json().await.map_err(|e| ApiError::from(e))
     }
 
     /// Get a specific pull request by number.
@@ -323,7 +347,28 @@ impl InstallationClient {
         repo: &str,
         pull_number: u64,
     ) -> Result<PullRequest, ApiError> {
-        unimplemented!("See github-bot-sdk-specs/interfaces/pull-request-operations.md")
+        let path = format!("/repos/{}/{}/pulls/{}", owner, repo, pull_number);
+        let response = self.get(&path).await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            return Err(match status.as_u16() {
+                404 => ApiError::NotFound,
+                403 => ApiError::AuthorizationFailed,
+                401 => ApiError::AuthenticationFailed,
+                _ => {
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError {
+                        status: status.as_u16(),
+                        message,
+                    }
+                }
+            });
+        }
+        response.json().await.map_err(|e| ApiError::from(e))
     }
 
     /// Create a new pull request.
@@ -335,7 +380,35 @@ impl InstallationClient {
         repo: &str,
         request: CreatePullRequestRequest,
     ) -> Result<PullRequest, ApiError> {
-        unimplemented!("See github-bot-sdk-specs/interfaces/pull-request-operations.md")
+        let path = format!("/repos/{}/{}/pulls", owner, repo);
+        let response = self.post(&path, &request).await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            return Err(match status.as_u16() {
+                422 => {
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Validation failed".to_string());
+                    ApiError::InvalidRequest { message }
+                }
+                404 => ApiError::NotFound,
+                403 => ApiError::AuthorizationFailed,
+                401 => ApiError::AuthenticationFailed,
+                _ => {
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError {
+                        status: status.as_u16(),
+                        message,
+                    }
+                }
+            });
+        }
+        response.json().await.map_err(|e| ApiError::from(e))
     }
 
     /// Update an existing pull request.
@@ -348,7 +421,35 @@ impl InstallationClient {
         pull_number: u64,
         request: UpdatePullRequestRequest,
     ) -> Result<PullRequest, ApiError> {
-        unimplemented!("See github-bot-sdk-specs/interfaces/pull-request-operations.md")
+        let path = format!("/repos/{}/{}/pulls/{}", owner, repo, pull_number);
+        let response = self.patch(&path, &request).await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            return Err(match status.as_u16() {
+                422 => {
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Validation failed".to_string());
+                    ApiError::InvalidRequest { message }
+                }
+                404 => ApiError::NotFound,
+                403 => ApiError::AuthorizationFailed,
+                401 => ApiError::AuthenticationFailed,
+                _ => {
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError {
+                        status: status.as_u16(),
+                        message,
+                    }
+                }
+            });
+        }
+        response.json().await.map_err(|e| ApiError::from(e))
     }
 
     /// Merge a pull request.
@@ -361,7 +462,48 @@ impl InstallationClient {
         pull_number: u64,
         request: MergePullRequestRequest,
     ) -> Result<MergeResult, ApiError> {
-        unimplemented!("See github-bot-sdk-specs/interfaces/pull-request-operations.md")
+        let path = format!("/repos/{}/{}/pulls/{}/merge", owner, repo, pull_number);
+        let response = self.put(&path, &request).await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            return Err(match status.as_u16() {
+                405 => {
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Pull request not mergeable".to_string());
+                    ApiError::HttpError {
+                        status: 405,
+                        message,
+                    }
+                }
+                409 => {
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Merge conflict".to_string());
+                    ApiError::HttpError {
+                        status: 409,
+                        message,
+                    }
+                }
+                404 => ApiError::NotFound,
+                403 => ApiError::AuthorizationFailed,
+                401 => ApiError::AuthenticationFailed,
+                _ => {
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError {
+                        status: status.as_u16(),
+                        message,
+                    }
+                }
+            });
+        }
+        response.json().await.map_err(|e| ApiError::from(e))
     }
 
     /// Set the milestone on a pull request.
@@ -374,7 +516,12 @@ impl InstallationClient {
         pull_number: u64,
         milestone_number: Option<u64>,
     ) -> Result<PullRequest, ApiError> {
-        unimplemented!("See github-bot-sdk-specs/interfaces/pull-request-operations.md")
+        let request = UpdatePullRequestRequest {
+            milestone: milestone_number,
+            ..Default::default()
+        };
+        self.update_pull_request(owner, repo, pull_number, request)
+            .await
     }
 
     // ========================================================================
@@ -390,7 +537,28 @@ impl InstallationClient {
         repo: &str,
         pull_number: u64,
     ) -> Result<Vec<Review>, ApiError> {
-        unimplemented!("See github-bot-sdk-specs/interfaces/pull-request-operations.md")
+        let path = format!("/repos/{}/{}/pulls/{}/reviews", owner, repo, pull_number);
+        let response = self.get(&path).await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            return Err(match status.as_u16() {
+                404 => ApiError::NotFound,
+                403 => ApiError::AuthorizationFailed,
+                401 => ApiError::AuthenticationFailed,
+                _ => {
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError {
+                        status: status.as_u16(),
+                        message,
+                    }
+                }
+            });
+        }
+        response.json().await.map_err(|e| ApiError::from(e))
     }
 
     /// Get a specific review by ID.
@@ -403,7 +571,31 @@ impl InstallationClient {
         pull_number: u64,
         review_id: u64,
     ) -> Result<Review, ApiError> {
-        unimplemented!("See github-bot-sdk-specs/interfaces/pull-request-operations.md")
+        let path = format!(
+            "/repos/{}/{}/pulls/{}/reviews/{}",
+            owner, repo, pull_number, review_id
+        );
+        let response = self.get(&path).await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            return Err(match status.as_u16() {
+                404 => ApiError::NotFound,
+                403 => ApiError::AuthorizationFailed,
+                401 => ApiError::AuthenticationFailed,
+                _ => {
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError {
+                        status: status.as_u16(),
+                        message,
+                    }
+                }
+            });
+        }
+        response.json().await.map_err(|e| ApiError::from(e))
     }
 
     /// Create a review on a pull request.
@@ -416,7 +608,35 @@ impl InstallationClient {
         pull_number: u64,
         request: CreateReviewRequest,
     ) -> Result<Review, ApiError> {
-        unimplemented!("See github-bot-sdk-specs/interfaces/pull-request-operations.md")
+        let path = format!("/repos/{}/{}/pulls/{}/reviews", owner, repo, pull_number);
+        let response = self.post(&path, &request).await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            return Err(match status.as_u16() {
+                422 => {
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Validation failed".to_string());
+                    ApiError::InvalidRequest { message }
+                }
+                404 => ApiError::NotFound,
+                403 => ApiError::AuthorizationFailed,
+                401 => ApiError::AuthenticationFailed,
+                _ => {
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError {
+                        status: status.as_u16(),
+                        message,
+                    }
+                }
+            });
+        }
+        response.json().await.map_err(|e| ApiError::from(e))
     }
 
     /// Update a pending review.
@@ -430,7 +650,38 @@ impl InstallationClient {
         review_id: u64,
         request: UpdateReviewRequest,
     ) -> Result<Review, ApiError> {
-        unimplemented!("See github-bot-sdk-specs/interfaces/pull-request-operations.md")
+        let path = format!(
+            "/repos/{}/{}/pulls/{}/reviews/{}",
+            owner, repo, pull_number, review_id
+        );
+        let response = self.put(&path, &request).await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            return Err(match status.as_u16() {
+                422 => {
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Validation failed".to_string());
+                    ApiError::InvalidRequest { message }
+                }
+                404 => ApiError::NotFound,
+                403 => ApiError::AuthorizationFailed,
+                401 => ApiError::AuthenticationFailed,
+                _ => {
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError {
+                        status: status.as_u16(),
+                        message,
+                    }
+                }
+            });
+        }
+        response.json().await.map_err(|e| ApiError::from(e))
     }
 
     /// Dismiss a review.
@@ -444,7 +695,38 @@ impl InstallationClient {
         review_id: u64,
         request: DismissReviewRequest,
     ) -> Result<Review, ApiError> {
-        unimplemented!("See github-bot-sdk-specs/interfaces/pull-request-operations.md")
+        let path = format!(
+            "/repos/{}/{}/pulls/{}/reviews/{}/dismissals",
+            owner, repo, pull_number, review_id
+        );
+        let response = self.put(&path, &request).await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            return Err(match status.as_u16() {
+                422 => {
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Validation failed".to_string());
+                    ApiError::InvalidRequest { message }
+                }
+                404 => ApiError::NotFound,
+                403 => ApiError::AuthorizationFailed,
+                401 => ApiError::AuthenticationFailed,
+                _ => {
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError {
+                        status: status.as_u16(),
+                        message,
+                    }
+                }
+            });
+        }
+        response.json().await.map_err(|e| ApiError::from(e))
     }
 
     // ========================================================================
@@ -460,7 +742,28 @@ impl InstallationClient {
         repo: &str,
         pull_number: u64,
     ) -> Result<Vec<PullRequestComment>, ApiError> {
-        unimplemented!("See github-bot-sdk-specs/interfaces/pull-request-operations.md")
+        let path = format!("/repos/{}/{}/pulls/{}/comments", owner, repo, pull_number);
+        let response = self.get(&path).await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            return Err(match status.as_u16() {
+                404 => ApiError::NotFound,
+                403 => ApiError::AuthorizationFailed,
+                401 => ApiError::AuthenticationFailed,
+                _ => {
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError {
+                        status: status.as_u16(),
+                        message,
+                    }
+                }
+            });
+        }
+        response.json().await.map_err(|e| ApiError::from(e))
     }
 
     /// Create a comment on a pull request.
@@ -473,7 +776,35 @@ impl InstallationClient {
         pull_number: u64,
         request: CreatePullRequestCommentRequest,
     ) -> Result<PullRequestComment, ApiError> {
-        unimplemented!("See github-bot-sdk-specs/interfaces/pull-request-operations.md")
+        let path = format!("/repos/{}/{}/pulls/{}/comments", owner, repo, pull_number);
+        let response = self.post(&path, &request).await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            return Err(match status.as_u16() {
+                422 => {
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Validation failed".to_string());
+                    ApiError::InvalidRequest { message }
+                }
+                404 => ApiError::NotFound,
+                403 => ApiError::AuthorizationFailed,
+                401 => ApiError::AuthenticationFailed,
+                _ => {
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError {
+                        status: status.as_u16(),
+                        message,
+                    }
+                }
+            });
+        }
+        response.json().await.map_err(|e| ApiError::from(e))
     }
 
     // ========================================================================
@@ -490,7 +821,36 @@ impl InstallationClient {
         pull_number: u64,
         labels: Vec<String>,
     ) -> Result<Vec<Label>, ApiError> {
-        unimplemented!("See github-bot-sdk-specs/interfaces/pull-request-operations.md")
+        // PRs use the same label endpoint as issues
+        let path = format!("/repos/{}/{}/issues/{}/labels", owner, repo, pull_number);
+        let response = self.post(&path, &labels).await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            return Err(match status.as_u16() {
+                422 => {
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Validation failed".to_string());
+                    ApiError::InvalidRequest { message }
+                }
+                404 => ApiError::NotFound,
+                403 => ApiError::AuthorizationFailed,
+                401 => ApiError::AuthenticationFailed,
+                _ => {
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError {
+                        status: status.as_u16(),
+                        message,
+                    }
+                }
+            });
+        }
+        response.json().await.map_err(|e| ApiError::from(e))
     }
 
     /// Remove a label from a pull request.
@@ -503,7 +863,32 @@ impl InstallationClient {
         pull_number: u64,
         name: &str,
     ) -> Result<(), ApiError> {
-        unimplemented!("See github-bot-sdk-specs/interfaces/pull-request-operations.md")
+        // PRs use the same label endpoint as issues
+        let path = format!(
+            "/repos/{}/{}/issues/{}/labels/{}",
+            owner, repo, pull_number, name
+        );
+        let response = self.delete(&path).await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            return Err(match status.as_u16() {
+                404 => ApiError::NotFound,
+                403 => ApiError::AuthorizationFailed,
+                401 => ApiError::AuthenticationFailed,
+                _ => {
+                    let message = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    ApiError::HttpError {
+                        status: status.as_u16(),
+                        message,
+                    }
+                }
+            });
+        }
+        Ok(())
     }
 }
 

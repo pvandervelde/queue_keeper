@@ -424,7 +424,7 @@ impl InstallationClient {
         milestone_number: Option<u64>,
     ) -> Result<Issue, ApiError> {
         let request = UpdateIssueRequest {
-            milestone: Some(milestone_number.unwrap_or(0)),
+            milestone: milestone_number,
             ..Default::default()
         };
         self.update_issue(owner, repo, issue_number, request).await
