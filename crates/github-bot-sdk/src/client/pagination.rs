@@ -78,6 +78,49 @@ impl Default for Pagination {
     }
 }
 
+impl<T> PagedResponse<T> {
+    /// Check if there are more pages available.
+    ///
+    /// Returns true if a next page URL exists in the pagination metadata.
+    pub fn has_next(&self) -> bool {
+        self.pagination.has_next()
+    }
+
+    /// Get the next page number from the pagination URL.
+    ///
+    /// Extracts the page number from the next page URL if available.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use github_bot_sdk::client::{PagedResponse, Pagination};
+    ///
+    /// let mut pagination = Pagination::default();
+    /// pagination.next = Some("https://api.github.com/repos/o/r/issues?page=3".to_string());
+    ///
+    /// let response = PagedResponse {
+    ///     items: vec![1, 2, 3],
+    ///     total_count: None,
+    ///     pagination,
+    /// };
+    ///
+    /// assert_eq!(response.next_page_number(), Some(3));
+    /// ```
+    pub fn next_page_number(&self) -> Option<u32> {
+        self.pagination
+            .next
+            .as_ref()
+            .and_then(|url| extract_page_number(url))
+    }
+
+    /// Check if this is the last page.
+    ///
+    /// Returns true if there is no next page available.
+    pub fn is_last_page(&self) -> bool {
+        !self.has_next()
+    }
+}
+
 /// Parse pagination metadata from Link header.
 ///
 /// GitHub returns Link headers like:
@@ -114,6 +157,49 @@ pub fn parse_link_header(link_header: Option<&str>) -> Pagination {
     }
 
     pagination
+}
+
+/// Extract page number from a URL.
+///
+/// Parses the query string to find the `page` parameter.
+///
+/// # Arguments
+///
+/// * `url` - Full URL containing page query parameter
+///
+/// # Returns
+///
+/// Returns page number if found, None otherwise.
+///
+/// # Examples
+///
+/// ```rust
+/// use github_bot_sdk::client::extract_page_number;
+///
+/// let url = "https://api.github.com/repos/o/r/issues?page=3";
+/// assert_eq!(extract_page_number(url), Some(3));
+/// ```
+pub fn extract_page_number(url: &str) -> Option<u32> {
+    // Parse the URL and extract query parameters
+    url.split('?')
+        .nth(1) // Get query string part
+        .and_then(|query| {
+            // Split by & to get individual parameters
+            query.split('&').find_map(|param| {
+                // Split by = to get key-value pairs
+                let mut parts = param.split('=');
+                let key = parts.next()?;
+                let value = parts.next()?;
+
+                // Check if this is the page parameter
+                if key == "page" {
+                    // Parse the value as u32
+                    value.parse::<u32>().ok()
+                } else {
+                    None
+                }
+            })
+        })
 }
 
 #[cfg(test)]

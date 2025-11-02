@@ -258,15 +258,15 @@ mod pull_request_operations {
             .await
             .unwrap();
 
-        let prs = client
-            .list_pull_requests("owner", "repo", None)
+        let response = client
+            .list_pull_requests("owner", "repo", None, None)
             .await
             .unwrap();
 
-        assert_eq!(prs.len(), 1);
-        assert_eq!(prs[0].number, 42);
-        assert_eq!(prs[0].title, "Test PR");
-        assert_eq!(prs[0].state, "open");
+        assert_eq!(response.items.len(), 1);
+        assert_eq!(response.items[0].number, 42);
+        assert_eq!(response.items[0].title, "Test PR");
+        assert_eq!(response.items[0].state, "open");
     }
 
     /// Verify get_pull_request returns single PR from GitHub API.
