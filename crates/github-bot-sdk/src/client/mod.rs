@@ -33,7 +33,7 @@ pub use issue::{
     Milestone, SetIssueMilestoneRequest, UpdateCommentRequest, UpdateIssueRequest,
     UpdateLabelRequest,
 };
-pub use pagination::{parse_link_header, PagedResponse, Pagination};
+pub use pagination::{extract_page_number, parse_link_header, PagedResponse, Pagination};
 pub use project::{AddProjectV2ItemRequest, ProjectOwner, ProjectV2, ProjectV2Item};
 pub use pull_request::{
     CreatePullRequestCommentRequest, CreatePullRequestRequest, CreateReviewRequest,

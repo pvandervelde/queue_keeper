@@ -116,6 +116,49 @@ pub fn parse_link_header(link_header: Option<&str>) -> Pagination {
     pagination
 }
 
+/// Extract page number from a URL.
+///
+/// Parses the query string to find the `page` parameter.
+///
+/// # Arguments
+///
+/// * `url` - Full URL containing page query parameter
+///
+/// # Returns
+///
+/// Returns page number if found, None otherwise.
+///
+/// # Examples
+///
+/// ```rust
+/// use github_bot_sdk::client::extract_page_number;
+///
+/// let url = "https://api.github.com/repos/o/r/issues?page=3";
+/// assert_eq!(extract_page_number(url), Some(3));
+/// ```
+pub fn extract_page_number(url: &str) -> Option<u32> {
+    // Parse the URL and extract query parameters
+    url.split('?')
+        .nth(1) // Get query string part
+        .and_then(|query| {
+            // Split by & to get individual parameters
+            query.split('&').find_map(|param| {
+                // Split by = to get key-value pairs
+                let mut parts = param.split('=');
+                let key = parts.next()?;
+                let value = parts.next()?;
+
+                // Check if this is the page parameter
+                if key == "page" {
+                    // Parse the value as u32
+                    value.parse::<u32>().ok()
+                } else {
+                    None
+                }
+            })
+        })
+}
+
 #[cfg(test)]
 #[path = "pagination_tests.rs"]
 mod tests;
