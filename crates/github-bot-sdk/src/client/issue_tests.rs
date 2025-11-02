@@ -1565,16 +1565,19 @@ mod error_handling {
     use super::*;
 
     #[tokio::test]
+    #[ignore = "TODO: Mock: 404 response returns ApiError::NotFound"]
     async fn test_issue_not_found() {
         todo!("Mock: 404 response returns ApiError::NotFound")
     }
 
     #[tokio::test]
+    #[ignore = "TODO: Mock: 403 response returns ApiError::Forbidden"]
     async fn test_forbidden_access() {
         todo!("Mock: 403 response returns ApiError::Forbidden")
     }
 
     #[tokio::test]
+    #[ignore = "TODO: Mock: 422 response for invalid input"]
     async fn test_validation_error() {
         todo!("Mock: 422 response for invalid input")
     }
