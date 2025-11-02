@@ -517,7 +517,7 @@ impl InstallationClient {
         milestone_number: Option<u64>,
     ) -> Result<PullRequest, ApiError> {
         let request = UpdatePullRequestRequest {
-            milestone: Some(milestone_number.unwrap_or(0)),
+            milestone: milestone_number,
             ..Default::default()
         };
         self.update_pull_request(owner, repo, pull_number, request)
