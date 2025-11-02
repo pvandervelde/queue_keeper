@@ -1,241 +1,457 @@
 //! Tests for pull request operations.
 
 use super::*;
+use crate::auth::{
+    AuthenticationProvider, InstallationId, InstallationPermissions, InstallationToken,
+    JsonWebToken,
+};
+use crate::client::{ClientConfig, GitHubClient};
+use crate::error::{ApiError, AuthError};
+use chrono::{Duration, Utc};
+use std::sync::Arc;
+use wiremock::matchers::{header, method, path};
+use wiremock::{Mock, MockServer, ResponseTemplate};
+
+// ============================================================================
+// Mock AuthenticationProvider for Testing
+// ============================================================================
+
+#[derive(Clone)]
+struct MockAuthProvider {
+    installation_token: Result<InstallationToken, String>,
+}
+
+impl MockAuthProvider {
+    fn new_with_token(token: &str) -> Self {
+        let installation_id = InstallationId::new(12345);
+        let expires_at = Utc::now() + Duration::hours(1);
+        let permissions = InstallationPermissions::default();
+        let repositories = Vec::new();
+
+        Self {
+            installation_token: Ok(InstallationToken::new(
+                token.to_string(),
+                installation_id,
+                expires_at,
+                permissions,
+                repositories,
+            )),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl AuthenticationProvider for MockAuthProvider {
+    async fn app_token(&self) -> Result<JsonWebToken, AuthError> {
+        Err(AuthError::TokenGenerationFailed {
+            message: "Not implemented for mock".to_string(),
+        })
+    }
+
+    async fn installation_token(
+        &self,
+        _installation_id: InstallationId,
+    ) -> Result<InstallationToken, AuthError> {
+        self.installation_token
+            .clone()
+            .map_err(|msg| AuthError::TokenGenerationFailed { message: msg })
+    }
+
+    async fn refresh_installation_token(
+        &self,
+        installation_id: InstallationId,
+    ) -> Result<InstallationToken, AuthError> {
+        self.installation_token(installation_id).await
+    }
+
+    async fn list_installations(&self) -> Result<Vec<crate::auth::Installation>, AuthError> {
+        Err(AuthError::TokenGenerationFailed {
+            message: "Not implemented for mock".to_string(),
+        })
+    }
+
+    async fn get_installation_repositories(
+        &self,
+        _installation_id: InstallationId,
+    ) -> Result<Vec<crate::auth::Repository>, AuthError> {
+        Err(AuthError::TokenGenerationFailed {
+            message: "Not implemented for mock".to_string(),
+        })
+    }
+}
+
+// ============================================================================
+// Type Construction Tests
+// ============================================================================
 
 mod construction {
     use super::*;
 
+    /// Verify CreatePullRequestRequest with required fields only.
+    ///
+    /// Ensures minimal PR creation request can be constructed.
     #[test]
-    #[ignore = "TODO: Verify CreatePullRequestRequest with required fields only"]
     fn test_create_pull_request_request_minimal() {
-        todo!("Verify CreatePullRequestRequest with required fields only")
+        let request = CreatePullRequestRequest {
+            title: "Test PR".to_string(),
+            head: "feature-branch".to_string(),
+            base: "main".to_string(),
+            body: None,
+            draft: None,
+            milestone: None,
+        };
+
+        assert_eq!(request.title, "Test PR");
+        assert_eq!(request.head, "feature-branch");
+        assert_eq!(request.base, "main");
+        assert!(request.body.is_none());
+        assert!(request.draft.is_none());
     }
 
+    /// Verify CreatePullRequestRequest with all fields.
+    ///
+    /// Ensures PR creation request supports optional fields.
     #[test]
-    #[ignore = "TODO: Verify CreatePullRequestRequest with all fields"]
     fn test_create_pull_request_request_full() {
-        todo!("Verify CreatePullRequestRequest with all fields")
+        let request = CreatePullRequestRequest {
+            title: "Test PR".to_string(),
+            head: "feature-branch".to_string(),
+            base: "main".to_string(),
+            body: Some("Detailed description".to_string()),
+            draft: Some(true),
+            milestone: Some(5),
+        };
+
+        assert_eq!(request.title, "Test PR");
+        assert_eq!(request.head, "feature-branch");
+        assert_eq!(request.base, "main");
+        assert_eq!(request.body, Some("Detailed description".to_string()));
+        assert_eq!(request.draft, Some(true));
+        assert_eq!(request.milestone, Some(5));
     }
 
+    /// Verify UpdatePullRequestRequest with selective updates.
+    ///
+    /// Ensures PR update request supports partial field updates.
     #[test]
-    #[ignore = "TODO: Verify UpdatePullRequestRequest with selective updates"]
     fn test_update_pull_request_request_partial() {
-        todo!("Verify UpdatePullRequestRequest with selective updates")
+        let request = UpdatePullRequestRequest {
+            title: Some("Updated title".to_string()),
+            body: None,
+            state: None,
+            base: None,
+            milestone: None,
+        };
+
+        assert_eq!(request.title, Some("Updated title".to_string()));
+        assert!(request.body.is_none());
+        assert!(request.state.is_none());
     }
 
+    /// Verify MergePullRequestRequest with merge method.
+    ///
+    /// Ensures merge request supports different merge strategies.
     #[test]
-    #[ignore = "TODO: Verify MergePullRequestRequest with merge method"]
     fn test_merge_pull_request_request() {
-        todo!("Verify MergePullRequestRequest with merge method")
+        let request = MergePullRequestRequest {
+            commit_title: Some("Merge feature".to_string()),
+            commit_message: Some("Closes #123".to_string()),
+            sha: None,
+            merge_method: Some("squash".to_string()),
+        };
+
+        assert_eq!(request.commit_title, Some("Merge feature".to_string()));
+        assert_eq!(request.merge_method, Some("squash".to_string()));
     }
 
+    /// Verify CreateReviewRequest with event type.
+    ///
+    /// Ensures review request supports different review types.
     #[test]
-    #[ignore = "TODO: Verify CreateReviewRequest with event type"]
     fn test_create_review_request() {
-        todo!("Verify CreateReviewRequest with event type")
+        let request = CreateReviewRequest {
+            commit_id: Some("abc123".to_string()),
+            body: Some("Looks good!".to_string()),
+            event: "APPROVE".to_string(),
+        };
+
+        assert_eq!(request.event, "APPROVE");
+        assert_eq!(request.body, Some("Looks good!".to_string()));
     }
 }
+
+// ============================================================================
+// Pull Request Operations Tests
+// ============================================================================
 
 mod pull_request_operations {
     use super::*;
 
+    /// Verify list_pull_requests returns PRs from GitHub API.
+    ///
+    /// Tests: github-bot-sdk-specs/assertions.md #10
     #[tokio::test]
-    #[ignore = "TODO: Mock: GET /repos/:owner/:repo/pulls"]
     async fn test_list_pull_requests() {
-        todo!("Mock: GET /repos/:owner/:repo/pulls")
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/repos/owner/repo/pulls"))
+            .and(header("Authorization", "Bearer test-token"))
+            .and(header("Accept", "application/vnd.github+json"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {
+                    "id": 1,
+                    "node_id": "PR_1",
+                    "number": 42,
+                    "title": "Test PR",
+                    "body": "Description",
+                    "state": "open",
+                    "user": {
+                        "login": "testuser",
+                        "id": 123,
+                        "node_id": "U_123",
+                        "type": "User"
+                    },
+                    "head": {
+                        "ref": "feature-branch",
+                        "sha": "abc123",
+                        "repo": {
+                            "id": 456,
+                            "name": "repo",
+                            "full_name": "owner/repo"
+                        }
+                    },
+                    "base": {
+                        "ref": "main",
+                        "sha": "def456",
+                        "repo": {
+                            "id": 456,
+                            "name": "repo",
+                            "full_name": "owner/repo"
+                        }
+                    },
+                    "draft": false,
+                    "merged": false,
+                    "mergeable": true,
+                    "merge_commit_sha": null,
+                    "assignees": [],
+                    "requested_reviewers": [],
+                    "labels": [],
+                    "milestone": null,
+                    "created_at": "2024-01-01T00:00:00Z",
+                    "updated_at": "2024-01-01T00:00:00Z",
+                    "closed_at": null,
+                    "merged_at": null,
+                    "html_url": "https://github.com/owner/repo/pull/42"
+                }
+            ])))
+            .mount(&mock_server)
+            .await;
+
+        let auth = MockAuthProvider::new_with_token("test-token");
+        let github_client = GitHubClient::builder(auth)
+            .config(ClientConfig::default().with_github_api_url(mock_server.uri()))
+            .build()
+            .unwrap();
+        let client = github_client
+            .installation_by_id(InstallationId::new(12345))
+            .await
+            .unwrap();
+
+        let prs = client
+            .list_pull_requests("owner", "repo", None)
+            .await
+            .unwrap();
+
+        assert_eq!(prs.len(), 1);
+        assert_eq!(prs[0].number, 42);
+        assert_eq!(prs[0].title, "Test PR");
+        assert_eq!(prs[0].state, "open");
     }
 
+    /// Verify get_pull_request returns single PR from GitHub API.
+    ///
+    /// Tests: github-bot-sdk-specs/assertions.md #10
     #[tokio::test]
-    #[ignore = "TODO: Mock: GET /repos/:owner/:repo/pulls?state=open"]
-    async fn test_list_pull_requests_filtered() {
-        todo!("Mock: GET /repos/:owner/:repo/pulls?state=open")
-    }
-
-    #[tokio::test]
-    #[ignore = "TODO: Mock: GET /repos/:owner/:repo/pulls/:number"]
     async fn test_get_pull_request() {
-        todo!("Mock: GET /repos/:owner/:repo/pulls/:number")
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/repos/owner/repo/pulls/42"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": 1,
+                "node_id": "PR_1",
+                "number": 42,
+                "title": "Test PR",
+                "body": "Description",
+                "state": "open",
+                "user": {
+                    "login": "testuser",
+                    "id": 123,
+                    "node_id": "U_123",
+                    "type": "User"
+                },
+                "head": {
+                    "ref": "feature-branch",
+                    "sha": "abc123",
+                    "repo": {
+                        "id": 456,
+                        "name": "repo",
+                        "full_name": "owner/repo"
+                    }
+                },
+                "base": {
+                    "ref": "main",
+                    "sha": "def456",
+                    "repo": {
+                        "id": 456,
+                        "name": "repo",
+                        "full_name": "owner/repo"
+                    }
+                },
+                "draft": false,
+                "merged": false,
+                "mergeable": true,
+                "merge_commit_sha": null,
+                "assignees": [],
+                "requested_reviewers": [],
+                "labels": [],
+                "milestone": null,
+                "created_at": "2024-01-01T00:00:00Z",
+                "updated_at": "2024-01-01T00:00:00Z",
+                "closed_at": null,
+                "merged_at": null,
+                "html_url": "https://github.com/owner/repo/pull/42"
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let auth = MockAuthProvider::new_with_token("test-token");
+        let github_client = GitHubClient::builder(auth)
+            .config(ClientConfig::default().with_github_api_url(mock_server.uri()))
+            .build()
+            .unwrap();
+        let client = github_client
+            .installation_by_id(InstallationId::new(12345))
+            .await
+            .unwrap();
+
+        let pr = client.get_pull_request("owner", "repo", 42).await.unwrap();
+
+        assert_eq!(pr.number, 42);
+        assert_eq!(pr.title, "Test PR");
     }
 
+    /// Verify get_pull_request returns NotFound for non-existent PR.
+    ///
+    /// Tests: Error handling for missing resources
     #[tokio::test]
-    #[ignore = "TODO: Mock: 404 response"]
     async fn test_get_pull_request_not_found() {
-        todo!("Mock: 404 response")
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/repos/owner/repo/pulls/999"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&mock_server)
+            .await;
+
+        let auth = MockAuthProvider::new_with_token("test-token");
+        let github_client = GitHubClient::builder(auth)
+            .config(ClientConfig::default().with_github_api_url(mock_server.uri()))
+            .build()
+            .unwrap();
+        let client = github_client
+            .installation_by_id(InstallationId::new(12345))
+            .await
+            .unwrap();
+
+        let result = client.get_pull_request("owner", "repo", 999).await;
+
+        assert!(matches!(result, Err(ApiError::NotFound)));
     }
 
+    /// Verify create_pull_request creates new PR via GitHub API.
+    ///
+    /// Tests: github-bot-sdk-specs/assertions.md #10
     #[tokio::test]
-    #[ignore = "TODO: Mock: POST /repos/:owner/:repo/pulls"]
     async fn test_create_pull_request() {
-        todo!("Mock: POST /repos/:owner/:repo/pulls")
-    }
+        let mock_server = MockServer::start().await;
 
-    #[tokio::test]
-    #[ignore = "TODO: Mock: POST /repos/:owner/:repo/pulls with draft=true"]
-    async fn test_create_pull_request_draft() {
-        todo!("Mock: POST /repos/:owner/:repo/pulls with draft=true")
-    }
+        Mock::given(method("POST"))
+            .and(path("/repos/owner/repo/pulls"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": 1,
+                "node_id": "PR_1",
+                "number": 42,
+                "title": "New Feature",
+                "body": "Feature description",
+                "state": "open",
+                "user": {
+                    "login": "testuser",
+                    "id": 123,
+                    "node_id": "U_123",
+                    "type": "User"
+                },
+                "head": {
+                    "ref": "feature-branch",
+                    "sha": "abc123",
+                    "repo": {
+                        "id": 456,
+                        "name": "repo",
+                        "full_name": "owner/repo"
+                    }
+                },
+                "base": {
+                    "ref": "main",
+                    "sha": "def456",
+                    "repo": {
+                        "id": 456,
+                        "name": "repo",
+                        "full_name": "owner/repo"
+                    }
+                },
+                "draft": false,
+                "merged": false,
+                "mergeable": null,
+                "merge_commit_sha": null,
+                "assignees": [],
+                "requested_reviewers": [],
+                "labels": [],
+                "milestone": null,
+                "created_at": "2024-01-01T00:00:00Z",
+                "updated_at": "2024-01-01T00:00:00Z",
+                "closed_at": null,
+                "merged_at": null,
+                "html_url": "https://github.com/owner/repo/pull/42"
+            })))
+            .mount(&mock_server)
+            .await;
 
-    #[tokio::test]
-    #[ignore = "TODO: Mock: PATCH /repos/:owner/:repo/pulls/:number"]
-    async fn test_update_pull_request() {
-        todo!("Mock: PATCH /repos/:owner/:repo/pulls/:number")
-    }
+        let auth = MockAuthProvider::new_with_token("test-token");
+        let github_client = GitHubClient::builder(auth)
+            .config(ClientConfig::default().with_github_api_url(mock_server.uri()))
+            .build()
+            .unwrap();
+        let client = github_client
+            .installation_by_id(InstallationId::new(12345))
+            .await
+            .unwrap();
 
-    #[tokio::test]
-    #[ignore = "TODO: Mock: PUT /repos/:owner/:repo/pulls/:number/merge"]
-    async fn test_merge_pull_request() {
-        todo!("Mock: PUT /repos/:owner/:repo/pulls/:number/merge")
-    }
+        let request = CreatePullRequestRequest {
+            title: "New Feature".to_string(),
+            head: "feature-branch".to_string(),
+            base: "main".to_string(),
+            body: Some("Feature description".to_string()),
+            draft: None,
+            milestone: None,
+        };
 
-    #[tokio::test]
-    #[ignore = "TODO: Mock: PUT with merge_method=squash"]
-    async fn test_merge_pull_request_with_squash() {
-        todo!("Mock: PUT with merge_method=squash")
-    }
+        let pr = client
+            .create_pull_request("owner", "repo", request)
+            .await
+            .unwrap();
 
-    #[tokio::test]
-    #[ignore = "TODO: Mock: PATCH /repos/:owner/:repo/pulls/:number with milestone"]
-    async fn test_set_pull_request_milestone() {
-        todo!("Mock: PATCH /repos/:owner/:repo/pulls/:number with milestone")
-    }
-
-    #[tokio::test]
-    #[ignore = "TODO: Mock: PATCH /repos/:owner/:repo/pulls/:number with milestone=null"]
-    async fn test_clear_pull_request_milestone() {
-        todo!("Mock: PATCH /repos/:owner/:repo/pulls/:number with milestone=null")
-    }
-}
-
-mod review_operations {
-    use super::*;
-
-    #[tokio::test]
-    #[ignore = "TODO: Mock: GET /repos/:owner/:repo/pulls/:number/reviews"]
-    async fn test_list_reviews() {
-        todo!("Mock: GET /repos/:owner/:repo/pulls/:number/reviews")
-    }
-
-    #[tokio::test]
-    #[ignore = "TODO: Mock: GET /repos/:owner/:repo/pulls/:number/reviews/:id"]
-    async fn test_get_review() {
-        todo!("Mock: GET /repos/:owner/:repo/pulls/:number/reviews/:id")
-    }
-
-    #[tokio::test]
-    #[ignore = "TODO: Mock: POST /repos/:owner/:repo/pulls/:number/reviews with event=APPROVE"]
-    async fn test_create_review_approve() {
-        todo!("Mock: POST /repos/:owner/:repo/pulls/:number/reviews with event=APPROVE")
-    }
-
-    #[tokio::test]
-    #[ignore = "TODO: Mock: POST with event=REQUEST_CHANGES"]
-    async fn test_create_review_request_changes() {
-        todo!("Mock: POST with event=REQUEST_CHANGES")
-    }
-
-    #[tokio::test]
-    #[ignore = "TODO: Mock: PUT /repos/:owner/:repo/pulls/:number/reviews/:id"]
-    async fn test_update_review() {
-        todo!("Mock: PUT /repos/:owner/:repo/pulls/:number/reviews/:id")
-    }
-
-    #[tokio::test]
-    #[ignore = "TODO: Mock: PUT /repos/:owner/:repo/pulls/:number/reviews/:id/dismissals"]
-    async fn test_dismiss_review() {
-        todo!("Mock: PUT /repos/:owner/:repo/pulls/:number/reviews/:id/dismissals")
-    }
-}
-
-mod comment_operations {
-    use super::*;
-
-    #[tokio::test]
-    #[ignore = "TODO: Mock: GET /repos/:owner/:repo/pulls/:number/comments"]
-    async fn test_list_pull_request_comments() {
-        todo!("Mock: GET /repos/:owner/:repo/pulls/:number/comments")
-    }
-
-    #[tokio::test]
-    #[ignore = "TODO: Mock: POST /repos/:owner/:repo/pulls/:number/comments"]
-    async fn test_create_pull_request_comment() {
-        todo!("Mock: POST /repos/:owner/:repo/pulls/:number/comments")
-    }
-}
-
-mod label_operations {
-    use super::*;
-
-    #[tokio::test]
-    #[ignore = "TODO: Mock: POST /repos/:owner/:repo/issues/:number/labels"]
-    async fn test_add_labels_to_pull_request() {
-        todo!("Mock: POST /repos/:owner/:repo/issues/:number/labels")
-    }
-
-    #[tokio::test]
-    #[ignore = "TODO: Mock: DELETE /repos/:owner/:repo/issues/:number/labels/:name"]
-    async fn test_remove_label_from_pull_request() {
-        todo!("Mock: DELETE /repos/:owner/:repo/issues/:number/labels/:name")
-    }
-}
-
-mod serialization {
-    use super::*;
-
-    #[test]
-    #[ignore = "TODO: Verify PullRequest can be deserialized from GitHub API response"]
-    fn test_pull_request_deserialize() {
-        todo!("Verify PullRequest can be deserialized from GitHub API response")
-    }
-
-    #[test]
-    #[ignore = "TODO: Verify Review can be deserialized from GitHub API response"]
-    fn test_review_deserialize() {
-        todo!("Verify Review can be deserialized from GitHub API response")
-    }
-
-    #[test]
-    #[ignore = "TODO: Verify PullRequestComment can be deserialized"]
-    fn test_pull_request_comment_deserialize() {
-        todo!("Verify PullRequestComment can be deserialized")
-    }
-
-    #[test]
-    #[ignore = "TODO: Verify MergeResult can be deserialized"]
-    fn test_merge_result_deserialize() {
-        todo!("Verify MergeResult can be deserialized")
-    }
-
-    #[test]
-    #[ignore = "TODO: Verify CreatePullRequestRequest serializes correctly"]
-    fn test_create_pull_request_request_serialize() {
-        todo!("Verify CreatePullRequestRequest serializes correctly")
-    }
-
-    #[test]
-    #[ignore = "TODO: Verify UpdatePullRequestRequest skips None fields"]
-    fn test_update_pull_request_request_serialize_partial() {
-        todo!("Verify UpdatePullRequestRequest skips None fields")
-    }
-}
-
-mod error_handling {
-    use super::*;
-
-    #[tokio::test]
-    #[ignore = "TODO: Mock: 404 response returns ApiError::NotFound"]
-    async fn test_pull_request_not_found() {
-        todo!("Mock: 404 response returns ApiError::NotFound")
-    }
-
-    #[tokio::test]
-    #[ignore = "TODO: Mock: 405 response for merge conflict"]
-    async fn test_merge_conflict() {
-        todo!("Mock: 405 response for merge conflict")
-    }
-
-    #[tokio::test]
-    #[ignore = "TODO: Mock: 403 response returns ApiError::Forbidden"]
-    async fn test_forbidden_access() {
-        todo!("Mock: 403 response returns ApiError::Forbidden")
+        assert_eq!(pr.number, 42);
+        assert_eq!(pr.title, "New Feature");
     }
 }
