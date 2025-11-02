@@ -51,6 +51,7 @@ src/
 ```
 
 **File vs Directory Modules**:
+
 - Single file `module.rs`: Module fits in one file, no submodules needed
 - Directory `module/mod.rs`: Module requires multiple files or has submodules
 
@@ -285,6 +286,43 @@ impl std::fmt::Debug for SecretToken {
             .finish()
     }
 }
+```
+
+## Git and Branch Management
+
+### Branch Protection Rules
+
+**CRITICAL**: Never commit directly to protected branches:
+
+- **NEVER** commit to `master` or `main` directly
+- **ALWAYS** create a feature branch before making commits
+- Feature branch naming: `feature/<task-id>-<brief-description>` (e.g., `feature/task-2.1-overridable-value`)
+- Bug fix branch naming: `fix/<issue-description>`
+
+### Workflow
+
+1. **Before any work**: Create and checkout a feature branch
+
+   ```bash
+   git checkout -b feature/task-X.Y-description
+   ```
+
+2. Make your commits on the feature branch
+3. When ready, push the branch and create a pull request
+
+### Recovery from Accidental Master Commit
+
+If you accidentally commit to master:
+
+```bash
+# Create a branch at the current commit
+git branch feature/branch-name
+
+# Reset master to the previous commit
+git reset --hard HEAD~1
+
+# Switch to the feature branch
+git checkout feature/branch-name
 ```
 
 ## Commit Guidelines
