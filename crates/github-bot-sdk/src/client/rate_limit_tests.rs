@@ -1,6 +1,7 @@
 //! Tests for rate limit tracking functionality.
 
 use super::*;
+use crate::auth::InstallationId;
 use chrono::{Duration, Utc};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 
@@ -194,9 +195,9 @@ mod rate_limiter_tests {
         assert_eq!(limiter_too_high.margin, 1.0);
     }
 
-    /// Verify that update_from_headers stores rate limit information.
+    /// Verify that update_from_headers stores rate limit information for app context.
     #[test]
-    fn test_rate_limiter_updates_from_headers() {
+    fn test_rate_limiter_updates_from_headers_app_context() {
         let limiter = RateLimiter::new(0.1);
 
         let mut headers = HeaderMap::new();
@@ -217,18 +218,162 @@ mod rate_limiter_tests {
             HeaderValue::from_static("core"),
         );
 
-        limiter.update_from_headers(&headers);
+        limiter.update_from_headers(&RateLimitContext::App, &headers);
 
-        let rate_limit = limiter.get_limit("core");
+        let rate_limit = limiter.get_limit(&RateLimitContext::App, "core");
         assert!(rate_limit.is_some());
         let rate_limit = rate_limit.unwrap();
         assert_eq!(rate_limit.limit(), 5000);
         assert_eq!(rate_limit.remaining(), 4500);
     }
 
-    /// Verify that can_proceed returns true when rate limit is healthy.
+    /// Verify that update_from_headers stores rate limit information for installation context.
     #[test]
-    fn test_rate_limiter_can_proceed_when_healthy() {
+    fn test_rate_limiter_updates_from_headers_installation_context() {
+        let limiter = RateLimiter::new(0.1);
+        let install_id = InstallationId::new(12345);
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            HeaderName::from_static("x-ratelimit-limit"),
+            HeaderValue::from_static("5000"),
+        );
+        headers.insert(
+            HeaderName::from_static("x-ratelimit-remaining"),
+            HeaderValue::from_static("3500"),
+        );
+        headers.insert(
+            HeaderName::from_static("x-ratelimit-reset"),
+            HeaderValue::from_str(&(Utc::now().timestamp() + 3600).to_string()).unwrap(),
+        );
+        headers.insert(
+            HeaderName::from_static("x-ratelimit-resource"),
+            HeaderValue::from_static("core"),
+        );
+
+        limiter.update_from_headers(&RateLimitContext::Installation(install_id), &headers);
+
+        let rate_limit = limiter.get_limit(&RateLimitContext::Installation(install_id), "core");
+        assert!(rate_limit.is_some());
+        let rate_limit = rate_limit.unwrap();
+        assert_eq!(rate_limit.limit(), 5000);
+        assert_eq!(rate_limit.remaining(), 3500);
+    }
+
+    /// Verify that rate limits are tracked separately for different installations.
+    ///
+    /// Multiple installations should have independent rate limit tracking.
+    #[test]
+    fn test_rate_limiter_tracks_installations_separately() {
+        let limiter = RateLimiter::new(0.1);
+        let install_1 = InstallationId::new(111);
+        let install_2 = InstallationId::new(222);
+
+        // Setup rate limit for installation 1
+        let mut headers_1 = HeaderMap::new();
+        headers_1.insert(
+            HeaderName::from_static("x-ratelimit-limit"),
+            HeaderValue::from_static("5000"),
+        );
+        headers_1.insert(
+            HeaderName::from_static("x-ratelimit-remaining"),
+            HeaderValue::from_static("4000"),
+        );
+        headers_1.insert(
+            HeaderName::from_static("x-ratelimit-reset"),
+            HeaderValue::from_str(&(Utc::now().timestamp() + 3600).to_string()).unwrap(),
+        );
+
+        limiter.update_from_headers(&RateLimitContext::Installation(install_1), &headers_1);
+
+        // Setup different rate limit for installation 2
+        let mut headers_2 = HeaderMap::new();
+        headers_2.insert(
+            HeaderName::from_static("x-ratelimit-limit"),
+            HeaderValue::from_static("5000"),
+        );
+        headers_2.insert(
+            HeaderName::from_static("x-ratelimit-remaining"),
+            HeaderValue::from_static("2000"),
+        );
+        headers_2.insert(
+            HeaderName::from_static("x-ratelimit-reset"),
+            HeaderValue::from_str(&(Utc::now().timestamp() + 3600).to_string()).unwrap(),
+        );
+
+        limiter.update_from_headers(&RateLimitContext::Installation(install_2), &headers_2);
+
+        // Verify both installations have their own limits
+        let limit_1 = limiter
+            .get_limit(&RateLimitContext::Installation(install_1), "core")
+            .unwrap();
+        let limit_2 = limiter
+            .get_limit(&RateLimitContext::Installation(install_2), "core")
+            .unwrap();
+
+        assert_eq!(limit_1.remaining(), 4000);
+        assert_eq!(limit_2.remaining(), 2000);
+    }
+
+    /// Verify that app-level and installation-level rate limits are tracked separately.
+    ///
+    /// App-level operations use JWT, installation-level use installation tokens.
+    /// They should have independent rate limits.
+    #[test]
+    fn test_rate_limiter_tracks_app_and_installation_separately() {
+        let limiter = RateLimiter::new(0.1);
+        let install_id = InstallationId::new(12345);
+
+        // Setup app-level rate limit
+        let mut app_headers = HeaderMap::new();
+        app_headers.insert(
+            HeaderName::from_static("x-ratelimit-limit"),
+            HeaderValue::from_static("5000"),
+        );
+        app_headers.insert(
+            HeaderName::from_static("x-ratelimit-remaining"),
+            HeaderValue::from_static("4500"),
+        );
+        app_headers.insert(
+            HeaderName::from_static("x-ratelimit-reset"),
+            HeaderValue::from_str(&(Utc::now().timestamp() + 3600).to_string()).unwrap(),
+        );
+
+        limiter.update_from_headers(&RateLimitContext::App, &app_headers);
+
+        // Setup installation-level rate limit
+        let mut install_headers = HeaderMap::new();
+        install_headers.insert(
+            HeaderName::from_static("x-ratelimit-limit"),
+            HeaderValue::from_static("5000"),
+        );
+        install_headers.insert(
+            HeaderName::from_static("x-ratelimit-remaining"),
+            HeaderValue::from_static("3000"),
+        );
+        install_headers.insert(
+            HeaderName::from_static("x-ratelimit-reset"),
+            HeaderValue::from_str(&(Utc::now().timestamp() + 3600).to_string()).unwrap(),
+        );
+
+        limiter.update_from_headers(
+            &RateLimitContext::Installation(install_id),
+            &install_headers,
+        );
+
+        // Verify both contexts have their own limits
+        let app_limit = limiter.get_limit(&RateLimitContext::App, "core").unwrap();
+        let install_limit = limiter
+            .get_limit(&RateLimitContext::Installation(install_id), "core")
+            .unwrap();
+
+        assert_eq!(app_limit.remaining(), 4500);
+        assert_eq!(install_limit.remaining(), 3000);
+    }
+
+    /// Verify that can_proceed returns true when rate limit is healthy for app context.
+    #[test]
+    fn test_rate_limiter_can_proceed_when_healthy_app() {
         let limiter = RateLimiter::new(0.1);
 
         // Setup rate limit with plenty of requests remaining
@@ -246,9 +391,35 @@ mod rate_limiter_tests {
             HeaderValue::from_str(&(Utc::now().timestamp() + 3600).to_string()).unwrap(),
         );
 
-        limiter.update_from_headers(&headers);
+        limiter.update_from_headers(&RateLimitContext::App, &headers);
 
-        assert!(limiter.can_proceed("core"));
+        assert!(limiter.can_proceed(&RateLimitContext::App, "core"));
+    }
+
+    /// Verify that can_proceed returns true when rate limit is healthy for installation context.
+    #[test]
+    fn test_rate_limiter_can_proceed_when_healthy_installation() {
+        let limiter = RateLimiter::new(0.1);
+        let install_id = InstallationId::new(12345);
+
+        // Setup rate limit with plenty of requests remaining
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            HeaderName::from_static("x-ratelimit-limit"),
+            HeaderValue::from_static("5000"),
+        );
+        headers.insert(
+            HeaderName::from_static("x-ratelimit-remaining"),
+            HeaderValue::from_static("4000"),
+        );
+        headers.insert(
+            HeaderName::from_static("x-ratelimit-reset"),
+            HeaderValue::from_str(&(Utc::now().timestamp() + 3600).to_string()).unwrap(),
+        );
+
+        limiter.update_from_headers(&RateLimitContext::Installation(install_id), &headers);
+
+        assert!(limiter.can_proceed(&RateLimitContext::Installation(install_id), "core"));
     }
 
     /// Verify that can_proceed returns false when near rate limit exhaustion.
@@ -273,9 +444,9 @@ mod rate_limiter_tests {
             HeaderValue::from_str(&(Utc::now().timestamp() + 3600).to_string()).unwrap(),
         );
 
-        limiter.update_from_headers(&headers);
+        limiter.update_from_headers(&RateLimitContext::App, &headers);
 
-        assert!(!limiter.can_proceed("core"));
+        assert!(!limiter.can_proceed(&RateLimitContext::App, "core"));
     }
 
     /// Verify that can_proceed returns false when rate limit is exhausted.
@@ -298,9 +469,9 @@ mod rate_limiter_tests {
             HeaderValue::from_str(&(Utc::now().timestamp() + 3600).to_string()).unwrap(),
         );
 
-        limiter.update_from_headers(&headers);
+        limiter.update_from_headers(&RateLimitContext::App, &headers);
 
-        assert!(!limiter.can_proceed("core"));
+        assert!(!limiter.can_proceed(&RateLimitContext::App, "core"));
     }
 
     /// Verify that can_proceed returns true when no rate limit data exists yet.
@@ -311,7 +482,7 @@ mod rate_limiter_tests {
         let limiter = RateLimiter::new(0.1);
 
         // No update_from_headers called yet
-        assert!(limiter.can_proceed("core"));
+        assert!(limiter.can_proceed(&RateLimitContext::App, "core"));
     }
 
     /// Verify that can_proceed returns true when rate limit has reset.
@@ -334,18 +505,68 @@ mod rate_limiter_tests {
             HeaderValue::from_str(&(Utc::now().timestamp() - 60).to_string()).unwrap(),
         );
 
-        limiter.update_from_headers(&headers);
+        limiter.update_from_headers(&RateLimitContext::App, &headers);
 
         // Should allow because rate limit has reset
-        assert!(limiter.can_proceed("core"));
+        assert!(limiter.can_proceed(&RateLimitContext::App, "core"));
     }
 
-    /// Verify that get_limit returns None when no data exists for resource.
+    /// Verify that can_proceed checks only the specified context.
+    ///
+    /// One installation being rate limited shouldn't affect another installation.
+    #[test]
+    fn test_rate_limiter_contexts_independent() {
+        let limiter = RateLimiter::new(0.1);
+        let install_1 = InstallationId::new(111);
+        let install_2 = InstallationId::new(222);
+
+        // Setup installation 1 as exhausted
+        let mut headers_1 = HeaderMap::new();
+        headers_1.insert(
+            HeaderName::from_static("x-ratelimit-limit"),
+            HeaderValue::from_static("5000"),
+        );
+        headers_1.insert(
+            HeaderName::from_static("x-ratelimit-remaining"),
+            HeaderValue::from_static("0"),
+        );
+        headers_1.insert(
+            HeaderName::from_static("x-ratelimit-reset"),
+            HeaderValue::from_str(&(Utc::now().timestamp() + 3600).to_string()).unwrap(),
+        );
+
+        limiter.update_from_headers(&RateLimitContext::Installation(install_1), &headers_1);
+
+        // Setup installation 2 as healthy
+        let mut headers_2 = HeaderMap::new();
+        headers_2.insert(
+            HeaderName::from_static("x-ratelimit-limit"),
+            HeaderValue::from_static("5000"),
+        );
+        headers_2.insert(
+            HeaderName::from_static("x-ratelimit-remaining"),
+            HeaderValue::from_static("4000"),
+        );
+        headers_2.insert(
+            HeaderName::from_static("x-ratelimit-reset"),
+            HeaderValue::from_str(&(Utc::now().timestamp() + 3600).to_string()).unwrap(),
+        );
+
+        limiter.update_from_headers(&RateLimitContext::Installation(install_2), &headers_2);
+
+        // Installation 1 should be blocked
+        assert!(!limiter.can_proceed(&RateLimitContext::Installation(install_1), "core"));
+
+        // Installation 2 should be allowed
+        assert!(limiter.can_proceed(&RateLimitContext::Installation(install_2), "core"));
+    }
+
+    /// Verify that get_limit returns None when no data exists for context.
     #[test]
     fn test_rate_limiter_get_limit_returns_none_when_no_data() {
         let limiter = RateLimiter::new(0.1);
 
-        assert!(limiter.get_limit("core").is_none());
+        assert!(limiter.get_limit(&RateLimitContext::App, "core").is_none());
     }
 
     /// Verify that get_limit returns stored rate limit information.
@@ -367,9 +588,9 @@ mod rate_limiter_tests {
             HeaderValue::from_str(&(Utc::now().timestamp() + 3600).to_string()).unwrap(),
         );
 
-        limiter.update_from_headers(&headers);
+        limiter.update_from_headers(&RateLimitContext::App, &headers);
 
-        let rate_limit = limiter.get_limit("core");
+        let rate_limit = limiter.get_limit(&RateLimitContext::App, "core");
         assert!(rate_limit.is_some());
         let rate_limit = rate_limit.unwrap();
         assert_eq!(rate_limit.limit(), 5000);

@@ -41,7 +41,7 @@ pub use pull_request::{
     PullRequestComment, PullRequestRepo, Review, SetPullRequestMilestoneRequest,
     UpdatePullRequestRequest, UpdateReviewRequest,
 };
-pub use rate_limit::{parse_rate_limit_from_headers, RateLimit, RateLimiter};
+pub use rate_limit::{parse_rate_limit_from_headers, RateLimit, RateLimitContext, RateLimiter};
 pub use release::{CreateReleaseRequest, Release, ReleaseAsset, UpdateReleaseRequest};
 pub use repository::{Branch, Commit, GitRef, Repository, RepositoryOwner, Tag};
 pub use retry::{RateLimitInfo, RetryPolicy};
