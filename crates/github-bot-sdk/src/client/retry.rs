@@ -118,9 +118,57 @@ impl RetryPolicy {
         }
     }
 
+    /// Enable jitter (random variation) in retry delays.
+    ///
+    /// Jitter helps prevent thundering herd problems when multiple clients
+    /// retry simultaneously. Adds ±25% randomization to calculated delays.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use github_bot_sdk::client::RetryPolicy;
+    ///
+    /// let policy = RetryPolicy::default().with_jitter();
+    /// ```
+    pub fn with_jitter(mut self) -> Self {
+        self.use_jitter = true;
+        self
+    }
+
+    /// Disable jitter (no random variation) in retry delays.
+    ///
+    /// Use this for deterministic testing or when precise timing is required.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use github_bot_sdk::client::RetryPolicy;
+    ///
+    /// let policy = RetryPolicy::default().without_jitter();
+    /// ```
+    pub fn without_jitter(mut self) -> Self {
+        self.use_jitter = false;
+        self
+    }
+
     /// Calculate delay for a specific retry attempt.
     ///
     /// Uses exponential backoff with optional jitter.
+    ///
+    /// # Jitter
+    ///
+    /// When jitter is enabled (default), applies ±25% randomization to prevent
+    /// thundering herd problems. For example, a 1000ms delay becomes 750-1250ms.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use github_bot_sdk::client::RetryPolicy;
+    ///
+    /// let policy = RetryPolicy::default();
+    /// let delay = policy.calculate_delay(1);
+    /// // First retry: ~100ms ±25%
+    /// ```
     ///
     /// See github-bot-sdk-specs/interfaces/rate-limiting-retry.md
     pub fn calculate_delay(&self, attempt: u32) -> Duration {
@@ -139,18 +187,24 @@ impl RetryPolicy {
         }
 
         // Add jitter if enabled (±25% randomization)
-        // Note: Jitter implementation requires rand crate
-        // For now, jitter is a no-op - will be implemented during task execution
         if self.use_jitter {
-            // TODO: Implement jitter using rand crate
-            // let jitter_factor = rand::thread_rng().gen_range(0.75..=1.25);
-            // delay = Duration::from_millis((delay.as_millis() as f64 * jitter_factor) as u64);
+            use rand::Rng;
+            let jitter_factor = rand::thread_rng().gen_range(0.75..=1.25);
+            delay = Duration::from_millis((delay.as_millis() as f64 * jitter_factor) as u64);
         }
 
         delay
     }
 
     /// Check if another retry attempt should be made.
+    ///
+    /// # Arguments
+    ///
+    /// * `attempt` - Current attempt number (0-indexed)
+    ///
+    /// # Returns
+    ///
+    /// `true` if attempt is below max_retries, `false` otherwise.
     pub fn should_retry(&self, attempt: u32) -> bool {
         attempt < self.max_retries
     }

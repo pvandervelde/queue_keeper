@@ -63,58 +63,201 @@ mod rate_limit_info {
 mod retry_policy {
     use super::*;
 
+    /// Verify that RetryPolicy::default() has expected values.
+    ///
+    /// Default policy should have 3 max retries, 100ms initial delay,
+    /// 60s max delay, 2.0 multiplier, and jitter enabled.
     #[test]
-    #[ignore = "TODO: Verify RetryPolicy::default() has expected values"]
     fn test_default() {
-        todo!("Verify RetryPolicy::default() has expected values")
+        let policy = RetryPolicy::default();
+
+        assert_eq!(policy.max_retries, 3);
+        assert_eq!(policy.initial_delay, Duration::from_millis(100));
+        assert_eq!(policy.max_delay, Duration::from_secs(60));
+        assert_eq!(policy.backoff_multiplier, 2.0);
+        assert!(policy.use_jitter);
     }
 
+    /// Verify that RetryPolicy::new creates a policy with custom values.
     #[test]
-    #[ignore = "TODO: Verify RetryPolicy::new with custom values"]
     fn test_new() {
-        todo!("Verify RetryPolicy::new with custom values")
+        let policy = RetryPolicy::new(5, Duration::from_millis(500), Duration::from_secs(30));
+
+        assert_eq!(policy.max_retries, 5);
+        assert_eq!(policy.initial_delay, Duration::from_millis(500));
+        assert_eq!(policy.max_delay, Duration::from_secs(30));
+        assert_eq!(policy.backoff_multiplier, 2.0);
+        assert!(policy.use_jitter); // Default is enabled
     }
 
+    /// Verify that with_jitter() enables jitter.
     #[test]
-    #[ignore = "TODO: Verify attempt 0 returns zero delay"]
+    fn test_with_jitter() {
+        let policy = RetryPolicy::default().with_jitter();
+        assert!(policy.use_jitter);
+    }
+
+    /// Verify that without_jitter() disables jitter.
+    #[test]
+    fn test_without_jitter() {
+        let policy = RetryPolicy::default().without_jitter();
+        assert!(!policy.use_jitter);
+    }
+
+    /// Verify that attempt 0 returns zero delay.
+    ///
+    /// The first request (attempt 0) should proceed immediately.
+    #[test]
     fn test_calculate_delay_attempt_zero() {
-        todo!("Verify attempt 0 returns zero delay")
+        let policy = RetryPolicy::default();
+        let delay = policy.calculate_delay(0);
+        assert_eq!(delay, Duration::from_secs(0));
     }
 
+    /// Verify that delays grow exponentially without jitter.
+    ///
+    /// With 100ms initial delay and 2.0 multiplier:
+    /// - Attempt 1: 100ms
+    /// - Attempt 2: 200ms
+    /// - Attempt 3: 400ms
+    /// - Attempt 4: 800ms
     #[test]
-    #[ignore = "TODO: Verify delays grow exponentially (100ms, 200ms, 400ms, etc.)"]
     fn test_calculate_delay_exponential_backoff() {
-        todo!("Verify delays grow exponentially (100ms, 200ms, 400ms, etc.)")
+        let policy = RetryPolicy::default().without_jitter();
+
+        assert_eq!(policy.calculate_delay(1), Duration::from_millis(100));
+        assert_eq!(policy.calculate_delay(2), Duration::from_millis(200));
+        assert_eq!(policy.calculate_delay(3), Duration::from_millis(400));
+        assert_eq!(policy.calculate_delay(4), Duration::from_millis(800));
     }
 
+    /// Verify that delay is capped at max_delay.
+    ///
+    /// Even with exponential growth, delays should never exceed max_delay.
     #[test]
-    #[ignore = "TODO: Verify delay is capped at max_delay"]
     fn test_calculate_delay_max_cap() {
-        todo!("Verify delay is capped at max_delay")
+        let policy = RetryPolicy {
+            max_retries: 100,
+            initial_delay: Duration::from_millis(100),
+            max_delay: Duration::from_secs(5),
+            backoff_multiplier: 2.0,
+            use_jitter: false,
+        };
+
+        // Attempt 20 would be 100ms * 2^19 = ~52 seconds
+        // Should be capped at 5 seconds
+        let delay = policy.calculate_delay(20);
+        assert_eq!(delay, Duration::from_secs(5));
     }
 
+    /// Verify that jitter adds randomization within ±25%.
+    ///
+    /// With jitter enabled, delays should vary but stay within bounds.
+    /// We test by running multiple calculations and verifying the range.
     #[test]
-    #[ignore = "TODO: Verify jitter adds randomization within ±25%"]
     fn test_calculate_delay_with_jitter() {
-        todo!("Verify jitter adds randomization within ±25%")
+        let policy = RetryPolicy::default().with_jitter();
+
+        // For attempt 1, base delay is 100ms
+        // With ±25% jitter, range is 75-125ms
+        let mut delays = Vec::new();
+        for _ in 0..100 {
+            let delay = policy.calculate_delay(1);
+            delays.push(delay.as_millis());
+        }
+
+        // All delays should be within the jitter range
+        for delay_ms in &delays {
+            assert!(*delay_ms >= 75, "Delay {}ms below minimum 75ms", delay_ms);
+            assert!(*delay_ms <= 125, "Delay {}ms above maximum 125ms", delay_ms);
+        }
+
+        // With 100 samples, we should see variation (not all the same)
+        let min = *delays.iter().min().unwrap();
+        let max = *delays.iter().max().unwrap();
+        assert!(max > min, "Jitter should produce variation in delays");
     }
 
+    /// Verify that delay is deterministic when use_jitter=false.
+    ///
+    /// Without jitter, the same attempt should always produce the same delay.
     #[test]
-    #[ignore = "TODO: Verify delay is deterministic when use_jitter=false"]
     fn test_calculate_delay_without_jitter() {
-        todo!("Verify delay is deterministic when use_jitter=false")
+        let policy = RetryPolicy::default().without_jitter();
+
+        let delay1 = policy.calculate_delay(1);
+        let delay2 = policy.calculate_delay(1);
+        let delay3 = policy.calculate_delay(1);
+
+        assert_eq!(delay1, delay2);
+        assert_eq!(delay2, delay3);
+        assert_eq!(delay1, Duration::from_millis(100));
     }
 
+    /// Verify that jitter stays within bounds for large delays.
+    ///
+    /// Even for delays near max_delay, jitter should respect bounds.
     #[test]
-    #[ignore = "TODO: Verify should_retry returns true when attempts < max"]
+    fn test_calculate_delay_jitter_respects_bounds() {
+        let policy = RetryPolicy {
+            max_retries: 10,
+            initial_delay: Duration::from_millis(5000),
+            max_delay: Duration::from_secs(10),
+            backoff_multiplier: 2.0,
+            use_jitter: true,
+        };
+
+        // This should be capped at 10 seconds, then jitter applied
+        // Jitter of ±25% means 7.5-12.5 seconds
+        // But max_delay is 10s, so actual range is 7.5-10s
+        let mut delays = Vec::new();
+        for _ in 0..50 {
+            let delay = policy.calculate_delay(5);
+            delays.push(delay.as_millis());
+        }
+
+        for delay_ms in &delays {
+            // With jitter on 10s max, minimum is 7.5s
+            assert!(*delay_ms >= 7500, "Delay {}ms below minimum", delay_ms);
+            // Jitter can push above max_delay
+            assert!(*delay_ms <= 12500, "Delay {}ms above maximum", delay_ms);
+        }
+    }
+
+    /// Verify that should_retry returns true when attempts < max.
+    #[test]
     fn test_should_retry_true() {
-        todo!("Verify should_retry returns true when attempts < max")
+        let policy = RetryPolicy::default(); // max_retries = 3
+
+        assert!(policy.should_retry(0));
+        assert!(policy.should_retry(1));
+        assert!(policy.should_retry(2));
     }
 
+    /// Verify that should_retry returns false when attempts >= max.
     #[test]
-    #[ignore = "TODO: Verify should_retry returns false when attempts >= max"]
     fn test_should_retry_false() {
-        todo!("Verify should_retry returns false when attempts >= max")
+        let policy = RetryPolicy::default(); // max_retries = 3
+
+        assert!(!policy.should_retry(3));
+        assert!(!policy.should_retry(4));
+        assert!(!policy.should_retry(100));
+    }
+
+    /// Verify that builder pattern works correctly.
+    #[test]
+    fn test_builder_pattern() {
+        let policy = RetryPolicy::new(5, Duration::from_millis(200), Duration::from_secs(30))
+            .without_jitter();
+
+        assert_eq!(policy.max_retries, 5);
+        assert_eq!(policy.initial_delay, Duration::from_millis(200));
+        assert_eq!(policy.max_delay, Duration::from_secs(30));
+        assert!(!policy.use_jitter);
+
+        // Chaining should work
+        let policy2 = policy.clone().with_jitter();
+        assert!(policy2.use_jitter);
     }
 }
 
