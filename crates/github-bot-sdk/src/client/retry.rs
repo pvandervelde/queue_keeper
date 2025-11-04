@@ -330,6 +330,67 @@ pub fn calculate_rate_limit_delay(
     Duration::from_secs(60)
 }
 
+/// Detect secondary rate limit (abuse detection) from 403 response.
+///
+/// GitHub API returns HTTP 403 for both permission denied and secondary
+/// rate limits (abuse detection). This function distinguishes between them
+/// by checking for rate limit indicators in the response body.
+///
+/// # Arguments
+///
+/// * `status` - HTTP status code
+/// * `body` - Response body text
+///
+/// # Returns
+///
+/// `true` if this is a secondary rate limit (abuse), `false` otherwise.
+///
+/// # Detection Criteria
+///
+/// A 403 response is considered a secondary rate limit if the body contains:
+/// - "rate limit" or "rate_limit" (case insensitive)
+/// - "abuse" (case insensitive)
+/// - "too many requests" (case insensitive)
+///
+/// # Examples
+///
+/// ```
+/// use github_bot_sdk::client::detect_secondary_rate_limit;
+///
+/// // Secondary rate limit message
+/// let is_secondary = detect_secondary_rate_limit(
+///     403,
+///     r#"{"message":"You have exceeded a secondary rate limit..."}"#
+/// );
+/// assert!(is_secondary);
+///
+/// // Permission denied (not rate limit)
+/// let is_secondary = detect_secondary_rate_limit(
+///     403,
+///     r#"{"message":"Resource not accessible by integration"}"#
+/// );
+/// assert!(!is_secondary);
+///
+/// // Not a 403 response
+/// let is_secondary = detect_secondary_rate_limit(404, "Not found");
+/// assert!(!is_secondary);
+/// ```
+///
+/// See github-bot-sdk-specs/interfaces/rate-limiting-retry.md
+pub fn detect_secondary_rate_limit(status: u16, body: &str) -> bool {
+    if status != 403 {
+        return false;
+    }
+
+    let body_lower = body.to_lowercase();
+    
+    // Check for rate limit indicators in response body
+    body_lower.contains("rate limit")
+        || body_lower.contains("rate_limit")
+        || body_lower.contains("abuse")
+        || body_lower.contains("too many requests")
+}
+
 #[cfg(test)]
 #[path = "retry_tests.rs"]
 mod tests;

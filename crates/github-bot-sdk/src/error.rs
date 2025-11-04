@@ -213,6 +213,11 @@ pub enum ApiError {
     #[error("Rate limit exceeded. Reset at: {reset_at}")]
     RateLimitExceeded { reset_at: DateTime<Utc> },
 
+    /// Secondary rate limit (abuse detection) exceeded.
+    /// Requires longer backoff period than primary rate limits.
+    #[error("Secondary rate limit exceeded (abuse detection). Retry after 60+ seconds")]
+    SecondaryRateLimit,
+
     /// Request to GitHub API timed out.
     #[error("Request timeout")]
     Timeout,
@@ -266,6 +271,7 @@ impl ApiError {
         match self {
             Self::HttpError { status, .. } => *status >= 500 || *status == 429,
             Self::RateLimitExceeded { .. } => true,
+            Self::SecondaryRateLimit => true, // Transient, requires longer backoff
             Self::Timeout => true,
             Self::InvalidRequest { .. } => false,
             Self::AuthenticationFailed => false,

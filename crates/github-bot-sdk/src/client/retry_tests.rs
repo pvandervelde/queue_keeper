@@ -464,3 +464,123 @@ mod rate_limit_delay_calculation {
         assert_eq!(delay, Duration::from_secs(3600));
     }
 }
+
+mod secondary_rate_limit_detection {
+    use super::*;
+
+    /// Verify that detect_secondary_rate_limit returns true for 403 with "rate limit" message.
+    #[test]
+    fn test_detect_secondary_rate_limit_rate_limit_message() {
+        let body = r#"{"message":"You have exceeded a secondary rate limit. Please wait a few minutes before you try again."}"#;
+
+        assert!(detect_secondary_rate_limit(403, body));
+    }
+
+    /// Verify that detect_secondary_rate_limit returns true for 403 with "rate_limit" underscore format.
+    #[test]
+    fn test_detect_secondary_rate_limit_rate_limit_underscore() {
+        let body = r#"{"message":"API rate_limit exceeded for user"}"#;
+
+        assert!(detect_secondary_rate_limit(403, body));
+    }
+
+    /// Verify that detect_secondary_rate_limit returns true for 403 with "abuse" message.
+    #[test]
+    fn test_detect_secondary_rate_limit_abuse_message() {
+        let body = r#"{"message":"You have triggered an abuse detection mechanism. Please retry your request later."}"#;
+
+        assert!(detect_secondary_rate_limit(403, body));
+    }
+
+    /// Verify that detect_secondary_rate_limit returns true for 403 with "too many requests" message.
+    #[test]
+    fn test_detect_secondary_rate_limit_too_many_requests() {
+        let body = r#"{"message":"Too many requests. Please slow down."}"#;
+
+        assert!(detect_secondary_rate_limit(403, body));
+    }
+
+    /// Verify that detect_secondary_rate_limit is case insensitive.
+    #[test]
+    fn test_detect_secondary_rate_limit_case_insensitive() {
+        let body = r#"{"message":"RATE LIMIT exceeded"}"#;
+
+        assert!(detect_secondary_rate_limit(403, body));
+    }
+
+    /// Verify that detect_secondary_rate_limit returns false for 403 permission denied.
+    #[test]
+    fn test_detect_secondary_rate_limit_permission_denied() {
+        let body = r#"{"message":"Resource not accessible by integration"}"#;
+
+        assert!(!detect_secondary_rate_limit(403, body));
+    }
+
+    /// Verify that detect_secondary_rate_limit returns false for 403 with unrelated message.
+    #[test]
+    fn test_detect_secondary_rate_limit_unrelated_403() {
+        let body = r#"{"message":"This repository has been archived"}"#;
+
+        assert!(!detect_secondary_rate_limit(403, body));
+    }
+
+    /// Verify that detect_secondary_rate_limit returns false for non-403 status codes.
+    #[test]
+    fn test_detect_secondary_rate_limit_not_403() {
+        let body = r#"{"message":"You have exceeded a secondary rate limit"}"#;
+
+        // Should only detect on 403
+        assert!(!detect_secondary_rate_limit(429, body));
+        assert!(!detect_secondary_rate_limit(404, body));
+        assert!(!detect_secondary_rate_limit(500, body));
+        assert!(!detect_secondary_rate_limit(200, body));
+    }
+
+    /// Verify that detect_secondary_rate_limit returns false for empty body.
+    #[test]
+    fn test_detect_secondary_rate_limit_empty_body() {
+        assert!(!detect_secondary_rate_limit(403, ""));
+    }
+
+    /// Verify that detect_secondary_rate_limit handles non-JSON body.
+    #[test]
+    fn test_detect_secondary_rate_limit_non_json_body() {
+        let body = "Plain text error: rate limit exceeded";
+
+        assert!(detect_secondary_rate_limit(403, body));
+    }
+
+    /// Verify that detect_secondary_rate_limit matches substring in larger text.
+    #[test]
+    fn test_detect_secondary_rate_limit_substring_match() {
+        let body = r#"
+        {
+            "message": "Request forbidden by administrative rules. The request has triggered GitHub's abuse detection mechanisms. Please wait before retrying.",
+            "documentation_url": "https://docs.github.com"
+        }
+        "#;
+
+        assert!(detect_secondary_rate_limit(403, body));
+    }
+
+    /// Verify that detect_secondary_rate_limit with real GitHub secondary rate limit response.
+    #[test]
+    fn test_detect_secondary_rate_limit_real_github_response() {
+        // Real GitHub secondary rate limit response format
+        let body = r#"{
+            "message": "You have exceeded a secondary rate limit. Please wait a few minutes before you try again.",
+            "documentation_url": "https://docs.github.com/rest/overview/resources-in-the-rest-api#secondary-rate-limits"
+        }"#;
+
+        assert!(detect_secondary_rate_limit(403, body));
+    }
+
+    /// Verify that detect_secondary_rate_limit does not match partial words.
+    #[test]
+    fn test_detect_secondary_rate_limit_no_partial_match() {
+        // "prelimit" should not match "rate limit"
+        let body = r#"{"message":"Preliminary check failed"}"#;
+
+        assert!(!detect_secondary_rate_limit(403, body));
+    }
+}
