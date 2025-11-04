@@ -288,3 +288,179 @@ mod serialization {
         todo!("Verify RetryPolicy can be deserialized")
     }
 }
+
+mod retry_after_parsing {
+    use super::*;
+
+    /// Verify that parse_retry_after correctly parses delta-seconds format.
+    ///
+    /// The Retry-After header often uses simple integer seconds.
+    #[test]
+    fn test_parse_retry_after_delta_seconds() {
+        assert_eq!(parse_retry_after("60"), Some(Duration::from_secs(60)));
+        assert_eq!(parse_retry_after("120"), Some(Duration::from_secs(120)));
+        assert_eq!(parse_retry_after("0"), Some(Duration::from_secs(0)));
+    }
+
+    /// Verify that parse_retry_after handles HTTP-date format.
+    ///
+    /// GitHub may use RFC 2822 date format in Retry-After headers.
+    #[test]
+    fn test_parse_retry_after_http_date() {
+        // Create a future date (60 seconds from now)
+        let future = Utc::now() + chrono::Duration::seconds(60);
+        let http_date = future.to_rfc2822();
+
+        let delay = parse_retry_after(&http_date);
+        assert!(delay.is_some());
+
+        let delay_secs = delay.unwrap().as_secs();
+        // Should be approximately 60 seconds (allow 1 second variance for test execution)
+        assert!(
+            delay_secs >= 59 && delay_secs <= 61,
+            "Delay was {}s",
+            delay_secs
+        );
+    }
+
+    /// Verify that parse_retry_after returns None for invalid formats.
+    #[test]
+    fn test_parse_retry_after_invalid() {
+        assert_eq!(parse_retry_after("invalid"), None);
+        assert_eq!(parse_retry_after("not a number"), None);
+        assert_eq!(parse_retry_after(""), None);
+        assert_eq!(parse_retry_after("-10"), None); // Negative numbers invalid
+    }
+
+    /// Verify that parse_retry_after returns None for past HTTP dates.
+    #[test]
+    fn test_parse_retry_after_past_date() {
+        // Create a past date
+        let past = Utc::now() - chrono::Duration::seconds(60);
+        let http_date = past.to_rfc2822();
+
+        let delay = parse_retry_after(&http_date);
+        assert_eq!(delay, None);
+    }
+
+    /// Verify that very large delay values are handled correctly.
+    #[test]
+    fn test_parse_retry_after_large_values() {
+        // 1 hour in seconds
+        assert_eq!(parse_retry_after("3600"), Some(Duration::from_secs(3600)));
+
+        // 24 hours in seconds
+        assert_eq!(parse_retry_after("86400"), Some(Duration::from_secs(86400)));
+    }
+}
+
+mod rate_limit_delay_calculation {
+    use super::*;
+
+    /// Verify that Retry-After header takes priority over rate limit reset.
+    #[test]
+    fn test_calculate_rate_limit_delay_retry_after_priority() {
+        let future_timestamp = (Utc::now().timestamp() + 300).to_string(); // 5 minutes
+
+        let delay = calculate_rate_limit_delay(
+            Some("60"),              // 1 minute
+            Some(&future_timestamp), // 5 minutes
+        );
+
+        // Should use Retry-After (60s), not reset time (300s)
+        assert_eq!(delay, Duration::from_secs(60));
+    }
+
+    /// Verify that rate limit reset is used when Retry-After is absent.
+    #[test]
+    fn test_calculate_rate_limit_delay_uses_reset() {
+        let future_timestamp = (Utc::now().timestamp() + 120).to_string(); // 2 minutes
+
+        let delay = calculate_rate_limit_delay(None, Some(&future_timestamp));
+
+        // Should be approximately 120 seconds
+        let delay_secs = delay.as_secs();
+        assert!(
+            delay_secs >= 119 && delay_secs <= 121,
+            "Delay was {}s",
+            delay_secs
+        );
+    }
+
+    /// Verify that default delay is used when no headers present.
+    #[test]
+    fn test_calculate_rate_limit_delay_default() {
+        let delay = calculate_rate_limit_delay(None, None);
+        assert_eq!(delay, Duration::from_secs(60));
+    }
+
+    /// Verify that invalid Retry-After falls back to reset time.
+    #[test]
+    fn test_calculate_rate_limit_delay_invalid_retry_after() {
+        let future_timestamp = (Utc::now().timestamp() + 90).to_string();
+
+        let delay = calculate_rate_limit_delay(Some("invalid"), Some(&future_timestamp));
+
+        // Should fall back to reset time (90s)
+        let delay_secs = delay.as_secs();
+        assert!(
+            delay_secs >= 89 && delay_secs <= 91,
+            "Delay was {}s",
+            delay_secs
+        );
+    }
+
+    /// Verify that invalid reset time falls back to default.
+    #[test]
+    fn test_calculate_rate_limit_delay_invalid_reset() {
+        let delay = calculate_rate_limit_delay(None, Some("not-a-timestamp"));
+
+        // Should use default 60s
+        assert_eq!(delay, Duration::from_secs(60));
+    }
+
+    /// Verify that past reset time falls back to default.
+    #[test]
+    fn test_calculate_rate_limit_delay_past_reset() {
+        let past_timestamp = (Utc::now().timestamp() - 60).to_string(); // 1 minute ago
+
+        let delay = calculate_rate_limit_delay(None, Some(&past_timestamp));
+
+        // Should use default 60s since reset is in the past
+        assert_eq!(delay, Duration::from_secs(60));
+    }
+
+    /// Verify handling of edge case: zero delay.
+    #[test]
+    fn test_calculate_rate_limit_delay_zero() {
+        let delay = calculate_rate_limit_delay(Some("0"), None);
+
+        assert_eq!(delay, Duration::from_secs(0));
+    }
+
+    /// Verify that Retry-After with HTTP date format works.
+    #[test]
+    fn test_calculate_rate_limit_delay_http_date() {
+        let future = Utc::now() + chrono::Duration::seconds(180); // 3 minutes
+        let http_date = future.to_rfc2822();
+
+        let delay = calculate_rate_limit_delay(Some(&http_date), None);
+
+        // Should be approximately 180 seconds
+        let delay_secs = delay.as_secs();
+        assert!(
+            delay_secs >= 179 && delay_secs <= 181,
+            "Delay was {}s",
+            delay_secs
+        );
+    }
+
+    /// Verify handling of very large delays.
+    #[test]
+    fn test_calculate_rate_limit_delay_large_value() {
+        // 1 hour
+        let delay = calculate_rate_limit_delay(Some("3600"), None);
+
+        assert_eq!(delay, Duration::from_secs(3600));
+    }
+}

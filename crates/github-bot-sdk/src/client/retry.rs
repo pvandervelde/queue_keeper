@@ -210,6 +210,126 @@ impl RetryPolicy {
     }
 }
 
+/// Parse Retry-After header from HTTP response.
+///
+/// The Retry-After header can be in two formats:
+/// - Delta-seconds: "60" (integer number of seconds)
+/// - HTTP-date: "Wed, 21 Oct 2015 07:28:00 GMT" (RFC 7231 format)
+///
+/// # Arguments
+///
+/// * `retry_after` - The Retry-After header value
+///
+/// # Returns
+///
+/// `Some(Duration)` if the header is valid, `None` otherwise.
+///
+/// # Examples
+///
+/// ```
+/// use github_bot_sdk::client::parse_retry_after;
+/// use std::time::Duration;
+///
+/// // Delta-seconds format
+/// let delay = parse_retry_after("60");
+/// assert_eq!(delay, Some(Duration::from_secs(60)));
+///
+/// // Invalid format
+/// let delay = parse_retry_after("invalid");
+/// assert_eq!(delay, None);
+/// ```
+///
+/// See github-bot-sdk-specs/interfaces/rate-limiting-retry.md
+pub fn parse_retry_after(retry_after: &str) -> Option<Duration> {
+    // Try parsing as delta-seconds first (most common for GitHub)
+    if let Ok(seconds) = retry_after.parse::<u64>() {
+        return Some(Duration::from_secs(seconds));
+    }
+
+    // Try parsing as HTTP-date (RFC 7231 format)
+    // Example: "Wed, 21 Oct 2015 07:28:00 GMT"
+    if let Ok(date_time) = chrono::DateTime::parse_from_rfc2822(retry_after) {
+        let now = Utc::now();
+        let retry_time = date_time.with_timezone(&Utc);
+        
+        if retry_time > now {
+            let duration = (retry_time - now).num_seconds();
+            if duration > 0 {
+                return Some(Duration::from_secs(duration as u64));
+            }
+        }
+    }
+
+    None
+}
+
+/// Calculate delay for rate limit exceeded (429) response.
+///
+/// Priority order:
+/// 1. Retry-After header if present
+/// 2. X-RateLimit-Reset header if present
+/// 3. Default 60 second delay
+///
+/// # Arguments
+///
+/// * `retry_after` - Optional Retry-After header value
+/// * `rate_limit_reset` - Optional X-RateLimit-Reset header value (Unix timestamp)
+///
+/// # Returns
+///
+/// `Duration` to wait before retrying.
+///
+/// # Examples
+///
+/// ```
+/// use github_bot_sdk::client::calculate_rate_limit_delay;
+/// use std::time::Duration;
+///
+/// // With Retry-After header
+/// let delay = calculate_rate_limit_delay(Some("60"), None);
+/// assert_eq!(delay, Duration::from_secs(60));
+///
+/// // With X-RateLimit-Reset header (Unix timestamp)
+/// let future_timestamp = (chrono::Utc::now().timestamp() + 120).to_string();
+/// let delay = calculate_rate_limit_delay(None, Some(&future_timestamp));
+/// assert!(delay >= Duration::from_secs(119) && delay <= Duration::from_secs(121));
+///
+/// // No headers, use default
+/// let delay = calculate_rate_limit_delay(None, None);
+/// assert_eq!(delay, Duration::from_secs(60));
+/// ```
+///
+/// See github-bot-sdk-specs/interfaces/rate-limiting-retry.md
+pub fn calculate_rate_limit_delay(
+    retry_after: Option<&str>,
+    rate_limit_reset: Option<&str>,
+) -> Duration {
+    // Priority 1: Retry-After header
+    if let Some(retry_after_value) = retry_after {
+        if let Some(delay) = parse_retry_after(retry_after_value) {
+            return delay;
+        }
+    }
+
+    // Priority 2: X-RateLimit-Reset header
+    if let Some(reset_value) = rate_limit_reset {
+        if let Ok(reset_timestamp) = reset_value.parse::<i64>() {
+            if let Some(reset_time) = DateTime::from_timestamp(reset_timestamp, 0) {
+                let now = Utc::now();
+                if reset_time > now {
+                    let duration = (reset_time - now).num_seconds();
+                    if duration > 0 {
+                        return Duration::from_secs(duration as u64);
+                    }
+                }
+            }
+        }
+    }
+
+    // Priority 3: Default delay
+    Duration::from_secs(60)
+}
+
 #[cfg(test)]
 #[path = "retry_tests.rs"]
 mod tests;
