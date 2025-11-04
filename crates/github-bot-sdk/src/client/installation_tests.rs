@@ -584,3 +584,530 @@ mod authorization_header_tests {
         // Mock expectation will verify the header was sent
     }
 }
+
+// ============================================================================
+// Retry Logic Tests
+// ============================================================================
+
+mod retry_logic_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::Arc as StdArc;
+
+    /// Verify retry on transient 500 server error succeeds after one retry.
+    ///
+    /// From spec: Transient errors (5xx) should trigger retry with exponential backoff.
+    /// Assertion #20: Network connectivity failures trigger retry logic.
+    /// Assertion #21: Server errors (5xx) are retried with backoff.
+    #[tokio::test]
+    async fn test_retry_on_500_error_succeeds() {
+        let mock_server = MockServer::start().await;
+        let test_token = "ghs_test_token";
+        let attempt_counter = StdArc::new(AtomicU32::new(0));
+        let counter_clone = attempt_counter.clone();
+
+        // First request fails with 500, second succeeds
+        Mock::given(method("GET"))
+            .and(path("/test"))
+            .respond_with(move |_req: &wiremock::Request| {
+                let attempt = counter_clone.fetch_add(1, Ordering::SeqCst);
+                if attempt == 0 {
+                    ResponseTemplate::new(500).set_body_string("Internal Server Error")
+                } else {
+                    ResponseTemplate::new(200).set_body_json(serde_json::json!({"success": true}))
+                }
+            })
+            .expect(2)
+            .mount(&mock_server)
+            .await;
+
+        let auth = MockAuthProvider::new_with_token(test_token);
+        let github_client = GitHubClient::builder(auth)
+            .config(ClientConfig::default().with_github_api_url(mock_server.uri()))
+            .build()
+            .unwrap();
+
+        let installation_id = InstallationId::new(12345);
+        let client = github_client
+            .installation_by_id(installation_id)
+            .await
+            .unwrap();
+
+        let response = client.get("test").await;
+
+        // Should succeed after retry
+        assert!(response.is_ok());
+        assert_eq!(response.unwrap().status(), 200);
+        assert_eq!(attempt_counter.load(Ordering::SeqCst), 2);
+    }
+
+    /// Verify retry on 503 Service Unavailable succeeds after retries.
+    ///
+    /// From spec: 503 errors are transient and should be retried.
+    #[tokio::test]
+    async fn test_retry_on_503_error_succeeds() {
+        let mock_server = MockServer::start().await;
+        let test_token = "ghs_test_token";
+        let attempt_counter = StdArc::new(AtomicU32::new(0));
+        let counter_clone = attempt_counter.clone();
+
+        Mock::given(method("GET"))
+            .and(path("/test"))
+            .respond_with(move |_req: &wiremock::Request| {
+                let attempt = counter_clone.fetch_add(1, Ordering::SeqCst);
+                if attempt < 2 {
+                    ResponseTemplate::new(503).set_body_string("Service Unavailable")
+                } else {
+                    ResponseTemplate::new(200).set_body_json(serde_json::json!({"success": true}))
+                }
+            })
+            .mount(&mock_server)
+            .await;
+
+        let auth = MockAuthProvider::new_with_token(test_token);
+        let github_client = GitHubClient::builder(auth)
+            .config(ClientConfig::default().with_github_api_url(mock_server.uri()))
+            .build()
+            .unwrap();
+
+        let installation_id = InstallationId::new(12345);
+        let client = github_client
+            .installation_by_id(installation_id)
+            .await
+            .unwrap();
+
+        let response = client.get("test").await;
+
+        assert!(response.is_ok());
+        assert_eq!(response.unwrap().status(), 200);
+        assert_eq!(attempt_counter.load(Ordering::SeqCst), 3);
+    }
+
+    /// Verify max retries limit is respected.
+    ///
+    /// From spec: Should not retry indefinitely - respect max_retries configuration.
+    #[tokio::test]
+    async fn test_max_retries_exceeded() {
+        let mock_server = MockServer::start().await;
+        let test_token = "ghs_test_token";
+        let attempt_counter = StdArc::new(AtomicU32::new(0));
+        let counter_clone = attempt_counter.clone();
+
+        // Always return 500
+        Mock::given(method("GET"))
+            .and(path("/test"))
+            .respond_with(move |_req: &wiremock::Request| {
+                counter_clone.fetch_add(1, Ordering::SeqCst);
+                ResponseTemplate::new(500).set_body_string("Internal Server Error")
+            })
+            .mount(&mock_server)
+            .await;
+
+        let auth = MockAuthProvider::new_with_token(test_token);
+        let github_client = GitHubClient::builder(auth)
+            .config(
+                ClientConfig::default()
+                    .with_github_api_url(mock_server.uri())
+                    .with_max_retries(3),
+            )
+            .build()
+            .unwrap();
+
+        let installation_id = InstallationId::new(12345);
+        let client = github_client
+            .installation_by_id(installation_id)
+            .await
+            .unwrap();
+
+        let response = client.get("test").await;
+
+        // Should fail after max retries (1 initial + 3 retries = 4 attempts)
+        assert!(response.is_err());
+        assert_eq!(attempt_counter.load(Ordering::SeqCst), 4);
+    }
+
+    /// Verify non-retryable 404 error fails immediately.
+    ///
+    /// From spec: Client errors (4xx except 429) should not be retried.
+    #[tokio::test]
+    async fn test_non_retryable_404_fails_immediately() {
+        let mock_server = MockServer::start().await;
+        let test_token = "ghs_test_token";
+        let attempt_counter = StdArc::new(AtomicU32::new(0));
+        let counter_clone = attempt_counter.clone();
+
+        Mock::given(method("GET"))
+            .and(path("/test"))
+            .respond_with(move |_req: &wiremock::Request| {
+                counter_clone.fetch_add(1, Ordering::SeqCst);
+                ResponseTemplate::new(404).set_body_string("Not Found")
+            })
+            .mount(&mock_server)
+            .await;
+
+        let auth = MockAuthProvider::new_with_token(test_token);
+        let github_client = GitHubClient::builder(auth)
+            .config(ClientConfig::default().with_github_api_url(mock_server.uri()))
+            .build()
+            .unwrap();
+
+        let installation_id = InstallationId::new(12345);
+        let client = github_client
+            .installation_by_id(installation_id)
+            .await
+            .unwrap();
+
+        let response = client.get("test").await;
+
+        // Should fail immediately without retries
+        assert!(response.is_err());
+        assert_eq!(attempt_counter.load(Ordering::SeqCst), 1);
+    }
+
+    /// Verify non-retryable 401 authentication error fails immediately.
+    ///
+    /// From spec: Authentication errors should not trigger retries.
+    #[tokio::test]
+    async fn test_non_retryable_401_fails_immediately() {
+        let mock_server = MockServer::start().await;
+        let test_token = "ghs_test_token";
+        let attempt_counter = StdArc::new(AtomicU32::new(0));
+        let counter_clone = attempt_counter.clone();
+
+        Mock::given(method("GET"))
+            .and(path("/test"))
+            .respond_with(move |_req: &wiremock::Request| {
+                counter_clone.fetch_add(1, Ordering::SeqCst);
+                ResponseTemplate::new(401).set_body_string("Unauthorized")
+            })
+            .mount(&mock_server)
+            .await;
+
+        let auth = MockAuthProvider::new_with_token(test_token);
+        let github_client = GitHubClient::builder(auth)
+            .config(ClientConfig::default().with_github_api_url(mock_server.uri()))
+            .build()
+            .unwrap();
+
+        let installation_id = InstallationId::new(12345);
+        let client = github_client
+            .installation_by_id(installation_id)
+            .await
+            .unwrap();
+
+        let response = client.get("test").await;
+
+        assert!(response.is_err());
+        assert_eq!(attempt_counter.load(Ordering::SeqCst), 1);
+    }
+
+    /// Verify 429 rate limit with Retry-After header is respected.
+    ///
+    /// From spec: 429 responses should parse Retry-After and delay accordingly.
+    /// Assertion #13: Rate limiting headers are parsed and respected.
+    #[tokio::test]
+    async fn test_429_with_retry_after_header() {
+        let mock_server = MockServer::start().await;
+        let test_token = "ghs_test_token";
+        let attempt_counter = StdArc::new(AtomicU32::new(0));
+        let counter_clone = attempt_counter.clone();
+
+        Mock::given(method("GET"))
+            .and(path("/test"))
+            .respond_with(move |_req: &wiremock::Request| {
+                let attempt = counter_clone.fetch_add(1, Ordering::SeqCst);
+                if attempt == 0 {
+                    // First request: rate limited with Retry-After
+                    ResponseTemplate::new(429)
+                        .insert_header("Retry-After", "2")
+                        .set_body_json(serde_json::json!({
+                            "message": "API rate limit exceeded"
+                        }))
+                } else {
+                    // Second request: success
+                    ResponseTemplate::new(200).set_body_json(serde_json::json!({"success": true}))
+                }
+            })
+            .expect(2)
+            .mount(&mock_server)
+            .await;
+
+        let auth = MockAuthProvider::new_with_token(test_token);
+        let github_client = GitHubClient::builder(auth)
+            .config(ClientConfig::default().with_github_api_url(mock_server.uri()))
+            .build()
+            .unwrap();
+
+        let installation_id = InstallationId::new(12345);
+        let client = github_client
+            .installation_by_id(installation_id)
+            .await
+            .unwrap();
+
+        let start = std::time::Instant::now();
+        let response = client.get("test").await;
+        let elapsed = start.elapsed();
+
+        // Should succeed after waiting for Retry-After
+        assert!(response.is_ok());
+        assert_eq!(response.unwrap().status(), 200);
+        assert_eq!(attempt_counter.load(Ordering::SeqCst), 2);
+        // Should have waited at least 2 seconds (with some tolerance for jitter/overhead)
+        assert!(elapsed.as_secs() >= 1);
+    }
+
+    /// Verify 403 secondary rate limit (abuse detection) is retried.
+    ///
+    /// From spec: 403 with abuse detection indicators should be retried with longer backoff.
+    /// Assertion #21: Secondary rate limits trigger appropriate backoff.
+    #[tokio::test]
+    async fn test_403_secondary_rate_limit_retry() {
+        let mock_server = MockServer::start().await;
+        let test_token = "ghs_test_token";
+        let attempt_counter = StdArc::new(AtomicU32::new(0));
+        let counter_clone = attempt_counter.clone();
+
+        Mock::given(method("GET"))
+            .and(path("/test"))
+            .respond_with(move |_req: &wiremock::Request| {
+                let attempt = counter_clone.fetch_add(1, Ordering::SeqCst);
+                if attempt == 0 {
+                    // First request: secondary rate limit
+                    ResponseTemplate::new(403).set_body_json(serde_json::json!({
+                        "message": "You have exceeded a secondary rate limit. Please wait a few minutes before you try again."
+                    }))
+                } else {
+                    // Second request: success
+                    ResponseTemplate::new(200).set_body_json(serde_json::json!({"success": true}))
+                }
+            })
+            .expect(2)
+            .mount(&mock_server)
+            .await;
+
+        let auth = MockAuthProvider::new_with_token(test_token);
+        let github_client = GitHubClient::builder(auth)
+            .config(ClientConfig::default().with_github_api_url(mock_server.uri()))
+            .build()
+            .unwrap();
+
+        let installation_id = InstallationId::new(12345);
+        let client = github_client
+            .installation_by_id(installation_id)
+            .await
+            .unwrap();
+
+        let response = client.get("test").await;
+
+        // Should succeed after retry
+        assert!(response.is_ok());
+        assert_eq!(response.unwrap().status(), 200);
+        assert_eq!(attempt_counter.load(Ordering::SeqCst), 2);
+    }
+
+    /// Verify 403 permission denied (non-abuse) fails immediately.
+    ///
+    /// From spec: 403 without abuse indicators is a permission error and should not retry.
+    #[tokio::test]
+    async fn test_403_permission_denied_fails_immediately() {
+        let mock_server = MockServer::start().await;
+        let test_token = "ghs_test_token";
+        let attempt_counter = StdArc::new(AtomicU32::new(0));
+        let counter_clone = attempt_counter.clone();
+
+        Mock::given(method("GET"))
+            .and(path("/test"))
+            .respond_with(move |_req: &wiremock::Request| {
+                counter_clone.fetch_add(1, Ordering::SeqCst);
+                ResponseTemplate::new(403).set_body_json(serde_json::json!({
+                    "message": "Resource not accessible by integration"
+                }))
+            })
+            .mount(&mock_server)
+            .await;
+
+        let auth = MockAuthProvider::new_with_token(test_token);
+        let github_client = GitHubClient::builder(auth)
+            .config(ClientConfig::default().with_github_api_url(mock_server.uri()))
+            .build()
+            .unwrap();
+
+        let installation_id = InstallationId::new(12345);
+        let client = github_client
+            .installation_by_id(installation_id)
+            .await
+            .unwrap();
+
+        let response = client.get("test").await;
+
+        // Should fail immediately without retries (permission error)
+        assert!(response.is_err());
+        assert_eq!(attempt_counter.load(Ordering::SeqCst), 1);
+    }
+
+    /// Verify POST request retries on transient errors.
+    ///
+    /// From spec: Retry logic should work for all HTTP methods, not just GET.
+    #[tokio::test]
+    async fn test_post_request_retry() {
+        let mock_server = MockServer::start().await;
+        let test_token = "ghs_test_token";
+        let attempt_counter = StdArc::new(AtomicU32::new(0));
+        let counter_clone = attempt_counter.clone();
+
+        Mock::given(method("POST"))
+            .and(path("/test"))
+            .respond_with(move |_req: &wiremock::Request| {
+                let attempt = counter_clone.fetch_add(1, Ordering::SeqCst);
+                if attempt == 0 {
+                    ResponseTemplate::new(502).set_body_string("Bad Gateway")
+                } else {
+                    ResponseTemplate::new(201).set_body_json(serde_json::json!({"id": 42}))
+                }
+            })
+            .expect(2)
+            .mount(&mock_server)
+            .await;
+
+        let auth = MockAuthProvider::new_with_token(test_token);
+        let github_client = GitHubClient::builder(auth)
+            .config(ClientConfig::default().with_github_api_url(mock_server.uri()))
+            .build()
+            .unwrap();
+
+        let installation_id = InstallationId::new(12345);
+        let client = github_client
+            .installation_by_id(installation_id)
+            .await
+            .unwrap();
+
+        let body = serde_json::json!({"data": "test"});
+        let response = client.post("test", &body).await;
+
+        assert!(response.is_ok());
+        assert_eq!(response.unwrap().status(), 201);
+        assert_eq!(attempt_counter.load(Ordering::SeqCst), 2);
+    }
+
+    /// Verify PUT request retries on transient errors.
+    #[tokio::test]
+    async fn test_put_request_retry() {
+        let mock_server = MockServer::start().await;
+        let test_token = "ghs_test_token";
+        let attempt_counter = StdArc::new(AtomicU32::new(0));
+        let counter_clone = attempt_counter.clone();
+
+        Mock::given(method("PUT"))
+            .and(path("/test"))
+            .respond_with(move |_req: &wiremock::Request| {
+                let attempt = counter_clone.fetch_add(1, Ordering::SeqCst);
+                if attempt == 0 {
+                    ResponseTemplate::new(500)
+                } else {
+                    ResponseTemplate::new(200)
+                }
+            })
+            .expect(2)
+            .mount(&mock_server)
+            .await;
+
+        let auth = MockAuthProvider::new_with_token(test_token);
+        let github_client = GitHubClient::builder(auth)
+            .config(ClientConfig::default().with_github_api_url(mock_server.uri()))
+            .build()
+            .unwrap();
+
+        let installation_id = InstallationId::new(12345);
+        let client = github_client
+            .installation_by_id(installation_id)
+            .await
+            .unwrap();
+
+        let body = serde_json::json!({"data": "test"});
+        let response = client.put("test", &body).await;
+
+        assert!(response.is_ok());
+        assert_eq!(attempt_counter.load(Ordering::SeqCst), 2);
+    }
+
+    /// Verify DELETE request retries on transient errors.
+    #[tokio::test]
+    async fn test_delete_request_retry() {
+        let mock_server = MockServer::start().await;
+        let test_token = "ghs_test_token";
+        let attempt_counter = StdArc::new(AtomicU32::new(0));
+        let counter_clone = attempt_counter.clone();
+
+        Mock::given(method("DELETE"))
+            .and(path("/test"))
+            .respond_with(move |_req: &wiremock::Request| {
+                let attempt = counter_clone.fetch_add(1, Ordering::SeqCst);
+                if attempt == 0 {
+                    ResponseTemplate::new(503)
+                } else {
+                    ResponseTemplate::new(204)
+                }
+            })
+            .expect(2)
+            .mount(&mock_server)
+            .await;
+
+        let auth = MockAuthProvider::new_with_token(test_token);
+        let github_client = GitHubClient::builder(auth)
+            .config(ClientConfig::default().with_github_api_url(mock_server.uri()))
+            .build()
+            .unwrap();
+
+        let installation_id = InstallationId::new(12345);
+        let client = github_client
+            .installation_by_id(installation_id)
+            .await
+            .unwrap();
+
+        let response = client.delete("test").await;
+
+        assert!(response.is_ok());
+        assert_eq!(attempt_counter.load(Ordering::SeqCst), 2);
+    }
+
+    /// Verify PATCH request retries on transient errors.
+    #[tokio::test]
+    async fn test_patch_request_retry() {
+        let mock_server = MockServer::start().await;
+        let test_token = "ghs_test_token";
+        let attempt_counter = StdArc::new(AtomicU32::new(0));
+        let counter_clone = attempt_counter.clone();
+
+        Mock::given(method("PATCH"))
+            .and(path("/test"))
+            .respond_with(move |_req: &wiremock::Request| {
+                let attempt = counter_clone.fetch_add(1, Ordering::SeqCst);
+                if attempt == 0 {
+                    ResponseTemplate::new(500)
+                } else {
+                    ResponseTemplate::new(200)
+                }
+            })
+            .expect(2)
+            .mount(&mock_server)
+            .await;
+
+        let auth = MockAuthProvider::new_with_token(test_token);
+        let github_client = GitHubClient::builder(auth)
+            .config(ClientConfig::default().with_github_api_url(mock_server.uri()))
+            .build()
+            .unwrap();
+
+        let installation_id = InstallationId::new(12345);
+        let client = github_client
+            .installation_by_id(installation_id)
+            .await
+            .unwrap();
+
+        let body = serde_json::json!({"data": "test"});
+        let response = client.patch("test", &body).await;
+
+        assert!(response.is_ok());
+        assert_eq!(attempt_counter.load(Ordering::SeqCst), 2);
+    }
+}
