@@ -267,7 +267,6 @@ impl RateLimiter {
         }
     }
 
-
     /// Check if we can proceed with a request for the given context and resource.
     ///
     /// # Arguments
@@ -302,7 +301,6 @@ impl RateLimiter {
         !rate_limit.is_exhausted() && !rate_limit.is_near_exhaustion(self.margin)
     }
 
-
     /// Get the current rate limit for a context and resource.
     ///
     /// # Arguments
@@ -318,7 +316,6 @@ impl RateLimiter {
         let key = (context.clone(), resource.to_string());
         self.limits.read().ok()?.get(&key).cloned()
     }
-
 }
 
 impl Default for RateLimiter {

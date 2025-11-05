@@ -251,7 +251,7 @@ pub fn parse_retry_after(retry_after: &str) -> Option<Duration> {
     if let Ok(date_time) = chrono::DateTime::parse_from_rfc2822(retry_after) {
         let now = Utc::now();
         let retry_time = date_time.with_timezone(&Utc);
-        
+
         if retry_time > now {
             let duration = (retry_time - now).num_seconds();
             if duration > 0 {
@@ -383,7 +383,7 @@ pub fn detect_secondary_rate_limit(status: u16, body: &str) -> bool {
     }
 
     let body_lower = body.to_lowercase();
-    
+
     // Check for rate limit indicators in response body
     body_lower.contains("rate limit")
         || body_lower.contains("rate_limit")
