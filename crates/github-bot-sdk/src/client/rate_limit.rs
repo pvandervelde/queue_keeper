@@ -8,6 +8,33 @@ use reqwest::header::HeaderMap;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
+use crate::auth::InstallationId;
+
+/// Authentication context for rate limit tracking.
+///
+/// GitHub enforces separate rate limits for app-level and installation-level operations.
+/// This enum distinguishes between the two contexts.
+///
+/// # Examples
+///
+/// ```
+/// use github_bot_sdk::client::RateLimitContext;
+/// use github_bot_sdk::auth::InstallationId;
+///
+/// // App-level context (using JWT)
+/// let app_context = RateLimitContext::App;
+///
+/// // Installation-level context (using installation token)
+/// let install_context = RateLimitContext::Installation(InstallationId::new(12345));
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum RateLimitContext {
+    /// App-level operations (authenticated with JWT)
+    App,
+    /// Installation-level operations (authenticated with installation token)
+    Installation(InstallationId),
+}
+
 /// Rate limit information from GitHub API response headers.
 ///
 /// GitHub includes rate limit information in HTTP response headers:
@@ -172,25 +199,33 @@ pub fn parse_rate_limit_from_headers(headers: &HeaderMap) -> Option<RateLimit> {
 
 /// Thread-safe rate limit tracker for GitHub API operations.
 ///
-/// Tracks rate limits for different GitHub API resources and provides
-/// methods to check rate limits before making requests.
+/// Tracks rate limits for different GitHub API resources and authentication contexts
+/// (app-level vs installation-level) and provides methods to check rate limits
+/// before making requests.
 ///
 /// # Examples
 ///
 /// ```
-/// use github_bot_sdk::client::RateLimiter;
+/// use github_bot_sdk::client::{RateLimiter, RateLimitContext};
+/// use github_bot_sdk::auth::InstallationId;
 ///
 /// let rate_limiter = RateLimiter::new(0.1); // 10% safety margin
 ///
-/// // Check if we can make a request
-/// if rate_limiter.can_proceed("core") {
+/// // Check if we can make an app-level request
+/// if rate_limiter.can_proceed(&RateLimitContext::App, "core") {
+///     // Make API request
+/// }
+///
+/// // Check if we can make an installation-level request
+/// let install_id = InstallationId::new(12345);
+/// if rate_limiter.can_proceed(&RateLimitContext::Installation(install_id), "core") {
 ///     // Make API request
 /// }
 /// ```
 #[derive(Debug, Clone)]
 pub struct RateLimiter {
-    /// Rate limits by resource type
-    limits: Arc<RwLock<HashMap<String, RateLimit>>>,
+    /// Rate limits by (context, resource) key
+    limits: Arc<RwLock<HashMap<(RateLimitContext, String), RateLimit>>>,
     /// Safety margin (0.0 to 1.0) - buffer before hitting limits
     margin: f64,
 }
@@ -221,35 +256,38 @@ impl RateLimiter {
     ///
     /// # Arguments
     ///
+    /// * `context` - The authentication context (app or installation)
     /// * `headers` - HTTP response headers containing rate limit info
-    pub fn update_from_headers(&self, headers: &HeaderMap) {
+    pub fn update_from_headers(&self, context: &RateLimitContext, headers: &HeaderMap) {
         if let Some(rate_limit) = parse_rate_limit_from_headers(headers) {
             let resource = rate_limit.resource().to_string();
             if let Ok(mut limits) = self.limits.write() {
-                limits.insert(resource, rate_limit);
+                limits.insert((context.clone(), resource), rate_limit);
             }
         }
     }
 
-    /// Check if we can proceed with a request for the given resource.
+    /// Check if we can proceed with a request for the given context and resource.
     ///
     /// # Arguments
     ///
+    /// * `context` - The authentication context (app or installation)
     /// * `resource` - The resource type (e.g., "core", "search")
     ///
     /// # Returns
     ///
     /// `true` if we have sufficient rate limit remaining (considering safety margin),
     /// `false` if we're at or near the rate limit.
-    pub fn can_proceed(&self, resource: &str) -> bool {
+    pub fn can_proceed(&self, context: &RateLimitContext, resource: &str) -> bool {
         // If we don't have rate limit data yet, allow the request
         let limits = match self.limits.read() {
             Ok(limits) => limits,
             Err(_) => return true, // Lock poisoned, allow request
         };
 
-        // If we don't have data for this resource, allow the request
-        let rate_limit = match limits.get(resource) {
+        // If we don't have data for this context/resource, allow the request
+        let key = (context.clone(), resource.to_string());
+        let rate_limit = match limits.get(&key) {
             Some(limit) => limit,
             None => return true,
         };
@@ -263,18 +301,20 @@ impl RateLimiter {
         !rate_limit.is_exhausted() && !rate_limit.is_near_exhaustion(self.margin)
     }
 
-    /// Get the current rate limit for a resource.
+    /// Get the current rate limit for a context and resource.
     ///
     /// # Arguments
     ///
+    /// * `context` - The authentication context (app or installation)
     /// * `resource` - The resource type
     ///
     /// # Returns
     ///
-    /// `Some(RateLimit)` if we have rate limit data for this resource,
+    /// `Some(RateLimit)` if we have rate limit data for this context/resource,
     /// `None` if we haven't received rate limit headers yet.
-    pub fn get_limit(&self, resource: &str) -> Option<RateLimit> {
-        self.limits.read().ok()?.get(resource).cloned()
+    pub fn get_limit(&self, context: &RateLimitContext, resource: &str) -> Option<RateLimit> {
+        let key = (context.clone(), resource.to_string());
+        self.limits.read().ok()?.get(&key).cloned()
     }
 }
 

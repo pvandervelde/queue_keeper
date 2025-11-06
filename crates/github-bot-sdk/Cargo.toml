@@ -26,6 +26,9 @@ rsa = "0.9"
 # Date/time
 chrono = { workspace = true }
 
+# Random number generation for jitter
+rand = "0.8"
+
 # Error handling
 thiserror = { workspace = true }
 anyhow = { workspace = true }
