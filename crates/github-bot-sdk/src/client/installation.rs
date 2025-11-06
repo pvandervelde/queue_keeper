@@ -158,7 +158,6 @@ impl InstallationClient {
 
                     // Check for secondary rate limit (403 with abuse detection)
                     if status == 403 {
-                        // Need to clone headers before consuming body
                         let body = response.text().await.unwrap_or_default();
 
                         if detect_secondary_rate_limit(status, &body) {
@@ -171,8 +170,11 @@ impl InstallationClient {
                             }
                         } else {
                             // Not a rate limit, it's a permission error - don't retry
-                            // Map to AuthorizationFailed for permission denied
-                            return Err(ApiError::AuthorizationFailed);
+                            // Return HttpError with body content for debugging
+                            return Err(ApiError::HttpError {
+                                status,
+                                message: body,
+                            });
                         }
                     }
 
