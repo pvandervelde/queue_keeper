@@ -103,8 +103,23 @@ impl SignatureValidator {
     /// # }
     /// ```
     pub async fn validate(&self, payload: &[u8], signature: &str) -> Result<bool, ValidationError> {
-        // TODO: implement
-        unimplemented!("validate not yet implemented")
+        // Parse the signature header
+        let signature_bytes = self.parse_signature(signature)?;
+
+        // Get webhook secret from provider
+        let secret = self.secrets.get_webhook_secret().await.map_err(|e| {
+            ValidationError::InvalidSignatureFormat {
+                message: format!("Failed to retrieve webhook secret: {}", e),
+            }
+        })?;
+
+        // Compute expected HMAC
+        let expected_hmac = self.compute_hmac(payload, &secret)?;
+
+        // Constant-time comparison
+        let is_valid = self.constant_time_compare(&signature_bytes, &expected_hmac);
+
+        Ok(is_valid)
     }
 
     /// Parse GitHub signature format.
@@ -125,8 +140,25 @@ impl SignatureValidator {
     /// - Signature doesn't start with "sha256="
     /// - Hex encoding is invalid
     fn parse_signature(&self, signature: &str) -> Result<Vec<u8>, ValidationError> {
-        // TODO: implement
-        unimplemented!("parse_signature not yet implemented")
+        // Check for "sha256=" prefix
+        const PREFIX: &str = "sha256=";
+        if !signature.starts_with(PREFIX) {
+            return Err(ValidationError::InvalidSignatureFormat {
+                message: format!(
+                    "Signature must start with '{}', got: '{}'",
+                    PREFIX,
+                    signature.chars().take(10).collect::<String>()
+                ),
+            });
+        }
+
+        // Extract hex portion
+        let hex_signature = &signature[PREFIX.len()..];
+
+        // Decode hex to bytes
+        hex::decode(hex_signature).map_err(|e| ValidationError::InvalidSignatureFormat {
+            message: format!("Invalid hex encoding in signature: {}", e),
+        })
     }
 
     /// Compute HMAC-SHA256 signature.
@@ -143,8 +175,23 @@ impl SignatureValidator {
     ///
     /// The computed HMAC signature bytes
     fn compute_hmac(&self, payload: &[u8], secret: &str) -> Result<Vec<u8>, ValidationError> {
-        // TODO: implement
-        unimplemented!("compute_hmac not yet implemented")
+        use hmac::{Hmac, Mac};
+        use sha2::Sha256;
+
+        type HmacSha256 = Hmac<Sha256>;
+
+        // Create HMAC instance with secret
+        let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).map_err(|e| {
+            ValidationError::HmacError {
+                message: format!("Failed to create HMAC instance: {}", e),
+            }
+        })?;
+
+        // Update with payload
+        mac.update(payload);
+
+        // Finalize and return bytes
+        Ok(mac.finalize().into_bytes().to_vec())
     }
 
     /// Constant-time comparison of signatures.
@@ -161,8 +208,15 @@ impl SignatureValidator {
     ///
     /// `true` if signatures match, `false` otherwise
     fn constant_time_compare(&self, a: &[u8], b: &[u8]) -> bool {
-        // TODO: implement
-        unimplemented!("constant_time_compare not yet implemented")
+        use subtle::ConstantTimeEq;
+
+        // Check length first (this is safe to do in non-constant time)
+        if a.len() != b.len() {
+            return false;
+        }
+
+        // Perform constant-time comparison
+        a.ct_eq(b).into()
     }
 }
 
