@@ -302,6 +302,14 @@ pub enum ValidationError {
     /// A field value is out of the acceptable range.
     #[error("Value out of range for {field}: {message}")]
     OutOfRange { field: String, message: String },
+
+    /// Webhook signature format is invalid.
+    #[error("Invalid signature format: {message}")]
+    InvalidSignatureFormat { message: String },
+
+    /// HMAC computation failed.
+    #[error("HMAC computation failed: {message}")]
+    HmacError { message: String },
 }
 
 #[cfg(test)]
