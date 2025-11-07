@@ -22,6 +22,8 @@ jsonwebtoken = { workspace = true }
 hmac = { workspace = true }
 sha2 = { workspace = true }
 rsa = "0.9"
+subtle = "2.5"
+hex = "0.4"
 
 # Date/time
 chrono = { workspace = true }

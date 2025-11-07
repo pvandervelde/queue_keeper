@@ -170,11 +170,7 @@ impl InstallationClient {
                             }
                         } else {
                             // Not a rate limit, it's a permission error - don't retry
-                            // Return HttpError with body content for debugging
-                            return Err(ApiError::HttpError {
-                                status,
-                                message: body,
-                            });
+                            return Err(ApiError::AuthorizationFailed);
                         }
                     }
 

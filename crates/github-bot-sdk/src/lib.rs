@@ -49,6 +49,7 @@
 pub mod auth;
 pub mod client;
 pub mod error;
+pub mod webhook;
 
 // Re-export commonly used types at crate root for convenience
 pub use error::{ApiError, AuthError, CacheError, SecretError, SigningError, ValidationError};
@@ -61,3 +62,5 @@ pub use auth::{
 };
 
 pub use client::{ClientConfig, ClientConfigBuilder, GitHubClient, GitHubClientBuilder};
+
+pub use webhook::SignatureValidator;
