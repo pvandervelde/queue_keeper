@@ -1,7 +1,7 @@
 //! Session management for ordered event processing.
 
 use super::processor::SessionIdStrategy;
-use super::{EntityType, EventEnvelope};
+use super::{EntityType, EventEnvelope, EventPayload};
 
 /// Manages session IDs for ordered event processing.
 ///

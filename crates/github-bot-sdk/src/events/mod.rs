@@ -160,7 +160,19 @@ impl EventEnvelope {
     /// let envelope = EventEnvelope::new("pull_request".to_string(), repository, payload);
     /// ```
     pub fn new(event_type: String, repository: Repository, payload: EventPayload) -> Self {
-        todo!("Implement EventEnvelope::new")
+        let entity_type = EntityType::from_event_type(&event_type);
+
+        Self {
+            event_id: EventId::new(),
+            event_type,
+            repository,
+            entity_type,
+            entity_id: None,
+            session_id: None,
+            payload,
+            metadata: EventMetadata::default(),
+            trace_context: None,
+        }
     }
 
     /// Add a session ID for ordered processing.
@@ -180,7 +192,14 @@ impl EventEnvelope {
     /// Returns a string in the format "repo:owner/name:entity_type:entity_id"
     /// for entities with IDs, or "repo:owner/name" for repository-level events.
     pub fn entity_key(&self) -> String {
-        todo!("Implement EventEnvelope::entity_key")
+        if let Some(ref entity_id) = self.entity_id {
+            format!(
+                "repo:{}:{:?}:{}",
+                self.repository.full_name, self.entity_type, entity_id
+            )
+        } else {
+            format!("repo:{}", self.repository.full_name)
+        }
     }
 
     /// Get the correlation ID for this event.
@@ -295,7 +314,20 @@ impl EntityType {
     /// assert_eq!(EntityType::from_event_type("unknown"), EntityType::Unknown);
     /// ```
     pub fn from_event_type(event_type: &str) -> Self {
-        todo!("Implement EntityType::from_event_type")
+        match event_type {
+            "pull_request" | "pull_request_review" | "pull_request_review_comment" => {
+                Self::PullRequest
+            }
+            "issues" | "issue_comment" => Self::Issue,
+            "push" | "create" | "delete" => Self::Branch,
+            "release" | "release_published" => Self::Release,
+            "check_run" => Self::CheckRun,
+            "check_suite" => Self::CheckSuite,
+            "deployment" | "deployment_status" => Self::Deployment,
+            "repository" => Self::Repository,
+            "organization" | "member" | "membership" => Self::Organization,
+            _ => Self::Unknown,
+        }
     }
 
     /// Check if this entity type supports ordered processing.
@@ -333,27 +365,27 @@ impl EventPayload {
 
     /// Parse as a pull request event.
     pub fn parse_pull_request(&self) -> Result<PullRequestEvent, EventError> {
-        todo!("Implement EventPayload::parse_pull_request")
+        Ok(serde_json::from_value(self.inner.clone())?)
     }
 
     /// Parse as an issue event.
     pub fn parse_issue(&self) -> Result<IssueEvent, EventError> {
-        todo!("Implement EventPayload::parse_issue")
+        Ok(serde_json::from_value(self.inner.clone())?)
     }
 
     /// Parse as a push event.
     pub fn parse_push(&self) -> Result<PushEvent, EventError> {
-        todo!("Implement EventPayload::parse_push")
+        Ok(serde_json::from_value(self.inner.clone())?)
     }
 
     /// Parse as a check run event.
     pub fn parse_check_run(&self) -> Result<CheckRunEvent, EventError> {
-        todo!("Implement EventPayload::parse_check_run")
+        Ok(serde_json::from_value(self.inner.clone())?)
     }
 
     /// Parse as a check suite event.
     pub fn parse_check_suite(&self) -> Result<CheckSuiteEvent, EventError> {
-        todo!("Implement EventPayload::parse_check_suite")
+        Ok(serde_json::from_value(self.inner.clone())?)
     }
 }
 

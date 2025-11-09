@@ -457,7 +457,7 @@ fn test_session_id_strategy_variants() {
 #[test]
 fn test_pull_request_action_variants() {
     // Ensure all PR action variants exist
-    let actions = vec![
+    let actions = [
         PullRequestAction::Opened,
         PullRequestAction::Closed,
         PullRequestAction::Reopened,
@@ -479,7 +479,7 @@ fn test_pull_request_action_variants() {
 #[test]
 fn test_issue_action_variants() {
     // Ensure all issue action variants exist
-    let actions = vec![
+    let actions = [
         IssueAction::Opened,
         IssueAction::Closed,
         IssueAction::Reopened,
@@ -498,7 +498,7 @@ fn test_issue_action_variants() {
 
 #[test]
 fn test_check_run_action_variants() {
-    let actions = vec![
+    let actions = [
         CheckRunAction::Created,
         CheckRunAction::Completed,
         CheckRunAction::Rerequested,
@@ -510,7 +510,7 @@ fn test_check_run_action_variants() {
 
 #[test]
 fn test_check_suite_action_variants() {
-    let actions = vec![
+    let actions = [
         CheckSuiteAction::Completed,
         CheckSuiteAction::Requested,
         CheckSuiteAction::Rerequested,
@@ -521,7 +521,7 @@ fn test_check_suite_action_variants() {
 
 #[test]
 fn test_entity_type_variants() {
-    let types = vec![
+    let types = [
         EntityType::Repository,
         EntityType::PullRequest,
         EntityType::Issue,
@@ -539,8 +539,8 @@ fn test_entity_type_variants() {
 }
 
 #[test]
-fn test_event_source_variants() {
-    let sources = vec![EventSource::GitHub, EventSource::Replay, EventSource::Test];
+fn test_event_source_enum_variants() {
+    let sources = [EventSource::GitHub, EventSource::Replay, EventSource::Test];
 
     assert_eq!(sources.len(), 3);
 }
