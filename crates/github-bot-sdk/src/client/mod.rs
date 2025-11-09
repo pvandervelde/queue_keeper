@@ -43,7 +43,7 @@ pub use pull_request::{
 };
 pub use rate_limit::{parse_rate_limit_from_headers, RateLimit, RateLimitContext, RateLimiter};
 pub use release::{CreateReleaseRequest, Release, ReleaseAsset, UpdateReleaseRequest};
-pub use repository::{Branch, Commit, GitRef, Repository, RepositoryOwner, Tag};
+pub use repository::{Branch, Commit, GitRef, OwnerType, Repository, RepositoryOwner, Tag};
 pub use retry::{
     calculate_rate_limit_delay, detect_secondary_rate_limit, parse_retry_after, RateLimitInfo,
     RetryPolicy,
