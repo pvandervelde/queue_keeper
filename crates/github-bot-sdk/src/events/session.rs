@@ -32,7 +32,51 @@ impl SessionManager {
     /// Returns `None` if the strategy is `SessionIdStrategy::None` or if
     /// the event doesn't support session-based ordering.
     pub fn generate_session_id(&self, envelope: &EventEnvelope) -> Option<String> {
-        todo!("Implement SessionManager::generate_session_id")
+        match &self.strategy {
+            SessionIdStrategy::None => None,
+            SessionIdStrategy::Entity => {
+                // Generate entity-based session ID
+                if let Some(ref id) = envelope.entity_id {
+                    match envelope.entity_type {
+                        EntityType::PullRequest => {
+                            Some(format!("pr-{}-{}", envelope.repository.full_name, id))
+                        }
+                        EntityType::Issue => {
+                            Some(format!("issue-{}-{}", envelope.repository.full_name, id))
+                        }
+                        EntityType::Branch => {
+                            Some(format!("branch-{}-{}", envelope.repository.full_name, id))
+                        }
+                        EntityType::CheckRun => Some(format!(
+                            "check-run-{}-{}",
+                            envelope.repository.full_name, id
+                        )),
+                        EntityType::CheckSuite => Some(format!(
+                            "check-suite-{}-{}",
+                            envelope.repository.full_name, id
+                        )),
+                        EntityType::Release => {
+                            Some(format!("release-{}-{}", envelope.repository.full_name, id))
+                        }
+                        EntityType::Deployment => Some(format!(
+                            "deployment-{}-{}",
+                            envelope.repository.full_name, id
+                        )),
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            }
+            SessionIdStrategy::Repository => {
+                // Generate repository-based session ID
+                Some(format!("repo-{}", envelope.repository.full_name))
+            }
+            SessionIdStrategy::Custom(f) => {
+                // Use custom function
+                f(envelope)
+            }
+        }
     }
 
     /// Extract an ordering key from an event envelope.
@@ -40,7 +84,8 @@ impl SessionManager {
     /// The ordering key is used by queue systems to ensure events with
     /// the same key are processed in order.
     pub fn extract_ordering_key(&self, envelope: &EventEnvelope) -> Option<String> {
-        todo!("Implement SessionManager::extract_ordering_key")
+        // Ordering key is the same as session ID for this implementation
+        self.generate_session_id(envelope)
     }
 
     /// Get an entity-based session strategy.

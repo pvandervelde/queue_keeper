@@ -1,14 +1,11 @@
 //! Event processor for converting raw webhooks to normalized events.
 
-use async_trait::async_trait;
-use chrono::Utc;
 use serde_json::Value;
 
 use crate::client::Repository;
 use crate::error::EventError;
-use crate::webhook::SignatureValidator;
 
-use super::{EntityType, EventEnvelope, EventId, EventMetadata, EventPayload, EventSource};
+use super::{EntityType, EventEnvelope, EventId, EventMetadata, EventPayload};
 
 /// Event processor configuration.
 ///
@@ -122,7 +119,66 @@ impl EventProcessor {
         payload: &[u8],
         delivery_id: Option<&str>,
     ) -> Result<EventEnvelope, EventError> {
-        todo!("Implement EventProcessor::process_webhook")
+        // Check payload size
+        if payload.len() > self.config.max_payload_size {
+            return Err(EventError::PayloadTooLarge {
+                size: payload.len(),
+                max: self.config.max_payload_size,
+            });
+        }
+
+        // Parse JSON payload
+        let json_payload: Value = serde_json::from_slice(payload)?;
+
+        // Extract repository information
+        let repository =
+            json_payload
+                .get("repository")
+                .ok_or_else(|| EventError::MissingField {
+                    field: "repository".to_string(),
+                })?;
+
+        let repository: Repository = serde_json::from_value(repository.clone())?;
+
+        // Extract entity information
+        let (entity_type, entity_id) = self.extract_entity_info(event_type, &json_payload)?;
+
+        // Create event payload wrapper
+        let event_payload = EventPayload::new(json_payload);
+
+        // Create event ID
+        let event_id = if let Some(delivery_id) = delivery_id {
+            EventId::from_github_delivery(delivery_id)
+        } else {
+            EventId::new()
+        };
+
+        // Create metadata
+        let mut metadata = EventMetadata::default();
+        metadata.delivery_id = delivery_id.map(|s| s.to_string());
+        metadata.signature_valid = !self.config.enable_signature_validation; // Default if not validated
+
+        // Create envelope
+        let mut envelope = EventEnvelope {
+            event_id,
+            event_type: event_type.to_string(),
+            repository,
+            entity_type,
+            entity_id: entity_id.clone(),
+            session_id: None,
+            payload: event_payload,
+            metadata,
+            trace_context: None,
+        };
+
+        // Generate session ID if enabled
+        if self.config.enable_session_correlation {
+            let session_id =
+                self.generate_session_id(&envelope.entity_type, &entity_id, &envelope.repository);
+            envelope.session_id = session_id;
+        }
+
+        Ok(envelope)
     }
 
     /// Extract entity information from the payload.
@@ -133,7 +189,72 @@ impl EventProcessor {
         event_type: &str,
         payload: &Value,
     ) -> Result<(EntityType, Option<String>), EventError> {
-        todo!("Implement EventProcessor::extract_entity_info")
+        let entity_type = EntityType::from_event_type(event_type);
+
+        // Extract entity ID based on event type
+        let entity_id = match event_type {
+            "pull_request" | "pull_request_review" | "pull_request_review_comment" => {
+                // For PR events, extract PR number
+                payload
+                    .get("number")
+                    .or_else(|| payload.get("pull_request").and_then(|pr| pr.get("number")))
+                    .and_then(|v| v.as_u64())
+                    .map(|n| n.to_string())
+            }
+            "issues" | "issue_comment" => {
+                // For issue events, extract issue number
+                payload
+                    .get("issue")
+                    .and_then(|issue| issue.get("number"))
+                    .and_then(|v| v.as_u64())
+                    .map(|n| n.to_string())
+            }
+            "push" | "create" | "delete" => {
+                // For branch events, extract ref name
+                payload
+                    .get("ref")
+                    .and_then(|v| v.as_str())
+                    .map(|r| r.to_string())
+            }
+            "check_run" => {
+                // For check run events, extract check run ID
+                payload
+                    .get("check_run")
+                    .and_then(|cr| cr.get("id"))
+                    .and_then(|v| v.as_u64())
+                    .map(|n| n.to_string())
+            }
+            "check_suite" => {
+                // For check suite events, extract check suite ID
+                payload
+                    .get("check_suite")
+                    .and_then(|cs| cs.get("id"))
+                    .and_then(|v| v.as_u64())
+                    .map(|n| n.to_string())
+            }
+            "release" => {
+                // For release events, extract release ID
+                payload
+                    .get("release")
+                    .and_then(|r| r.get("id"))
+                    .and_then(|v| v.as_u64())
+                    .map(|n| n.to_string())
+            }
+            "deployment" | "deployment_status" => {
+                // For deployment events, extract deployment ID
+                payload
+                    .get("deployment")
+                    .and_then(|d| d.get("id"))
+                    .and_then(|v| v.as_u64())
+                    .map(|n| n.to_string())
+            }
+            _ => {
+                // For other events, no specific entity ID
+                None
+            }
+        };
+
+        Ok((entity_type, entity_id))
     }
 
     /// Generate a session ID for ordered processing.
@@ -146,7 +267,57 @@ impl EventProcessor {
         entity_id: &Option<String>,
         repository: &Repository,
     ) -> Option<String> {
-        todo!("Implement EventProcessor::generate_session_id")
+        match &self.config.session_id_strategy {
+            SessionIdStrategy::None => None,
+            SessionIdStrategy::Entity => {
+                // Generate entity-based session ID
+                if let Some(id) = entity_id {
+                    match entity_type {
+                        EntityType::PullRequest => {
+                            Some(format!("pr-{}-{}", repository.full_name, id))
+                        }
+                        EntityType::Issue => Some(format!("issue-{}-{}", repository.full_name, id)),
+                        EntityType::Branch => {
+                            Some(format!("branch-{}-{}", repository.full_name, id))
+                        }
+                        EntityType::CheckRun => {
+                            Some(format!("check-run-{}-{}", repository.full_name, id))
+                        }
+                        EntityType::CheckSuite => {
+                            Some(format!("check-suite-{}-{}", repository.full_name, id))
+                        }
+                        EntityType::Release => {
+                            Some(format!("release-{}-{}", repository.full_name, id))
+                        }
+                        EntityType::Deployment => {
+                            Some(format!("deployment-{}-{}", repository.full_name, id))
+                        }
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            }
+            SessionIdStrategy::Repository => {
+                // Generate repository-based session ID
+                Some(format!("repo-{}", repository.full_name))
+            }
+            SessionIdStrategy::Custom(f) => {
+                // Use custom function - create temporary envelope for evaluation
+                let temp_envelope = EventEnvelope {
+                    event_id: EventId::new(),
+                    event_type: String::new(),
+                    repository: repository.clone(),
+                    entity_type: entity_type.clone(),
+                    entity_id: entity_id.clone(),
+                    session_id: None,
+                    payload: EventPayload::new(serde_json::Value::Null),
+                    metadata: EventMetadata::default(),
+                    trace_context: None,
+                };
+                f(&temp_envelope)
+            }
+        }
     }
 }
 
