@@ -312,6 +312,56 @@ pub enum ValidationError {
     HmacError { message: String },
 }
 
+/// Event processing errors.
+///
+/// These errors occur when processing GitHub webhook events, including
+/// parsing, validation, and normalization failures.
+#[derive(Debug, Error)]
+pub enum EventError {
+    /// The event payload is invalid or malformed.
+    #[error("Invalid event payload: {message}")]
+    InvalidPayload { message: String },
+
+    /// The event type is not supported.
+    #[error("Unsupported event type: {event_type}")]
+    UnsupportedEventType { event_type: String },
+
+    /// Webhook signature validation failed.
+    #[error("Signature validation failed")]
+    InvalidSignature,
+
+    /// A required field is missing from the payload.
+    #[error("Missing required field: {field}")]
+    MissingField { field: String },
+
+    /// The payload size exceeds the maximum allowed.
+    #[error("Payload too large: {size} bytes (max: {max})")]
+    PayloadTooLarge { size: usize, max: usize },
+
+    /// JSON parsing failed.
+    #[error("JSON parsing error: {0}")]
+    JsonParsing(#[from] serde_json::Error),
+
+    /// Secret provider error while validating signature.
+    #[error("Secret provider error: {0}")]
+    SecretProvider(#[source] Box<dyn std::error::Error + Send + Sync>),
+}
+
+impl EventError {
+    /// Check if this error represents a transient condition that may succeed if retried.
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::InvalidPayload { .. } => false,
+            Self::UnsupportedEventType { .. } => false,
+            Self::InvalidSignature => false,
+            Self::MissingField { .. } => false,
+            Self::PayloadTooLarge { .. } => false,
+            Self::JsonParsing(_) => false,
+            Self::SecretProvider(_) => true, // Secret retrieval might be temporarily unavailable
+        }
+    }
+}
+
 #[cfg(test)]
 #[path = "error_tests.rs"]
 mod tests;
