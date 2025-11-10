@@ -24,6 +24,7 @@
 //! let processor = EventProcessor::new(config);
 //!
 //! // Process incoming webhook
+//! let payload_bytes = b"{\"action\": \"opened\", \"repository\": {}}";
 //! let envelope = processor.process_webhook(
 //!     "pull_request",
 //!     payload_bytes,
@@ -86,20 +87,28 @@ pub use session::SessionManager;
 ///
 /// ```rust
 /// use github_bot_sdk::events::{EventEnvelope, EventPayload, EntityType};
-/// use github_bot_sdk::client::Repository;
+/// use github_bot_sdk::client::{Repository, RepositoryOwner, OwnerType};
 /// use serde_json::json;
+/// use chrono::Utc;
 ///
 /// # let repository = Repository {
 /// #     id: 12345,
 /// #     name: "repo".to_string(),
 /// #     full_name: "owner/repo".to_string(),
-/// #     owner: None,
+/// #     owner: RepositoryOwner {
+/// #         login: "owner".to_string(),
+/// #         id: 1,
+/// #         avatar_url: "https://example.com/avatar.png".to_string(),
+/// #         owner_type: OwnerType::User,
+/// #     },
 /// #     private: false,
 /// #     description: None,
-/// #     fork: false,
-/// #     url: "https://api.github.com/repos/owner/repo".to_string(),
-/// #     html_url: "https://github.com/owner/repo".to_string(),
 /// #     default_branch: "main".to_string(),
+/// #     html_url: "https://github.com/owner/repo".to_string(),
+/// #     clone_url: "https://github.com/owner/repo.git".to_string(),
+/// #     ssh_url: "git@github.com:owner/repo.git".to_string(),
+/// #     created_at: Utc::now(),
+/// #     updated_at: Utc::now(),
 /// # };
 /// let payload = EventPayload::new(json!({"action": "opened"}));
 ///
@@ -149,12 +158,27 @@ impl EventEnvelope {
     ///
     /// ```rust
     /// # use github_bot_sdk::events::{EventEnvelope, EventPayload};
-    /// # use github_bot_sdk::client::Repository;
+    /// # use github_bot_sdk::client::{Repository, RepositoryOwner, OwnerType};
     /// # use serde_json::json;
+    /// # use chrono::Utc;
     /// # let repository = Repository {
-    /// #     id: 1, name: "repo".to_string(), full_name: "owner/repo".to_string(),
-    /// #     owner: None, private: false, description: None, fork: false,
-    /// #     url: "".to_string(), html_url: "".to_string(), default_branch: "main".to_string()
+    /// #     id: 1,
+    /// #     name: "repo".to_string(),
+    /// #     full_name: "owner/repo".to_string(),
+    /// #     owner: RepositoryOwner {
+    /// #         login: "owner".to_string(),
+    /// #         id: 1,
+    /// #         avatar_url: "https://example.com/avatar.png".to_string(),
+    /// #         owner_type: OwnerType::User,
+    /// #     },
+    /// #     private: false,
+    /// #     description: None,
+    /// #     default_branch: "main".to_string(),
+    /// #     html_url: "https://github.com/owner/repo".to_string(),
+    /// #     clone_url: "https://github.com/owner/repo.git".to_string(),
+    /// #     ssh_url: "git@github.com:owner/repo.git".to_string(),
+    /// #     created_at: Utc::now(),
+    /// #     updated_at: Utc::now(),
     /// # };
     /// let payload = EventPayload::new(json!({"action": "opened"}));
     /// let envelope = EventEnvelope::new("pull_request".to_string(), repository, payload);
