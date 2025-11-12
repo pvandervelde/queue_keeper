@@ -121,6 +121,9 @@ pub enum ConfigurationError {
 
     #[error("Configuration parsing failed: {message}")]
     Parsing { message: String },
+
+    #[error("Unsupported provider: {provider} - {message}")]
+    UnsupportedProvider { provider: String, message: String },
 }
 
 /// Validation errors

@@ -4,7 +4,7 @@ use crate::error::QueueError;
 use crate::message::{
     Message, MessageId, QueueName, ReceiptHandle, ReceivedMessage, SessionId, Timestamp,
 };
-use crate::provider::{ProviderType, QueueConfig, SessionSupport};
+use crate::provider::{InMemoryConfig, ProviderConfig, ProviderType, QueueConfig, SessionSupport};
 use async_trait::async_trait;
 use chrono::Duration;
 
@@ -214,92 +214,193 @@ pub struct QueueClientFactory;
 
 impl QueueClientFactory {
     /// Create queue client from configuration
-    pub async fn create_client(_config: QueueConfig) -> Result<Box<dyn QueueClient>, QueueError> {
-        // TODO: Implement client factory
-        // See specs/interfaces/queue-client.md
-        unimplemented!("Queue client factory not yet implemented")
+    pub async fn create_client(config: QueueConfig) -> Result<Box<dyn QueueClient>, QueueError> {
+        // Clone config for client since we need to move parts for provider
+        let client_config = config.clone();
+
+        // Create provider based on configuration
+        let provider: Box<dyn QueueProvider> = match config.provider {
+            ProviderConfig::InMemory(in_memory_config) => {
+                Box::new(InMemoryProvider::new(in_memory_config))
+            }
+            ProviderConfig::AzureServiceBus(_azure_config) => {
+                // TODO: Implement Azure Service Bus provider in task 18.0
+                return Err(QueueError::ConfigurationError(
+                    crate::error::ConfigurationError::UnsupportedProvider {
+                        provider: "AzureServiceBus".to_string(),
+                        message: "Azure Service Bus provider not yet implemented".to_string(),
+                    },
+                ));
+            }
+            ProviderConfig::AwsSqs(_aws_config) => {
+                // TODO: Implement AWS SQS provider in future task
+                return Err(QueueError::ConfigurationError(
+                    crate::error::ConfigurationError::UnsupportedProvider {
+                        provider: "AwsSqs".to_string(),
+                        message: "AWS SQS provider not yet implemented".to_string(),
+                    },
+                ));
+            }
+        };
+
+        // Wrap provider in StandardQueueClient
+        Ok(Box::new(StandardQueueClient::new(provider, client_config)))
     }
 
     /// Create test client with in-memory provider
     pub fn create_test_client() -> Box<dyn QueueClient> {
-        // TODO: Implement test client creation
-        // See specs/interfaces/queue-client.md
-        unimplemented!("Test client creation not yet implemented")
+        let provider = InMemoryProvider::new(InMemoryConfig::default());
+        let config = QueueConfig::default();
+        Box::new(StandardQueueClient::new(Box::new(provider), config))
     }
 }
 
 /// Standard queue client implementation
-pub struct StandardQueueClient;
+pub struct StandardQueueClient {
+    provider: Box<dyn QueueProvider>,
+    #[allow(dead_code)] // Will be used for retry logic and timeouts in future
+    config: QueueConfig,
+}
+
+impl StandardQueueClient {
+    /// Create new standard queue client with provider
+    pub fn new(provider: Box<dyn QueueProvider>, config: QueueConfig) -> Self {
+        Self { provider, config }
+    }
+}
 
 #[async_trait]
 impl QueueClient for StandardQueueClient {
     async fn send_message(
         &self,
-        _queue: &QueueName,
-        _message: Message,
+        queue: &QueueName,
+        message: Message,
     ) -> Result<MessageId, QueueError> {
-        unimplemented!("Message sending not yet implemented")
+        self.provider.send_message(queue, &message).await
     }
 
     async fn send_messages(
         &self,
-        _queue: &QueueName,
-        _messages: Vec<Message>,
+        queue: &QueueName,
+        messages: Vec<Message>,
     ) -> Result<Vec<MessageId>, QueueError> {
-        unimplemented!("Batch message sending not yet implemented")
+        // Pass slice of messages to provider
+        self.provider.send_messages(queue, &messages).await
     }
 
     async fn receive_message(
         &self,
-        _queue: &QueueName,
-        _timeout: Duration,
+        queue: &QueueName,
+        timeout: Duration,
     ) -> Result<Option<ReceivedMessage>, QueueError> {
-        unimplemented!("Message receiving not yet implemented")
+        self.provider.receive_message(queue, timeout).await
     }
 
     async fn receive_messages(
         &self,
-        _queue: &QueueName,
-        _max_messages: u32,
-        _timeout: Duration,
+        queue: &QueueName,
+        max_messages: u32,
+        timeout: Duration,
     ) -> Result<Vec<ReceivedMessage>, QueueError> {
-        unimplemented!("Batch message receiving not yet implemented")
+        self.provider
+            .receive_messages(queue, max_messages, timeout)
+            .await
     }
 
-    async fn complete_message(&self, _receipt: ReceiptHandle) -> Result<(), QueueError> {
-        unimplemented!("Message completion not yet implemented")
+    async fn complete_message(&self, receipt: ReceiptHandle) -> Result<(), QueueError> {
+        self.provider.complete_message(&receipt).await
     }
 
-    async fn abandon_message(&self, _receipt: ReceiptHandle) -> Result<(), QueueError> {
-        unimplemented!("Message abandonment not yet implemented")
+    async fn abandon_message(&self, receipt: ReceiptHandle) -> Result<(), QueueError> {
+        self.provider.abandon_message(&receipt).await
     }
 
     async fn dead_letter_message(
         &self,
-        _receipt: ReceiptHandle,
-        _reason: String,
+        receipt: ReceiptHandle,
+        reason: String,
     ) -> Result<(), QueueError> {
-        unimplemented!("Dead letter handling not yet implemented")
+        self.provider.dead_letter_message(&receipt, &reason).await
     }
 
     async fn accept_session(
         &self,
-        _queue: &QueueName,
-        _session_id: Option<SessionId>,
+        queue: &QueueName,
+        session_id: Option<SessionId>,
     ) -> Result<Box<dyn SessionClient>, QueueError> {
-        unimplemented!("Session acceptance not yet implemented")
+        let session_provider = self
+            .provider
+            .create_session_client(queue, session_id)
+            .await?;
+        Ok(Box::new(StandardSessionClient::new(session_provider)))
     }
 
     fn provider_type(&self) -> ProviderType {
-        ProviderType::InMemory
+        self.provider.provider_type()
     }
 
     fn supports_sessions(&self) -> bool {
-        true
+        matches!(
+            self.provider.supports_sessions(),
+            SessionSupport::Native | SessionSupport::Emulated
+        )
     }
 
     fn supports_batching(&self) -> bool {
-        true
+        self.provider.supports_batching()
+    }
+}
+
+/// Standard session client implementation
+struct StandardSessionClient {
+    provider: Box<dyn SessionProvider>,
+}
+
+impl StandardSessionClient {
+    fn new(provider: Box<dyn SessionProvider>) -> Self {
+        Self { provider }
+    }
+}
+
+#[async_trait]
+impl SessionClient for StandardSessionClient {
+    async fn receive_message(
+        &self,
+        timeout: Duration,
+    ) -> Result<Option<ReceivedMessage>, QueueError> {
+        self.provider.receive_message(timeout).await
+    }
+
+    async fn complete_message(&self, receipt: ReceiptHandle) -> Result<(), QueueError> {
+        self.provider.complete_message(&receipt).await
+    }
+
+    async fn abandon_message(&self, receipt: ReceiptHandle) -> Result<(), QueueError> {
+        self.provider.abandon_message(&receipt).await
+    }
+
+    async fn dead_letter_message(
+        &self,
+        receipt: ReceiptHandle,
+        reason: String,
+    ) -> Result<(), QueueError> {
+        self.provider.dead_letter_message(&receipt, &reason).await
+    }
+
+    async fn renew_session_lock(&self) -> Result<(), QueueError> {
+        self.provider.renew_session_lock().await
+    }
+
+    async fn close_session(&self) -> Result<(), QueueError> {
+        self.provider.close_session().await
+    }
+
+    fn session_id(&self) -> &SessionId {
+        self.provider.session_id()
+    }
+
+    fn session_expires_at(&self) -> Timestamp {
+        self.provider.session_expires_at()
     }
 }
 
