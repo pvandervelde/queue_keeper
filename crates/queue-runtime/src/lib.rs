@@ -31,8 +31,11 @@ pub use client::{
     SessionProvider, StandardQueueClient,
 };
 pub use error::{ConfigurationError, QueueError, SerializationError, ValidationError};
-pub use message::{Message, MessageId, QueueName, ReceivedMessage, ReceiptHandle, SessionId, Timestamp};
+pub use message::{
+    Message, MessageId, QueueName, ReceiptHandle, ReceiveOptions, ReceivedMessage, SendOptions,
+    SessionId, Timestamp,
+};
 pub use provider::{
-    AzureServiceBusConfig, AwsSqsConfig, InMemoryConfig, ProviderConfig, ProviderType,
-    QueueConfig, SessionSupport,
+    AwsSqsConfig, AzureServiceBusConfig, InMemoryConfig, ProviderConfig, ProviderType, QueueConfig,
+    SessionSupport,
 };

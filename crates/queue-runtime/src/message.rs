@@ -366,6 +366,169 @@ impl ReceiptHandle {
     }
 }
 
+// ============================================================================
+// Send and Receive Options
+// ============================================================================
+
+/// Configuration options for sending messages to queues
+#[derive(Debug, Clone, Default)]
+pub struct SendOptions {
+    /// Session ID for ordered processing workflows
+    pub session_id: Option<SessionId>,
+    /// Correlation ID for request/response and tracing patterns
+    pub correlation_id: Option<String>,
+    /// Scheduled delivery time for delayed message processing
+    pub scheduled_enqueue_time: Option<Timestamp>,
+    /// Time-to-live for automatic message expiration
+    pub time_to_live: Option<Duration>,
+    /// Custom properties for metadata and routing information
+    pub properties: HashMap<String, String>,
+    /// Content type override for specialized message formats
+    pub content_type: Option<String>,
+    /// Duplicate detection ID for exactly-once delivery guarantees
+    pub duplicate_detection_id: Option<String>,
+}
+
+impl SendOptions {
+    /// Create new send options with defaults
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set session ID for ordered processing
+    pub fn with_session_id(mut self, session_id: SessionId) -> Self {
+        self.session_id = Some(session_id);
+        self
+    }
+
+    /// Set correlation ID for tracing
+    pub fn with_correlation_id(mut self, correlation_id: String) -> Self {
+        self.correlation_id = Some(correlation_id);
+        self
+    }
+
+    /// Set scheduled delivery time
+    pub fn with_scheduled_enqueue_time(mut self, time: Timestamp) -> Self {
+        self.scheduled_enqueue_time = Some(time);
+        self
+    }
+
+    /// Set scheduled delivery with a delay from now
+    pub fn with_delay(mut self, delay: Duration) -> Self {
+        let scheduled_time = Timestamp::from_datetime(Utc::now() + delay);
+        self.scheduled_enqueue_time = Some(scheduled_time);
+        self
+    }
+
+    /// Set time-to-live for message expiration
+    pub fn with_time_to_live(mut self, ttl: Duration) -> Self {
+        self.time_to_live = Some(ttl);
+        self
+    }
+
+    /// Add a custom property
+    pub fn with_property(mut self, key: String, value: String) -> Self {
+        self.properties.insert(key, value);
+        self
+    }
+
+    /// Set content type
+    pub fn with_content_type(mut self, content_type: String) -> Self {
+        self.content_type = Some(content_type);
+        self
+    }
+
+    /// Set duplicate detection ID
+    pub fn with_duplicate_detection_id(mut self, id: String) -> Self {
+        self.duplicate_detection_id = Some(id);
+        self
+    }
+}
+
+/// Configuration options for receiving messages from queues
+#[derive(Debug, Clone)]
+pub struct ReceiveOptions {
+    /// Maximum number of messages to receive in a batch
+    pub max_messages: u32,
+    /// Timeout duration for receive operations
+    pub timeout: Duration,
+    /// Session ID for session-specific message consumption
+    pub session_id: Option<SessionId>,
+    /// Whether to accept any available session
+    pub accept_any_session: bool,
+    /// Message lock duration for processing time management
+    pub lock_duration: Option<Duration>,
+    /// Peek-only mode for message inspection without consumption
+    pub peek_only: bool,
+    /// Sequence number for replay and recovery scenarios
+    pub from_sequence_number: Option<u64>,
+}
+
+impl Default for ReceiveOptions {
+    fn default() -> Self {
+        Self {
+            max_messages: 1,
+            timeout: Duration::seconds(30),
+            session_id: None,
+            accept_any_session: false,
+            lock_duration: None,
+            peek_only: false,
+            from_sequence_number: None,
+        }
+    }
+}
+
+impl ReceiveOptions {
+    /// Create new receive options with defaults
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set maximum number of messages to receive
+    pub fn with_max_messages(mut self, max: u32) -> Self {
+        self.max_messages = max;
+        self
+    }
+
+    /// Set timeout duration
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
+    }
+
+    /// Set specific session ID to consume from
+    pub fn with_session_id(mut self, session_id: SessionId) -> Self {
+        self.session_id = Some(session_id);
+        self.accept_any_session = false;
+        self
+    }
+
+    /// Accept messages from any available session
+    pub fn accept_any_session(mut self) -> Self {
+        self.accept_any_session = true;
+        self.session_id = None;
+        self
+    }
+
+    /// Set message lock duration
+    pub fn with_lock_duration(mut self, duration: Duration) -> Self {
+        self.lock_duration = Some(duration);
+        self
+    }
+
+    /// Enable peek-only mode (inspect without consuming)
+    pub fn peek_only(mut self) -> Self {
+        self.peek_only = true;
+        self
+    }
+
+    /// Set starting sequence number for replay
+    pub fn from_sequence_number(mut self, sequence: u64) -> Self {
+        self.from_sequence_number = Some(sequence);
+        self
+    }
+}
+
 #[cfg(test)]
 #[path = "message_tests.rs"]
 mod tests;
