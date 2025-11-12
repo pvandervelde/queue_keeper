@@ -1,7 +1,9 @@
 //! Client traits and implementations for queue operations.
 
 use crate::error::QueueError;
-use crate::message::{Message, MessageId, QueueName, ReceivedMessage, ReceiptHandle, SessionId, Timestamp};
+use crate::message::{
+    Message, MessageId, QueueName, ReceiptHandle, ReceivedMessage, SessionId, Timestamp,
+};
 use crate::provider::{ProviderType, QueueConfig, SessionSupport};
 use async_trait::async_trait;
 use chrono::Duration;
