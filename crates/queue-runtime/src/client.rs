@@ -8,6 +8,10 @@ use crate::provider::{ProviderType, QueueConfig, SessionSupport};
 use async_trait::async_trait;
 use chrono::Duration;
 
+#[cfg(test)]
+#[path = "client_tests.rs"]
+mod tests;
+
 /// Main interface for queue operations across all providers
 #[async_trait]
 pub trait QueueClient: Send + Sync {
