@@ -1,7 +1,7 @@
 //! Tests for message types.
 
 use super::*;
-use chrono::Utc;
+use chrono::{TimeZone, Utc};
 
 #[test]
 fn test_message_builder() {
@@ -217,4 +217,189 @@ fn test_receive_options_batch_configuration() {
 
     assert_eq!(options.max_messages, 50);
     assert_eq!(options.timeout, Duration::seconds(120));
+}
+
+// ============================================================================
+// Domain Identifier Tests
+// ============================================================================
+
+#[test]
+fn test_queue_name_valid() {
+    let name = QueueName::new("valid-queue_name".to_string()).unwrap();
+    assert_eq!(name.as_str(), "valid-queue_name");
+}
+
+#[test]
+fn test_queue_name_with_prefix() {
+    let name = QueueName::with_prefix("prod", "events").unwrap();
+    assert_eq!(name.as_str(), "prod-events");
+}
+
+#[test]
+fn test_queue_name_empty_rejected() {
+    let result = QueueName::new("".to_string());
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_queue_name_too_long_rejected() {
+    let long_name = "a".repeat(261);
+    let result = QueueName::new(long_name);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_queue_name_invalid_characters_rejected() {
+    let result = QueueName::new("queue@name".to_string());
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_queue_name_leading_hyphen_rejected() {
+    let result = QueueName::new("-queue".to_string());
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_queue_name_trailing_hyphen_rejected() {
+    let result = QueueName::new("queue-".to_string());
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_queue_name_consecutive_hyphens_rejected() {
+    let result = QueueName::new("queue--name".to_string());
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_queue_name_from_str() {
+    let name: QueueName = "test-queue".parse().unwrap();
+    assert_eq!(name.as_str(), "test-queue");
+}
+
+#[test]
+fn test_queue_name_display() {
+    let name = QueueName::new("test-queue".to_string()).unwrap();
+    assert_eq!(format!("{}", name), "test-queue");
+}
+
+#[test]
+fn test_message_id_generation() {
+    let id1 = MessageId::new();
+    let id2 = MessageId::new();
+
+    assert_ne!(id1, id2); // Each ID should be unique
+    assert!(!id1.as_str().is_empty());
+}
+
+#[test]
+fn test_message_id_default() {
+    let id = MessageId::default();
+    assert!(!id.as_str().is_empty());
+}
+
+#[test]
+fn test_message_id_from_str() {
+    let id: MessageId = "test-message-id".parse().unwrap();
+    assert_eq!(id.as_str(), "test-message-id");
+}
+
+#[test]
+fn test_message_id_empty_rejected() {
+    let result: Result<MessageId, _> = "".parse();
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_message_id_display() {
+    let id: MessageId = "test-id".parse().unwrap();
+    assert_eq!(format!("{}", id), "test-id");
+}
+
+#[test]
+fn test_session_id_valid() {
+    let id = SessionId::new("valid-session".to_string()).unwrap();
+    assert_eq!(id.as_str(), "valid-session");
+}
+
+#[test]
+fn test_session_id_from_parts() {
+    let id = SessionId::from_parts("owner", "repo", "pull_request", "123");
+    assert_eq!(id.as_str(), "owner/repo/pull_request/123");
+}
+
+#[test]
+fn test_session_id_empty_rejected() {
+    let result = SessionId::new("".to_string());
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_session_id_too_long_rejected() {
+    let long_id = "a".repeat(129);
+    let result = SessionId::new(long_id);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_session_id_non_ascii_rejected() {
+    let result = SessionId::new("session-💡".to_string());
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_session_id_control_characters_rejected() {
+    let result = SessionId::new("session\x00id".to_string());
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_session_id_from_str() {
+    let id: SessionId = "test-session".parse().unwrap();
+    assert_eq!(id.as_str(), "test-session");
+}
+
+#[test]
+fn test_session_id_display() {
+    let id = SessionId::new("test-session".to_string()).unwrap();
+    assert_eq!(format!("{}", id), "test-session");
+}
+
+#[test]
+fn test_timestamp_now() {
+    let ts1 = Timestamp::now();
+    std::thread::sleep(std::time::Duration::from_millis(10));
+    let ts2 = Timestamp::now();
+
+    assert!(ts2 > ts1); // Time should advance
+}
+
+#[test]
+fn test_timestamp_from_datetime() {
+    let dt = Utc::now();
+    let ts = Timestamp::from_datetime(dt);
+    assert_eq!(ts.as_datetime(), dt);
+}
+
+#[test]
+fn test_timestamp_ordering() {
+    let ts1 = Timestamp::now();
+    std::thread::sleep(std::time::Duration::from_millis(10));
+    let ts2 = Timestamp::now();
+
+    assert!(ts1 < ts2);
+    assert!(ts2 > ts1);
+    assert_eq!(ts1, ts1.clone());
+}
+
+#[test]
+fn test_timestamp_display() {
+    let dt = Utc.with_ymd_and_hms(2025, 1, 15, 10, 30, 45).unwrap();
+    let ts = Timestamp::from_datetime(dt);
+    let display = format!("{}", ts);
+
+    assert!(display.contains("2025-01-15"));
+    assert!(display.contains("10:30:45"));
+    assert!(display.contains("UTC"));
 }
