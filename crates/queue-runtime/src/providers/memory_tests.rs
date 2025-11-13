@@ -647,3 +647,363 @@ mod session_ordering {
         assert!(has_session && has_no_session);
     }
 }
+
+// ============================================================================
+// Subtask 10.3: Message Acknowledgment Tests
+// ============================================================================
+
+mod acknowledgment {
+    use super::*;
+
+    /// Verify that completing a message removes it permanently.
+    ///
+    /// After complete_message, the message should not be receivable again.
+    #[tokio::test]
+    async fn test_complete_message_removes_permanently() {
+        let provider = InMemoryProvider::default();
+        let queue_name = QueueName::new("complete-test".to_string()).unwrap();
+
+        // Send and receive a message
+        let msg = Message::new(Bytes::from("Complete me"));
+        provider.send_message(&queue_name, &msg).await.unwrap();
+
+        let received = provider
+            .receive_message(&queue_name, Duration::seconds(1))
+            .await
+            .unwrap()
+            .unwrap();
+
+        // Complete the message
+        provider
+            .complete_message(&received.receipt_handle)
+            .await
+            .unwrap();
+
+        // Trying to receive again should return None (queue is empty)
+        let result = provider
+            .receive_message(&queue_name, Duration::seconds(1))
+            .await
+            .unwrap();
+
+        assert!(
+            result.is_none(),
+            "Completed message should not be receivable"
+        );
+    }
+
+    /// Verify that completing with an invalid receipt handle returns an error.
+    ///
+    /// Assertion #6: Invalid receipt handle returns MessageNotFound error.
+    #[tokio::test]
+    async fn test_complete_with_invalid_receipt_returns_error() {
+        let provider = InMemoryProvider::default();
+
+        // Try to complete with a non-existent receipt handle
+        let now = Timestamp::now();
+        let expires_at = Timestamp::from_datetime(now.as_datetime() + Duration::seconds(30));
+        let invalid_receipt = ReceiptHandle::new(
+            "invalid-receipt-123".to_string(),
+            expires_at,
+            ProviderType::InMemory,
+        );
+        let result = provider.complete_message(&invalid_receipt).await;
+
+        assert!(result.is_err(), "Invalid receipt should return error");
+        match result.unwrap_err() {
+            QueueError::MessageNotFound { .. } => {
+                // Expected error
+            }
+            other => panic!("Expected MessageNotFound, got {:?}", other),
+        }
+    }
+
+    /// Verify that completing with an expired receipt handle returns an error.
+    ///
+    /// After visibility timeout, receipt handles become invalid.
+    #[tokio::test]
+    async fn test_complete_with_expired_receipt_returns_error() {
+        let provider = InMemoryProvider::default();
+        let queue_name = QueueName::new("expire-test".to_string()).unwrap();
+
+        // Send and receive a message
+        let msg = Message::new(Bytes::from("Will expire"));
+        provider.send_message(&queue_name, &msg).await.unwrap();
+
+        let received = provider
+            .receive_message(&queue_name, Duration::seconds(1))
+            .await
+            .unwrap()
+            .unwrap();
+
+        // Simulate passage of time beyond visibility timeout (30 seconds)
+        // Note: In real implementation, we'd wait or mock time. For now,
+        // we test the error path by manipulating storage directly if needed.
+        // This test will validate the logic once time-based expiry is implemented.
+
+        tokio::time::sleep(tokio::time::Duration::from_secs(31)).await;
+
+        // Try to complete with expired receipt
+        let result = provider.complete_message(&received.receipt_handle).await;
+
+        assert!(result.is_err(), "Expired receipt should return error");
+        match result.unwrap_err() {
+            QueueError::MessageNotFound { .. } => {
+                // Expected error
+            }
+            other => panic!("Expected MessageNotFound, got {:?}", other),
+        }
+    }
+
+    /// Verify that abandoning a message makes it available again.
+    ///
+    /// After abandon_message, the message should be immediately receivable.
+    #[tokio::test]
+    async fn test_abandon_message_makes_available_again() {
+        let provider = InMemoryProvider::default();
+        let queue_name = QueueName::new("abandon-test".to_string()).unwrap();
+
+        // Send and receive a message
+        let msg = Message::new(Bytes::from("Abandon me"));
+        provider.send_message(&queue_name, &msg).await.unwrap();
+
+        let received = provider
+            .receive_message(&queue_name, Duration::seconds(1))
+            .await
+            .unwrap()
+            .unwrap();
+
+        let original_body = received.body.clone();
+
+        // Abandon the message
+        provider
+            .abandon_message(&received.receipt_handle)
+            .await
+            .unwrap();
+
+        // Message should be immediately receivable again
+        let redelivered = provider
+            .receive_message(&queue_name, Duration::seconds(1))
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            redelivered.body, original_body,
+            "Redelivered message should have same body"
+        );
+    }
+
+    /// Verify that abandoned message has incremented delivery count.
+    ///
+    /// Each delivery attempt should increment the counter.
+    #[tokio::test]
+    async fn test_abandoned_message_increments_delivery_count() {
+        let provider = InMemoryProvider::default();
+        let queue_name = QueueName::new("delivery-count-test".to_string()).unwrap();
+
+        // Send a message
+        let msg = Message::new(Bytes::from("Count deliveries"));
+        provider.send_message(&queue_name, &msg).await.unwrap();
+
+        // Receive and abandon multiple times
+        for expected_count in 1..=3 {
+            let received = provider
+                .receive_message(&queue_name, Duration::seconds(1))
+                .await
+                .unwrap()
+                .unwrap();
+
+            assert_eq!(
+                received.delivery_count, expected_count,
+                "Delivery count should be {}",
+                expected_count
+            );
+
+            // Abandon for next iteration
+            provider
+                .abandon_message(&received.receipt_handle)
+                .await
+                .unwrap();
+        }
+    }
+
+    /// Verify that abandoning with invalid receipt returns error.
+    #[tokio::test]
+    async fn test_abandon_with_invalid_receipt_returns_error() {
+        let provider = InMemoryProvider::default();
+
+        // Try to abandon with a non-existent receipt handle
+        let now = Timestamp::now();
+        let expires_at = Timestamp::from_datetime(now.as_datetime() + Duration::seconds(30));
+        let invalid_receipt = ReceiptHandle::new(
+            "invalid-abandon-123".to_string(),
+            expires_at,
+            ProviderType::InMemory,
+        );
+        let result = provider.abandon_message(&invalid_receipt).await;
+
+        assert!(result.is_err(), "Invalid receipt should return error");
+        match result.unwrap_err() {
+            QueueError::MessageNotFound { .. } => {
+                // Expected error
+            }
+            other => panic!("Expected MessageNotFound, got {:?}", other),
+        }
+    }
+
+    /// Verify that session messages maintain order after abandonment.
+    ///
+    /// Abandoned session messages should return to the front of their session queue.
+    #[tokio::test]
+    async fn test_session_message_ordering_after_abandon() {
+        let provider = InMemoryProvider::default();
+        let queue_name = QueueName::new("session-abandon-test".to_string()).unwrap();
+
+        let session_id = SessionId::new("session-1".to_string()).unwrap();
+
+        // Send three session messages in order
+        for i in 1..=3 {
+            let msg = Message::new(Bytes::from(format!("Message {}", i)))
+                .with_session_id(session_id.clone());
+            provider.send_message(&queue_name, &msg).await.unwrap();
+        }
+
+        // Receive first message
+        let msg1 = provider
+            .receive_message(&queue_name, Duration::seconds(1))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(msg1.body, Bytes::from("Message 1"));
+
+        // Abandon it
+        provider
+            .abandon_message(&msg1.receipt_handle)
+            .await
+            .unwrap();
+
+        // Should receive message 1 again (front of session queue)
+        let msg1_again = provider
+            .receive_message(&queue_name, Duration::seconds(1))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(msg1_again.body, Bytes::from("Message 1"));
+    }
+}
+
+// ============================================================================
+// Subtask 10.3: Visibility Timeout Tests
+// ============================================================================
+
+mod visibility_timeout {
+    use super::*;
+
+    /// Verify that messages reappear after visibility timeout expires.
+    ///
+    /// Assertion #13: Visibility timeout causes message to become available again.
+    #[tokio::test]
+    async fn test_visibility_timeout_makes_message_reappear() {
+        let provider = InMemoryProvider::default();
+        let queue_name = QueueName::new("visibility-test".to_string()).unwrap();
+
+        // Send a message
+        let msg = Message::new(Bytes::from("Visibility timeout test"));
+        provider.send_message(&queue_name, &msg).await.unwrap();
+
+        // Receive it (makes it invisible for 30 seconds)
+        let received = provider
+            .receive_message(&queue_name, Duration::seconds(1))
+            .await
+            .unwrap()
+            .unwrap();
+
+        // Immediately trying to receive again should return None
+        let result = provider
+            .receive_message(&queue_name, Duration::seconds(1))
+            .await
+            .unwrap();
+        assert!(
+            result.is_none(),
+            "Message should be invisible during timeout"
+        );
+
+        // Wait for visibility timeout to expire (30 seconds + small buffer)
+        tokio::time::sleep(tokio::time::Duration::from_secs(31)).await;
+
+        // Message should be available again
+        let redelivered = provider
+            .receive_message(&queue_name, Duration::seconds(1))
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            redelivered.body, received.body,
+            "Same message should reappear after timeout"
+        );
+        assert_eq!(
+            redelivered.delivery_count, 2,
+            "Delivery count should be incremented"
+        );
+    }
+
+    /// Verify that expired in-flight messages are returned to queue during cleanup.
+    ///
+    /// This tests the automatic cleanup mechanism.
+    #[tokio::test]
+    async fn test_expired_inflight_messages_return_to_queue() {
+        let provider = InMemoryProvider::default();
+        let queue_name = QueueName::new("inflight-cleanup-test".to_string()).unwrap();
+
+        // Send a message
+        let msg = Message::new(Bytes::from("Cleanup test"));
+        provider.send_message(&queue_name, &msg).await.unwrap();
+
+        // Receive it
+        let _received = provider
+            .receive_message(&queue_name, Duration::seconds(1))
+            .await
+            .unwrap()
+            .unwrap();
+
+        // Wait for visibility timeout
+        tokio::time::sleep(tokio::time::Duration::from_secs(31)).await;
+
+        // Trigger cleanup by attempting another receive
+        let redelivered = provider
+            .receive_message(&queue_name, Duration::seconds(1))
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(redelivered.body, Bytes::from("Cleanup test"));
+    }
+
+    /// Verify that receipt handles are invalidated after timeout.
+    ///
+    /// Operations with expired receipts should fail.
+    #[tokio::test]
+    async fn test_receipt_invalidation_after_timeout() {
+        let provider = InMemoryProvider::default();
+        let queue_name = QueueName::new("receipt-invalidation-test".to_string()).unwrap();
+
+        // Send and receive a message
+        let msg = Message::new(Bytes::from("Receipt test"));
+        provider.send_message(&queue_name, &msg).await.unwrap();
+
+        let received = provider
+            .receive_message(&queue_name, Duration::seconds(1))
+            .await
+            .unwrap()
+            .unwrap();
+
+        // Wait for visibility timeout
+        tokio::time::sleep(tokio::time::Duration::from_secs(31)).await;
+
+        // Try to complete with expired receipt
+        let result = provider.complete_message(&received.receipt_handle).await;
+
+        assert!(result.is_err(), "Expired receipt should be invalid");
+    }
+}
