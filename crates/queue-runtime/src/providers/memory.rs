@@ -189,6 +189,39 @@ impl InMemoryProvider {
             storage: Arc::new(RwLock::new(QueueStorage::new(config))),
         }
     }
+
+    /// Return expired in-flight messages back to the queue
+    fn return_expired_messages(queue: &mut InMemoryQueue) {
+        let now = Timestamp::now();
+        let mut expired_handles = Vec::new();
+
+        // Find expired messages
+        for (handle, inflight) in &queue.in_flight {
+            if now >= inflight.lock_expires_at {
+                expired_handles.push(handle.clone());
+            }
+        }
+
+        // Return them to the queue
+        for handle in expired_handles {
+            if let Some(inflight) = queue.in_flight.remove(&handle) {
+                let mut message = inflight.message;
+                // Make immediately available
+                message.available_at = now.clone();
+                queue.messages.push_back(message);
+            }
+        }
+    }
+
+    /// Check if a session is locked
+    fn is_session_locked(queue: &InMemoryQueue, session_id: &Option<SessionId>) -> bool {
+        if let Some(ref sid) = session_id {
+            if let Some(session_state) = queue.sessions.get(sid) {
+                return session_state.is_locked();
+            }
+        }
+        false
+    }
 }
 
 impl Default for InMemoryProvider {
@@ -201,39 +234,167 @@ impl Default for InMemoryProvider {
 impl QueueProvider for InMemoryProvider {
     async fn send_message(
         &self,
-        _queue: &QueueName,
-        _message: &Message,
+        queue: &QueueName,
+        message: &Message,
     ) -> Result<MessageId, QueueError> {
-        // TODO: Implement in subtask 10.2
-        unimplemented!("send_message will be implemented in subtask 10.2")
+        // Validate message size (10MB for in-memory provider)
+        let message_size = message.body.len();
+        let max_size = self.provider_type().max_message_size();
+        if message_size > max_size {
+            return Err(QueueError::MessageTooLarge {
+                size: message_size,
+                max_size,
+            });
+        }
+
+        // Generate message ID
+        let message_id = MessageId::new();
+
+        // Store message
+        let stored_message = StoredMessage::from_message(message, message_id.clone());
+
+        let mut storage = self.storage.write().unwrap();
+        let queue_state = storage.get_or_create_queue(queue);
+        queue_state.messages.push_back(stored_message);
+
+        Ok(message_id)
     }
 
     async fn send_messages(
         &self,
-        _queue: &QueueName,
-        _messages: &[Message],
+        queue: &QueueName,
+        messages: &[Message],
     ) -> Result<Vec<MessageId>, QueueError> {
-        // TODO: Implement in subtask 10.2
-        unimplemented!("send_messages will be implemented in subtask 10.2")
+        // Validate batch size
+        if messages.len() > self.max_batch_size() as usize {
+            return Err(QueueError::BatchTooLarge {
+                size: messages.len(),
+                max_size: self.max_batch_size() as usize,
+            });
+        }
+
+        // Validate individual message sizes and send all
+        let mut message_ids = Vec::with_capacity(messages.len());
+        for message in messages {
+            let message_id = self.send_message(queue, message).await?;
+            message_ids.push(message_id);
+        }
+
+        Ok(message_ids)
     }
 
     async fn receive_message(
         &self,
-        _queue: &QueueName,
-        _timeout: Duration,
+        queue: &QueueName,
+        timeout: Duration,
     ) -> Result<Option<ReceivedMessage>, QueueError> {
-        // TODO: Implement in subtask 10.2
-        unimplemented!("receive_message will be implemented in subtask 10.2")
+        let start_time = std::time::Instant::now();
+        let timeout_duration = timeout.to_std().unwrap_or(std::time::Duration::from_secs(30));
+
+        loop {
+            // Try to receive a message
+            let received_message = {
+                let mut storage = self.storage.write().unwrap();
+                let queue_state = storage.get_or_create_queue(queue);
+
+                // First, return any expired in-flight messages back to the queue
+                Self::return_expired_messages(queue_state);
+
+                // Find first available message (not expired, visibility timeout passed, not in a locked session)
+                let now = Timestamp::now();
+                let message_index = queue_state.messages.iter().position(|msg| {
+                    !msg.is_expired()
+                        && msg.is_available()
+                        && !Self::is_session_locked(queue_state, &msg.session_id)
+                });
+
+                if let Some(index) = message_index {
+                    // Remove message from queue
+                    let mut stored_message = queue_state.messages.remove(index).unwrap();
+
+                    // Increment delivery count
+                    stored_message.delivery_count += 1;
+
+                    // Create receipt handle
+                    let receipt_handle_str = uuid::Uuid::new_v4().to_string();
+                    let lock_expires_at =
+                        Timestamp::from_datetime(now.as_datetime() + Duration::seconds(30));
+                    let receipt_handle = ReceiptHandle::new(
+                        receipt_handle_str.clone(),
+                        lock_expires_at.clone(),
+                        ProviderType::InMemory,
+                    );
+
+                    // Create received message
+                    let received_message = ReceivedMessage {
+                        message_id: stored_message.message_id.clone(),
+                        body: stored_message.body.clone(),
+                        attributes: stored_message.attributes.clone(),
+                        session_id: stored_message.session_id.clone(),
+                        correlation_id: stored_message.correlation_id.clone(),
+                        receipt_handle: receipt_handle.clone(),
+                        delivery_count: stored_message.delivery_count,
+                        first_delivered_at: stored_message.enqueued_at.clone(),
+                        delivered_at: now,
+                    };
+
+                    // Move to in-flight
+                    let inflight = InFlightMessage {
+                        message: stored_message,
+                        receipt_handle: receipt_handle_str.clone(),
+                        lock_expires_at,
+                    };
+                    queue_state.in_flight.insert(receipt_handle_str, inflight);
+
+                    Some(received_message)
+                } else {
+                    None
+                }
+            }; // Lock is released here
+
+            if let Some(msg) = received_message {
+                return Ok(Some(msg));
+            }
+
+            // No message available - check timeout
+            if start_time.elapsed() >= timeout_duration {
+                return Ok(None);
+            }
+
+            // Small sleep before retry
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
     }
 
     async fn receive_messages(
         &self,
-        _queue: &QueueName,
-        _max_messages: u32,
-        _timeout: Duration,
+        queue: &QueueName,
+        max_messages: u32,
+        timeout: Duration,
     ) -> Result<Vec<ReceivedMessage>, QueueError> {
-        // TODO: Implement in subtask 10.2
-        unimplemented!("receive_messages will be implemented in subtask 10.2")
+        let mut messages = Vec::new();
+        let start_time = std::time::Instant::now();
+        let timeout_duration = timeout.to_std().unwrap_or(std::time::Duration::from_secs(30));
+
+        while messages.len() < max_messages as usize {
+            let remaining_timeout = timeout_duration
+                .checked_sub(start_time.elapsed())
+                .unwrap_or(std::time::Duration::ZERO);
+
+            if remaining_timeout.is_zero() {
+                break;
+            }
+
+            let remaining_duration = Duration::from_std(remaining_timeout).unwrap_or(Duration::zero());
+            let received = self.receive_message(queue, remaining_duration).await?;
+
+            match received {
+                Some(msg) => messages.push(msg),
+                None => break,
+            }
+        }
+
+        Ok(messages)
     }
 
     async fn complete_message(&self, _receipt: &ReceiptHandle) -> Result<(), QueueError> {
