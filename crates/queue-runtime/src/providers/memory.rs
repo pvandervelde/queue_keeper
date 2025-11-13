@@ -397,14 +397,66 @@ impl QueueProvider for InMemoryProvider {
         Ok(messages)
     }
 
-    async fn complete_message(&self, _receipt: &ReceiptHandle) -> Result<(), QueueError> {
-        // TODO: Implement in subtask 10.3
-        unimplemented!("complete_message will be implemented in subtask 10.3")
+    async fn complete_message(&self, receipt: &ReceiptHandle) -> Result<(), QueueError> {
+        let mut storage = self.storage.write().unwrap();
+        let now = Timestamp::now();
+
+        // Find the queue containing this receipt
+        for queue in storage.queues.values_mut() {
+            if let Some(inflight) = queue.in_flight.get(receipt.handle()) {
+                // Check if receipt is expired
+                if inflight.lock_expires_at <= now {
+                    queue.in_flight.remove(receipt.handle());
+                    return Err(QueueError::MessageNotFound {
+                        receipt: receipt.handle().to_string(),
+                    });
+                }
+
+                // Remove from in-flight (permanently deletes the message)
+                queue.in_flight.remove(receipt.handle());
+                return Ok(());
+            }
+        }
+
+        // Receipt not found in any queue
+        Err(QueueError::MessageNotFound {
+            receipt: receipt.handle().to_string(),
+        })
     }
 
-    async fn abandon_message(&self, _receipt: &ReceiptHandle) -> Result<(), QueueError> {
-        // TODO: Implement in subtask 10.3
-        unimplemented!("abandon_message will be implemented in subtask 10.3")
+    async fn abandon_message(&self, receipt: &ReceiptHandle) -> Result<(), QueueError> {
+        let mut storage = self.storage.write().unwrap();
+        let now = Timestamp::now();
+
+        // Find the queue containing this receipt
+        for queue in storage.queues.values_mut() {
+            if let Some(inflight) = queue.in_flight.remove(receipt.handle()) {
+                // Check if receipt is expired
+                if inflight.lock_expires_at <= now {
+                    return Err(QueueError::MessageNotFound {
+                        receipt: receipt.handle().to_string(),
+                    });
+                }
+
+                // Return message to queue with immediate availability
+                let mut returned_message = inflight.message;
+                returned_message.available_at = now;
+
+                // Add back to queue (front for sessions to maintain ordering, back for others)
+                if returned_message.session_id.is_some() {
+                    queue.messages.push_front(returned_message);
+                } else {
+                    queue.messages.push_back(returned_message);
+                }
+
+                return Ok(());
+            }
+        }
+
+        // Receipt not found in any queue
+        Err(QueueError::MessageNotFound {
+            receipt: receipt.handle().to_string(),
+        })
     }
 
     async fn dead_letter_message(
