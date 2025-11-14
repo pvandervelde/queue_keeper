@@ -289,7 +289,9 @@ impl QueueProvider for InMemoryProvider {
         timeout: Duration,
     ) -> Result<Option<ReceivedMessage>, QueueError> {
         let start_time = std::time::Instant::now();
-        let timeout_duration = timeout.to_std().unwrap_or(std::time::Duration::from_secs(30));
+        let timeout_duration = timeout
+            .to_std()
+            .unwrap_or(std::time::Duration::from_secs(30));
 
         loop {
             // Try to receive a message
@@ -374,7 +376,9 @@ impl QueueProvider for InMemoryProvider {
     ) -> Result<Vec<ReceivedMessage>, QueueError> {
         let mut messages = Vec::new();
         let start_time = std::time::Instant::now();
-        let timeout_duration = timeout.to_std().unwrap_or(std::time::Duration::from_secs(30));
+        let timeout_duration = timeout
+            .to_std()
+            .unwrap_or(std::time::Duration::from_secs(30));
 
         while messages.len() < max_messages as usize {
             let remaining_timeout = timeout_duration
@@ -385,7 +389,8 @@ impl QueueProvider for InMemoryProvider {
                 break;
             }
 
-            let remaining_duration = Duration::from_std(remaining_timeout).unwrap_or(Duration::zero());
+            let remaining_duration =
+                Duration::from_std(remaining_timeout).unwrap_or(Duration::zero());
             let received = self.receive_message(queue, remaining_duration).await?;
 
             match received {

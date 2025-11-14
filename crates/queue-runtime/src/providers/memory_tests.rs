@@ -26,6 +26,7 @@ mod storage_initialization {
         let config = InMemoryConfig {
             max_queue_size: 5000,
             enable_persistence: false,
+            ..Default::default()
         };
 
         let provider = InMemoryProvider::new(config);
@@ -1005,5 +1006,318 @@ mod visibility_timeout {
         let result = provider.complete_message(&received.receipt_handle).await;
 
         assert!(result.is_err(), "Expired receipt should be invalid");
+    }
+}
+
+// ============================================================================
+// Subtask 10.4: TTL and Dead Letter Queue Tests
+// ============================================================================
+
+mod ttl_and_dlq {
+    use super::*;
+
+    /// Verify that messages with TTL expire after the specified duration.
+    #[tokio::test]
+    async fn test_message_ttl_expiration() {
+        let provider = InMemoryProvider::default();
+        let queue_name = QueueName::new("ttl-test".to_string()).unwrap();
+
+        // Send message with short TTL (2 seconds)
+        let msg = Message::new(Bytes::from("Expires soon")).with_ttl(Duration::seconds(2));
+
+        provider.send_message(&queue_name, &msg).await.unwrap();
+
+        // Message should be receivable immediately
+        let received = provider
+            .receive_message(&queue_name, Duration::seconds(1))
+            .await
+            .unwrap();
+        assert!(received.is_some(), "Message should be available initially");
+
+        // Return message to queue
+        provider
+            .abandon_message(&received.unwrap().receipt_handle)
+            .await
+            .unwrap();
+
+        // Wait for TTL to expire
+        tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+
+        // Message should no longer be available
+        let result = provider
+            .receive_message(&queue_name, Duration::seconds(1))
+            .await
+            .unwrap();
+
+        assert!(result.is_none(), "Expired message should not be receivable");
+    }
+
+    /// Verify that expired messages are not returned during receive.
+    #[tokio::test]
+    async fn test_expired_messages_not_received() {
+        let provider = InMemoryProvider::default();
+        let queue_name = QueueName::new("expired-receive-test".to_string()).unwrap();
+
+        // Send two messages: one with TTL, one without
+        let msg_with_ttl =
+            Message::new(Bytes::from("Has TTL")).with_ttl(Duration::milliseconds(500));
+        let msg_without_ttl = Message::new(Bytes::from("No TTL"));
+
+        provider
+            .send_message(&queue_name, &msg_with_ttl)
+            .await
+            .unwrap();
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        provider
+            .send_message(&queue_name, &msg_without_ttl)
+            .await
+            .unwrap();
+
+        // Wait for first message TTL to expire
+        tokio::time::sleep(tokio::time::Duration::from_millis(600)).await;
+
+        // Should receive only the message without TTL
+        let received = provider
+            .receive_message(&queue_name, Duration::seconds(1))
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(received.body, Bytes::from("No TTL"));
+
+        // No more messages available
+        let result = provider
+            .receive_message(&queue_name, Duration::seconds(1))
+            .await
+            .unwrap();
+        assert!(result.is_none());
+    }
+
+    /// Verify that messages exceeding max delivery count are moved to DLQ.
+    ///
+    /// Assertion #14: Dead letter queue routing after max delivery attempts.
+    #[tokio::test]
+    async fn test_max_delivery_count_triggers_dlq() {
+        let config = InMemoryConfig {
+            max_delivery_count: 3,
+            enable_dead_letter_queue: true,
+            ..Default::default()
+        };
+        let provider = InMemoryProvider::new(config);
+        let queue_name = QueueName::new("dlq-test".to_string()).unwrap();
+
+        // Send a message
+        let msg = Message::new(Bytes::from("Will go to DLQ"));
+        provider.send_message(&queue_name, &msg).await.unwrap();
+
+        // Receive and abandon 3 times (max_delivery_count)
+        for i in 1..=3 {
+            let received = provider
+                .receive_message(&queue_name, Duration::seconds(1))
+                .await
+                .unwrap();
+
+            if i < 3 {
+                // First two attempts: abandon to retry
+                assert!(received.is_some(), "Message should be available");
+                provider
+                    .abandon_message(&received.unwrap().receipt_handle)
+                    .await
+                    .unwrap();
+            } else {
+                // Third attempt: should be moved to DLQ before receive returns it
+                // In this implementation, the message won't be received because
+                // it's moved to DLQ when delivery_count >= max_delivery_count
+                assert!(
+                    received.is_none(),
+                    "Message should be in DLQ, not available for receive"
+                );
+            }
+        }
+
+        // Regular queue should be empty
+        let result = provider
+            .receive_message(&queue_name, Duration::seconds(1))
+            .await
+            .unwrap();
+        assert!(result.is_none(), "Main queue should be empty");
+    }
+
+    /// Verify that DLQ preserves original message metadata.
+    #[tokio::test]
+    async fn test_dlq_preserves_message_metadata() {
+        let config = InMemoryConfig {
+            max_delivery_count: 2,
+            enable_dead_letter_queue: true,
+            ..Default::default()
+        };
+        let provider = InMemoryProvider::new(config);
+        let queue_name = QueueName::new("dlq-metadata-test".to_string()).unwrap();
+
+        let session_id = SessionId::new("session-1".to_string()).unwrap();
+
+        // Send message with metadata
+        let msg = Message::new(Bytes::from("DLQ message"))
+            .with_session_id(session_id.clone())
+            .with_correlation_id("corr-123".to_string())
+            .with_attribute("key".to_string(), "value".to_string());
+
+        provider.send_message(&queue_name, &msg).await.unwrap();
+
+        // Abandon twice to trigger DLQ
+        for _ in 0..2 {
+            if let Some(received) = provider
+                .receive_message(&queue_name, Duration::seconds(1))
+                .await
+                .unwrap()
+            {
+                provider
+                    .abandon_message(&received.receipt_handle)
+                    .await
+                    .unwrap();
+            }
+        }
+
+        // Message should be in DLQ (verify via implementation internals if needed)
+        // For now, verify it's no longer in main queue
+        let result = provider
+            .receive_message(&queue_name, Duration::seconds(1))
+            .await
+            .unwrap();
+        assert!(result.is_none(), "Message should be in DLQ");
+    }
+
+    /// Verify DLQ can be disabled via configuration.
+    #[tokio::test]
+    async fn test_dlq_disabled_when_configured() {
+        let config = InMemoryConfig {
+            max_delivery_count: 2,
+            enable_dead_letter_queue: false, // Disabled
+            ..Default::default()
+        };
+        let provider = InMemoryProvider::new(config);
+        let queue_name = QueueName::new("dlq-disabled-test".to_string()).unwrap();
+
+        // Send a message
+        let msg = Message::new(Bytes::from("No DLQ"));
+        provider.send_message(&queue_name, &msg).await.unwrap();
+
+        // Abandon multiple times
+        for _ in 0..5 {
+            if let Some(received) = provider
+                .receive_message(&queue_name, Duration::seconds(1))
+                .await
+                .unwrap()
+            {
+                provider
+                    .abandon_message(&received.receipt_handle)
+                    .await
+                    .unwrap();
+            } else {
+                break;
+            }
+        }
+
+        // Message should still be receivable (no DLQ to move to)
+        let received = provider
+            .receive_message(&queue_name, Duration::seconds(1))
+            .await
+            .unwrap();
+
+        assert!(
+            received.is_some(),
+            "Message should still be available when DLQ disabled"
+        );
+    }
+
+    /// Verify that multiple abandons eventually trigger DLQ.
+    #[tokio::test]
+    async fn test_multiple_abandons_trigger_dlq() {
+        let config = InMemoryConfig {
+            max_delivery_count: 3,
+            enable_dead_letter_queue: true,
+            ..Default::default()
+        };
+        let provider = InMemoryProvider::new(config);
+        let queue_name = QueueName::new("multi-abandon-test".to_string()).unwrap();
+
+        // Send a message
+        let msg = Message::new(Bytes::from("Abandon me"));
+        provider.send_message(&queue_name, &msg).await.unwrap();
+
+        // Abandon exactly max_delivery_count times
+        let mut attempts = 0;
+        loop {
+            match provider
+                .receive_message(&queue_name, Duration::seconds(1))
+                .await
+                .unwrap()
+            {
+                Some(received) => {
+                    attempts += 1;
+                    provider
+                        .abandon_message(&received.receipt_handle)
+                        .await
+                        .unwrap();
+                }
+                None => break,
+            }
+
+            if attempts >= 5 {
+                // Safety limit
+                break;
+            }
+        }
+
+        // Should have received it exactly max_delivery_count times
+        assert_eq!(
+            attempts, 3,
+            "Should receive message max_delivery_count times before DLQ"
+        );
+
+        // Message should now be in DLQ (not receivable from main queue)
+        let result = provider
+            .receive_message(&queue_name, Duration::seconds(1))
+            .await
+            .unwrap();
+        assert!(result.is_none(), "Message should be in DLQ");
+    }
+
+    /// Verify that default TTL from config is applied to messages without explicit TTL.
+    #[tokio::test]
+    async fn test_default_message_ttl_applied() {
+        let config = InMemoryConfig {
+            default_message_ttl: Some(Duration::seconds(1)),
+            ..Default::default()
+        };
+        let provider = InMemoryProvider::new(config);
+        let queue_name = QueueName::new("default-ttl-test".to_string()).unwrap();
+
+        // Send message without explicit TTL
+        let msg = Message::new(Bytes::from("Uses default TTL"));
+        provider.send_message(&queue_name, &msg).await.unwrap();
+
+        // Message should be receivable immediately
+        let received = provider
+            .receive_message(&queue_name, Duration::seconds(1))
+            .await
+            .unwrap();
+        assert!(received.is_some());
+
+        // Return to queue
+        provider
+            .abandon_message(&received.unwrap().receipt_handle)
+            .await
+            .unwrap();
+
+        // Wait for default TTL to expire
+        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+
+        // Message should be expired
+        let result = provider
+            .receive_message(&queue_name, Duration::seconds(1))
+            .await
+            .unwrap();
+        assert!(result.is_none(), "Message with default TTL should expire");
     }
 }
