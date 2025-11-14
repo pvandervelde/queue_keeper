@@ -94,11 +94,12 @@ struct StoredMessage {
 }
 
 impl StoredMessage {
-    fn from_message(message: &Message, message_id: MessageId) -> Self {
+    fn from_message(message: &Message, message_id: MessageId, config: &InMemoryConfig) -> Self {
         let now = Timestamp::now();
-        let expires_at = message
-            .time_to_live
-            .map(|ttl| Timestamp::from_datetime(now.as_datetime() + ttl));
+        
+        // Apply TTL: use message TTL if provided, otherwise use default from config
+        let ttl = message.time_to_live.or(config.default_message_ttl);
+        let expires_at = ttl.map(|ttl| Timestamp::from_datetime(now.as_datetime() + ttl));
 
         Self {
             message_id,
@@ -213,6 +214,25 @@ impl InMemoryProvider {
         }
     }
 
+    /// Clean up expired messages (based on TTL)
+    fn clean_expired_messages(queue: &mut InMemoryQueue) {
+        let mut i = 0;
+        while i < queue.messages.len() {
+            if queue.messages[i].is_expired() {
+                // Remove expired message
+                if let Some(expired_msg) = queue.messages.remove(i) {
+                    // Move to DLQ if enabled, otherwise just discard
+                    if queue.config.enable_dead_letter_queue {
+                        queue.dead_letter.push_back(expired_msg);
+                    }
+                }
+                // Don't increment i since we removed an element
+            } else {
+                i += 1;
+            }
+        }
+    }
+
     /// Check if a session is locked
     fn is_session_locked(queue: &InMemoryQueue, session_id: &Option<SessionId>) -> bool {
         if let Some(ref sid) = session_id {
@@ -250,11 +270,10 @@ impl QueueProvider for InMemoryProvider {
         // Generate message ID
         let message_id = MessageId::new();
 
-        // Store message
-        let stored_message = StoredMessage::from_message(message, message_id.clone());
-
+        // Store message with config for default TTL
         let mut storage = self.storage.write().unwrap();
         let queue_state = storage.get_or_create_queue(queue);
+        let stored_message = StoredMessage::from_message(message, message_id.clone(), &queue_state.config);
         queue_state.messages.push_back(stored_message);
 
         Ok(message_id)
@@ -301,6 +320,9 @@ impl QueueProvider for InMemoryProvider {
 
                 // First, return any expired in-flight messages back to the queue
                 Self::return_expired_messages(queue_state);
+                
+                // Clean up expired messages (move to DLQ or discard)
+                Self::clean_expired_messages(queue_state);
 
                 // Find first available message (not expired, visibility timeout passed, not in a locked session)
                 let now = Timestamp::now();
@@ -314,41 +336,50 @@ impl QueueProvider for InMemoryProvider {
                     // Remove message from queue
                     let mut stored_message = queue_state.messages.remove(index).unwrap();
 
-                    // Increment delivery count
-                    stored_message.delivery_count += 1;
+                    // Check if message should go to DLQ before delivery
+                    if queue_state.config.enable_dead_letter_queue
+                        && stored_message.delivery_count >= queue_state.config.max_delivery_count
+                    {
+                        // Move to DLQ instead of delivering
+                        queue_state.dead_letter.push_back(stored_message);
+                        None
+                    } else {
+                        // Increment delivery count
+                        stored_message.delivery_count += 1;
 
-                    // Create receipt handle
-                    let receipt_handle_str = uuid::Uuid::new_v4().to_string();
-                    let lock_expires_at =
-                        Timestamp::from_datetime(now.as_datetime() + Duration::seconds(30));
-                    let receipt_handle = ReceiptHandle::new(
-                        receipt_handle_str.clone(),
-                        lock_expires_at.clone(),
-                        ProviderType::InMemory,
-                    );
+                        // Create receipt handle
+                        let receipt_handle_str = uuid::Uuid::new_v4().to_string();
+                        let lock_expires_at =
+                            Timestamp::from_datetime(now.as_datetime() + Duration::seconds(30));
+                        let receipt_handle = ReceiptHandle::new(
+                            receipt_handle_str.clone(),
+                            lock_expires_at.clone(),
+                            ProviderType::InMemory,
+                        );
 
-                    // Create received message
-                    let received_message = ReceivedMessage {
-                        message_id: stored_message.message_id.clone(),
-                        body: stored_message.body.clone(),
-                        attributes: stored_message.attributes.clone(),
-                        session_id: stored_message.session_id.clone(),
-                        correlation_id: stored_message.correlation_id.clone(),
-                        receipt_handle: receipt_handle.clone(),
-                        delivery_count: stored_message.delivery_count,
-                        first_delivered_at: stored_message.enqueued_at.clone(),
-                        delivered_at: now,
-                    };
+                        // Create received message
+                        let received_message = ReceivedMessage {
+                            message_id: stored_message.message_id.clone(),
+                            body: stored_message.body.clone(),
+                            attributes: stored_message.attributes.clone(),
+                            session_id: stored_message.session_id.clone(),
+                            correlation_id: stored_message.correlation_id.clone(),
+                            receipt_handle: receipt_handle.clone(),
+                            delivery_count: stored_message.delivery_count,
+                            first_delivered_at: stored_message.enqueued_at.clone(),
+                            delivered_at: now,
+                        };
 
-                    // Move to in-flight
-                    let inflight = InFlightMessage {
-                        message: stored_message,
-                        receipt_handle: receipt_handle_str.clone(),
-                        lock_expires_at,
-                    };
-                    queue_state.in_flight.insert(receipt_handle_str, inflight);
+                        // Move to in-flight
+                        let inflight = InFlightMessage {
+                            message: stored_message,
+                            receipt_handle: receipt_handle_str.clone(),
+                            lock_expires_at,
+                        };
+                        queue_state.in_flight.insert(receipt_handle_str, inflight);
 
-                    Some(received_message)
+                        Some(received_message)
+                    }
                 } else {
                     None
                 }

@@ -102,8 +102,9 @@ mod data_structures {
     fn test_stored_message_from_message() {
         let message = Message::new(Bytes::from("test body"));
         let message_id = MessageId::new();
+        let config = InMemoryConfig::default();
 
-        let stored = StoredMessage::from_message(&message, message_id.clone());
+        let stored = StoredMessage::from_message(&message, message_id.clone(), &config);
 
         assert_eq!(stored.message_id, message_id);
         assert_eq!(stored.body, Bytes::from("test body"));
@@ -118,8 +119,9 @@ mod data_structures {
         let session_id = SessionId::new("test-session".to_string()).unwrap();
         let message = Message::new(Bytes::from("test body")).with_session_id(session_id.clone());
         let message_id = MessageId::new();
+        let config = InMemoryConfig::default();
 
-        let stored = StoredMessage::from_message(&message, message_id);
+        let stored = StoredMessage::from_message(&message, message_id, &config);
 
         assert_eq!(stored.session_id, Some(session_id));
     }
@@ -131,8 +133,9 @@ mod data_structures {
         let message =
             Message::new(Bytes::from("test body")).with_correlation_id(correlation_id.clone());
         let message_id = MessageId::new();
+        let config = InMemoryConfig::default();
 
-        let stored = StoredMessage::from_message(&message, message_id);
+        let stored = StoredMessage::from_message(&message, message_id, &config);
 
         assert_eq!(stored.correlation_id, Some(correlation_id));
     }
@@ -143,8 +146,9 @@ mod data_structures {
         let ttl = Duration::seconds(60);
         let message = Message::new(Bytes::from("test body")).with_ttl(ttl);
         let message_id = MessageId::new();
+        let config = InMemoryConfig::default();
 
-        let stored = StoredMessage::from_message(&message, message_id);
+        let stored = StoredMessage::from_message(&message, message_id, &config);
 
         assert!(stored.expires_at.is_some());
         assert!(!stored.is_expired()); // Should not be expired immediately
@@ -1110,30 +1114,35 @@ mod ttl_and_dlq {
         let msg = Message::new(Bytes::from("Will go to DLQ"));
         provider.send_message(&queue_name, &msg).await.unwrap();
 
-        // Receive and abandon 3 times (max_delivery_count)
+        // Receive and abandon max_delivery_count times
         for i in 1..=3 {
             let received = provider
                 .receive_message(&queue_name, Duration::seconds(1))
                 .await
                 .unwrap();
 
-            if i < 3 {
-                // First two attempts: abandon to retry
-                assert!(received.is_some(), "Message should be available");
-                provider
-                    .abandon_message(&received.unwrap().receipt_handle)
-                    .await
-                    .unwrap();
-            } else {
-                // Third attempt: should be moved to DLQ before receive returns it
-                // In this implementation, the message won't be received because
-                // it's moved to DLQ when delivery_count >= max_delivery_count
-                assert!(
-                    received.is_none(),
-                    "Message should be in DLQ, not available for receive"
-                );
-            }
+            // First three attempts should succeed (max_delivery_count = 3)
+            assert!(
+                received.is_some(),
+                "Message should be available for delivery {}",
+                i
+            );
+            provider
+                .abandon_message(&received.unwrap().receipt_handle)
+                .await
+                .unwrap();
         }
+
+        // Fourth attempt: message should be in DLQ
+        let received = provider
+            .receive_message(&queue_name, Duration::seconds(1))
+            .await
+            .unwrap();
+        assert!(
+            received.is_none(),
+            "Message should be in DLQ after {} deliveries",
+            3
+        );
 
         // Regular queue should be empty
         let result = provider
