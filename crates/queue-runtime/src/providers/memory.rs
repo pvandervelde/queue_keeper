@@ -96,7 +96,7 @@ struct StoredMessage {
 impl StoredMessage {
     fn from_message(message: &Message, message_id: MessageId, config: &InMemoryConfig) -> Self {
         let now = Timestamp::now();
-        
+
         // Apply TTL: use message TTL if provided, otherwise use default from config
         let ttl = message.time_to_live.or(config.default_message_ttl);
         let expires_at = ttl.map(|ttl| Timestamp::from_datetime(now.as_datetime() + ttl));
@@ -191,6 +191,69 @@ impl InMemoryProvider {
         }
     }
 
+    /// Helper method to accept a session and return a SessionClient.
+    ///
+    /// This is a convenience method for testing that wraps create_session_client.
+    /// In production code, use QueueClient::accept_session() instead.
+    pub async fn accept_session(
+        &self,
+        queue: &QueueName,
+        session_id: Option<SessionId>,
+    ) -> Result<Box<dyn crate::client::SessionClient>, QueueError> {
+        use crate::client::SessionProvider;
+
+        let provider = self.create_session_client(queue, session_id).await?;
+
+        // Wrap in StandardSessionClient
+        struct StandardSessionClient {
+            provider: Box<dyn SessionProvider>,
+        }
+
+        #[async_trait]
+        impl crate::client::SessionClient for StandardSessionClient {
+            async fn receive_message(
+                &self,
+                timeout: Duration,
+            ) -> Result<Option<ReceivedMessage>, QueueError> {
+                self.provider.receive_message(timeout).await
+            }
+
+            async fn complete_message(&self, receipt: ReceiptHandle) -> Result<(), QueueError> {
+                self.provider.complete_message(&receipt).await
+            }
+
+            async fn abandon_message(&self, receipt: ReceiptHandle) -> Result<(), QueueError> {
+                self.provider.abandon_message(&receipt).await
+            }
+
+            async fn dead_letter_message(
+                &self,
+                receipt: ReceiptHandle,
+                reason: String,
+            ) -> Result<(), QueueError> {
+                self.provider.dead_letter_message(&receipt, &reason).await
+            }
+
+            async fn renew_session_lock(&self) -> Result<(), QueueError> {
+                self.provider.renew_session_lock().await
+            }
+
+            async fn close_session(&self) -> Result<(), QueueError> {
+                self.provider.close_session().await
+            }
+
+            fn session_id(&self) -> &SessionId {
+                self.provider.session_id()
+            }
+
+            fn session_expires_at(&self) -> Timestamp {
+                self.provider.session_expires_at()
+            }
+        }
+
+        Ok(Box::new(StandardSessionClient { provider }))
+    }
+
     /// Return expired in-flight messages back to the queue
     fn return_expired_messages(queue: &mut InMemoryQueue) {
         let now = Timestamp::now();
@@ -273,7 +336,8 @@ impl QueueProvider for InMemoryProvider {
         // Store message with config for default TTL
         let mut storage = self.storage.write().unwrap();
         let queue_state = storage.get_or_create_queue(queue);
-        let stored_message = StoredMessage::from_message(message, message_id.clone(), &queue_state.config);
+        let stored_message =
+            StoredMessage::from_message(message, message_id.clone(), &queue_state.config);
         queue_state.messages.push_back(stored_message);
 
         Ok(message_id)
@@ -320,7 +384,7 @@ impl QueueProvider for InMemoryProvider {
 
                 // First, return any expired in-flight messages back to the queue
                 Self::return_expired_messages(queue_state);
-                
+
                 // Clean up expired messages (move to DLQ or discard)
                 Self::clean_expired_messages(queue_state);
 
@@ -506,11 +570,87 @@ impl QueueProvider for InMemoryProvider {
 
     async fn create_session_client(
         &self,
-        _queue: &QueueName,
-        _session_id: Option<SessionId>,
+        queue: &QueueName,
+        session_id: Option<SessionId>,
     ) -> Result<Box<dyn SessionProvider>, QueueError> {
-        // TODO: Implement in subtask 10.5
-        unimplemented!("create_session_client will be implemented in subtask 10.5")
+        // Determine which session to use
+        let target_session_id = if let Some(sid) = session_id {
+            sid
+        } else {
+            // Find first available session (one with messages but not locked)
+            let storage = self.storage.read().unwrap();
+            let queue_state =
+                storage
+                    .queues
+                    .get(queue)
+                    .ok_or_else(|| QueueError::QueueNotFound {
+                        queue_name: queue.as_str().to_string(),
+                    })?;
+
+            // Find first session with available messages
+            let mut sessions_with_messages = std::collections::HashSet::new();
+            for msg in &queue_state.messages {
+                if let Some(ref sid) = msg.session_id {
+                    sessions_with_messages.insert(sid.clone());
+                }
+            }
+
+            // Check which sessions are not locked
+            let mut found_session = None;
+            for sid in sessions_with_messages {
+                let session_state = queue_state.sessions.get(&sid);
+                if session_state.map(|s| !s.is_locked()).unwrap_or(true) {
+                    // Session has messages and is not locked
+                    found_session = Some(sid);
+                    break;
+                }
+            }
+
+            found_session.ok_or_else(|| QueueError::SessionNotFound {
+                session_id: "<any>".to_string(),
+            })?
+        };
+
+        // Try to acquire lock on the session
+        let mut storage = self.storage.write().unwrap();
+        let queue_state = storage.get_or_create_queue(queue);
+        let config = queue_state.config.clone();
+
+        // Check if session is already locked
+        let session_state = queue_state
+            .sessions
+            .entry(target_session_id.clone())
+            .or_insert_with(SessionState::new);
+
+        if session_state.is_locked() {
+            let locked_until = session_state
+                .lock_expires_at
+                .clone()
+                .unwrap_or_else(Timestamp::now);
+            return Err(QueueError::SessionLocked {
+                session_id: target_session_id.as_str().to_string(),
+                locked_until,
+            });
+        }
+
+        // Acquire lock
+        let lock_duration = config.session_lock_duration;
+        let now = Timestamp::now();
+        let lock_expires_at = Timestamp::from_datetime(now.as_datetime() + lock_duration);
+        let client_id = uuid::Uuid::new_v4().to_string();
+
+        session_state.locked = true;
+        session_state.lock_expires_at = Some(lock_expires_at.clone());
+        session_state.locked_by = Some(client_id.clone());
+
+        // Create session provider
+        Ok(Box::new(InMemorySessionProvider::new(
+            self.storage.clone(),
+            queue.clone(),
+            target_session_id,
+            client_id,
+            lock_expires_at,
+        )))
     }
 
     fn provider_type(&self) -> ProviderType {
@@ -540,6 +680,7 @@ pub struct InMemorySessionProvider {
     queue_name: QueueName,
     session_id: SessionId,
     client_id: String,
+    lock_expires_at: Timestamp,
 }
 
 impl InMemorySessionProvider {
@@ -547,13 +688,15 @@ impl InMemorySessionProvider {
         storage: Arc<RwLock<QueueStorage>>,
         queue_name: QueueName,
         session_id: SessionId,
+        client_id: String,
+        lock_expires_at: Timestamp,
     ) -> Self {
-        let client_id = uuid::Uuid::new_v4().to_string();
         Self {
             storage,
             queue_name,
             session_id,
             client_id,
+            lock_expires_at,
         }
     }
 }
@@ -562,39 +705,285 @@ impl InMemorySessionProvider {
 impl SessionProvider for InMemorySessionProvider {
     async fn receive_message(
         &self,
-        _timeout: Duration,
+        timeout: Duration,
     ) -> Result<Option<ReceivedMessage>, QueueError> {
-        // TODO: Implement in subtask 10.5
-        unimplemented!("SessionProvider::receive_message will be implemented in subtask 10.5")
+        // Check if we still hold the lock
+        {
+            let storage = self.storage.read().unwrap();
+            if let Some(queue_state) = storage.queues.get(&self.queue_name) {
+                if let Some(session_state) = queue_state.sessions.get(&self.session_id) {
+                    if !session_state.is_locked()
+                        || session_state.locked_by.as_ref() != Some(&self.client_id)
+                    {
+                        return Err(QueueError::SessionLocked {
+                            session_id: self.session_id.as_str().to_string(),
+                            locked_until: session_state
+                                .lock_expires_at
+                                .clone()
+                                .unwrap_or_else(Timestamp::now),
+                        });
+                    }
+                }
+            }
+        }
+
+        // Use a similar approach to regular receive, but filtered for this session
+        let start_time = std::time::Instant::now();
+        let timeout_duration = timeout
+            .to_std()
+            .unwrap_or(std::time::Duration::from_secs(30));
+
+        loop {
+            // Try to receive a message for this session
+            let received_message = {
+                let mut storage = self.storage.write().unwrap();
+                if let Some(queue_state) = storage.queues.get_mut(&self.queue_name) {
+                    // Clean up expired messages
+                    InMemoryProvider::clean_expired_messages(queue_state);
+
+                    // Find first available message for this session
+                    let now = Timestamp::now();
+                    let message_index = queue_state.messages.iter().position(|msg| {
+                        !msg.is_expired()
+                            && msg.is_available()
+                            && msg.session_id.as_ref() == Some(&self.session_id)
+                    });
+
+                    if let Some(index) = message_index {
+                        // Remove message from queue
+                        let mut message = queue_state.messages.remove(index).unwrap();
+
+                        // Generate receipt handle
+                        let receipt = uuid::Uuid::new_v4().to_string();
+
+                        // Calculate visibility timeout
+                        let visibility_timeout = Duration::seconds(30);
+                        let lock_expires_at =
+                            Timestamp::from_datetime(now.as_datetime() + visibility_timeout);
+
+                        // Track delivery
+                        message.delivery_count += 1;
+                        let first_delivered_at = if message.delivery_count == 1 {
+                            now.clone()
+                        } else {
+                            message.enqueued_at.clone()
+                        };
+
+                        // Add to in-flight
+                        queue_state.in_flight.insert(
+                            receipt.clone(),
+                            InFlightMessage {
+                                message: message.clone(),
+                                receipt_handle: receipt.clone(),
+                                lock_expires_at: lock_expires_at.clone(),
+                            },
+                        );
+
+                        // Build received message
+                        Some(ReceivedMessage {
+                            message_id: message.message_id.clone(),
+                            body: message.body.clone(),
+                            attributes: message.attributes.clone(),
+                            receipt_handle: ReceiptHandle::new(
+                                receipt,
+                                lock_expires_at,
+                                ProviderType::InMemory,
+                            ),
+                            session_id: message.session_id.clone(),
+                            correlation_id: message.correlation_id.clone(),
+                            delivery_count: message.delivery_count,
+                            first_delivered_at,
+                            delivered_at: now,
+                        })
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            };
+
+            if let Some(msg) = received_message {
+                return Ok(Some(msg));
+            }
+
+            // Check timeout
+            if start_time.elapsed() >= timeout_duration {
+                return Ok(None);
+            }
+
+            // Brief sleep before retry
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        }
     }
 
-    async fn complete_message(&self, _receipt: &ReceiptHandle) -> Result<(), QueueError> {
-        // TODO: Implement in subtask 10.5
-        unimplemented!("SessionProvider::complete_message will be implemented in subtask 10.5")
+    async fn complete_message(&self, receipt: &ReceiptHandle) -> Result<(), QueueError> {
+        // Verify we still hold the session lock
+        {
+            let storage = self.storage.read().unwrap();
+            if let Some(queue_state) = storage.queues.get(&self.queue_name) {
+                if let Some(session_state) = queue_state.sessions.get(&self.session_id) {
+                    if !session_state.is_locked()
+                        || session_state.locked_by.as_ref() != Some(&self.client_id)
+                    {
+                        return Err(QueueError::SessionLocked {
+                            session_id: self.session_id.as_str().to_string(),
+                            locked_until: session_state
+                                .lock_expires_at
+                                .clone()
+                                .unwrap_or_else(Timestamp::now),
+                        });
+                    }
+                }
+            }
+        }
+
+        // Delegate to storage to remove message
+        let mut storage = self.storage.write().unwrap();
+        if let Some(queue_state) = storage.queues.get_mut(&self.queue_name) {
+            if queue_state.in_flight.remove(receipt.handle()).is_some() {
+                return Ok(());
+            }
+        }
+
+        Err(QueueError::MessageNotFound {
+            receipt: receipt.handle().to_string(),
+        })
     }
 
-    async fn abandon_message(&self, _receipt: &ReceiptHandle) -> Result<(), QueueError> {
-        // TODO: Implement in subtask 10.5
-        unimplemented!("SessionProvider::abandon_message will be implemented in subtask 10.5")
+    async fn abandon_message(&self, receipt: &ReceiptHandle) -> Result<(), QueueError> {
+        // Verify we still hold the session lock
+        {
+            let storage = self.storage.read().unwrap();
+            if let Some(queue_state) = storage.queues.get(&self.queue_name) {
+                if let Some(session_state) = queue_state.sessions.get(&self.session_id) {
+                    if !session_state.is_locked()
+                        || session_state.locked_by.as_ref() != Some(&self.client_id)
+                    {
+                        return Err(QueueError::SessionLocked {
+                            session_id: self.session_id.as_str().to_string(),
+                            locked_until: session_state
+                                .lock_expires_at
+                                .clone()
+                                .unwrap_or_else(Timestamp::now),
+                        });
+                    }
+                }
+            }
+        }
+
+        // Return message to queue
+        let mut storage = self.storage.write().unwrap();
+        if let Some(queue_state) = storage.queues.get_mut(&self.queue_name) {
+            if let Some(inflight) = queue_state.in_flight.remove(receipt.handle()) {
+                let mut message = inflight.message;
+
+                // Increment delivery count
+                message.delivery_count += 1;
+
+                // Check if max delivery count reached
+                if message.delivery_count >= queue_state.config.max_delivery_count {
+                    // Move to DLQ if enabled
+                    if queue_state.config.enable_dead_letter_queue {
+                        queue_state.dead_letter.push_back(message);
+                        return Ok(());
+                    }
+                }
+
+                // Make immediately available and add back to front for session ordering
+                message.available_at = Timestamp::now();
+                queue_state.messages.push_front(message);
+                return Ok(());
+            }
+        }
+
+        Err(QueueError::MessageNotFound {
+            receipt: receipt.handle().to_string(),
+        })
     }
 
     async fn dead_letter_message(
         &self,
-        _receipt: &ReceiptHandle,
+        receipt: &ReceiptHandle,
         _reason: &str,
     ) -> Result<(), QueueError> {
-        // TODO: Implement in subtask 10.5
-        unimplemented!("SessionProvider::dead_letter_message will be implemented in subtask 10.5")
+        // Verify we still hold the session lock
+        {
+            let storage = self.storage.read().unwrap();
+            if let Some(queue_state) = storage.queues.get(&self.queue_name) {
+                if let Some(session_state) = queue_state.sessions.get(&self.session_id) {
+                    if !session_state.is_locked()
+                        || session_state.locked_by.as_ref() != Some(&self.client_id)
+                    {
+                        return Err(QueueError::SessionLocked {
+                            session_id: self.session_id.as_str().to_string(),
+                            locked_until: session_state
+                                .lock_expires_at
+                                .clone()
+                                .unwrap_or_else(Timestamp::now),
+                        });
+                    }
+                }
+            }
+        }
+
+        // Move message to DLQ
+        let mut storage = self.storage.write().unwrap();
+        if let Some(queue_state) = storage.queues.get_mut(&self.queue_name) {
+            if let Some(inflight) = queue_state.in_flight.remove(receipt.handle()) {
+                queue_state.dead_letter.push_back(inflight.message);
+                return Ok(());
+            }
+        }
+
+        Err(QueueError::MessageNotFound {
+            receipt: receipt.handle().to_string(),
+        })
     }
 
     async fn renew_session_lock(&self) -> Result<(), QueueError> {
-        // TODO: Implement in subtask 10.5
-        unimplemented!("renew_session_lock will be implemented in subtask 10.5")
+        let mut storage = self.storage.write().unwrap();
+        if let Some(queue_state) = storage.queues.get_mut(&self.queue_name) {
+            if let Some(session_state) = queue_state.sessions.get_mut(&self.session_id) {
+                // Verify we hold the lock
+                if session_state.locked_by.as_ref() != Some(&self.client_id) {
+                    return Err(QueueError::SessionLocked {
+                        session_id: self.session_id.as_str().to_string(),
+                        locked_until: session_state
+                            .lock_expires_at
+                            .clone()
+                            .unwrap_or_else(Timestamp::now),
+                    });
+                }
+
+                // Renew lock
+                let lock_duration = queue_state.config.session_lock_duration;
+                let new_expires_at =
+                    Timestamp::from_datetime(Timestamp::now().as_datetime() + lock_duration);
+                session_state.lock_expires_at = Some(new_expires_at);
+
+                return Ok(());
+            }
+        }
+
+        Err(QueueError::SessionNotFound {
+            session_id: self.session_id.as_str().to_string(),
+        })
     }
 
     async fn close_session(&self) -> Result<(), QueueError> {
-        // TODO: Implement in subtask 10.5
-        unimplemented!("close_session will be implemented in subtask 10.5")
+        let mut storage = self.storage.write().unwrap();
+        if let Some(queue_state) = storage.queues.get_mut(&self.queue_name) {
+            if let Some(session_state) = queue_state.sessions.get_mut(&self.session_id) {
+                // Release lock
+                session_state.locked = false;
+                session_state.lock_expires_at = None;
+                session_state.locked_by = None;
+                return Ok(());
+            }
+        }
+
+        Ok(()) // Session already released or doesn't exist - that's fine
     }
 
     fn session_id(&self) -> &SessionId {
@@ -602,7 +991,6 @@ impl SessionProvider for InMemorySessionProvider {
     }
 
     fn session_expires_at(&self) -> Timestamp {
-        // TODO: Implement proper expiration tracking in subtask 10.5
-        Timestamp::from_datetime(chrono::Utc::now() + chrono::Duration::minutes(5))
+        self.lock_expires_at.clone()
     }
 }

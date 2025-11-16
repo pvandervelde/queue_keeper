@@ -1777,7 +1777,7 @@ mod concurrency {
             .filter_map(|r| {
                 r.as_ref()
                     .ok()
-                    .and_then(|opt| opt.as_ref().map(|msg| msg.message_id.clone()))
+                    .and_then(|opt| opt.as_ref().map(|msg| msg.message_id.as_str().to_string()))
             })
             .collect();
 
@@ -1791,7 +1791,6 @@ mod concurrency {
             "No message should be received twice"
         );
     }
-
     /// Verify concurrent complete operations work correctly.
     #[tokio::test]
     async fn test_concurrent_complete_operations() {
