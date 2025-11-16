@@ -1330,3 +1330,659 @@ mod ttl_and_dlq {
         assert!(result.is_none(), "Message with default TTL should expire");
     }
 }
+
+// ============================================================================
+// Session Provider Operations Tests
+// ============================================================================
+
+mod session_provider {
+    use super::*;
+
+    /// Verify that only one client can acquire a session lock at a time.
+    ///
+    /// Tests assertion #9: Session lock acquisition with exclusive access.
+    #[tokio::test]
+    async fn test_session_lock_acquisition() {
+        let provider = Arc::new(InMemoryProvider::new(InMemoryConfig::default()));
+        let queue_name = QueueName::new("session-lock-test".to_string()).unwrap();
+        let session_id = SessionId::new("test-session".to_string()).unwrap();
+
+        // Send message to session
+        let msg = Message::new(Bytes::from("Session message")).with_session_id(session_id.clone());
+        provider.send_message(&queue_name, &msg).await.unwrap();
+
+        // First client accepts session - should succeed
+        let session1 = provider
+            .accept_session(&queue_name, Some(session_id.clone()))
+            .await;
+        assert!(session1.is_ok(), "First client should acquire session lock");
+
+        // Second client tries to accept same session - should fail with lock error
+        let session2 = provider
+            .accept_session(&queue_name, Some(session_id.clone()))
+            .await;
+        assert!(
+            session2.is_err(),
+            "Second client should not acquire locked session"
+        );
+
+        if let Err(QueueError::SessionLocked { .. }) = session2 {
+            // Expected error type
+        } else {
+            panic!("Expected SessionLocked error");
+        }
+    }
+
+    /// Verify that session lock expires after timeout and becomes available.
+    ///
+    /// Tests assertion #10: Session lock timeout and automatic release.
+    #[tokio::test]
+    async fn test_session_lock_timeout() {
+        let config = InMemoryConfig {
+            session_lock_duration: Duration::seconds(1),
+            ..Default::default()
+        };
+        let provider = Arc::new(InMemoryProvider::new(config));
+        let queue_name = QueueName::new("lock-timeout-test".to_string()).unwrap();
+        let session_id = SessionId::new("timeout-session".to_string()).unwrap();
+
+        // Send message to session
+        let msg = Message::new(Bytes::from("Session message")).with_session_id(session_id.clone());
+        provider.send_message(&queue_name, &msg).await.unwrap();
+
+        // First client accepts session
+        let session1 = provider
+            .accept_session(&queue_name, Some(session_id.clone()))
+            .await
+            .unwrap();
+
+        assert_eq!(session1.session_id(), &session_id);
+
+        // Wait for lock to expire
+        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+
+        // Second client should now be able to acquire lock
+        let session2 = provider
+            .accept_session(&queue_name, Some(session_id.clone()))
+            .await;
+        assert!(
+            session2.is_ok(),
+            "Session lock should expire and become available"
+        );
+    }
+
+    /// Verify that session lock can be renewed before expiration.
+    #[tokio::test]
+    async fn test_session_renew_lock() {
+        let config = InMemoryConfig {
+            session_lock_duration: Duration::seconds(2),
+            ..Default::default()
+        };
+        let provider = Arc::new(InMemoryProvider::new(config));
+        let queue_name = QueueName::new("renew-lock-test".to_string()).unwrap();
+        let session_id = SessionId::new("renew-session".to_string()).unwrap();
+
+        // Send message to session
+        let msg = Message::new(Bytes::from("Session message")).with_session_id(session_id.clone());
+        provider.send_message(&queue_name, &msg).await.unwrap();
+
+        // Accept session
+        let session = provider
+            .accept_session(&queue_name, Some(session_id.clone()))
+            .await
+            .unwrap();
+
+        // Wait half the lock duration
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+
+        // Renew lock
+        let renew_result = session.renew_session_lock().await;
+        assert!(renew_result.is_ok(), "Lock renewal should succeed");
+
+        // Wait another second (would have expired without renewal)
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+
+        // Session should still be locked (another client can't acquire)
+        let session2 = provider
+            .accept_session(&queue_name, Some(session_id.clone()))
+            .await;
+        assert!(
+            session2.is_err(),
+            "Session should still be locked after renewal"
+        );
+    }
+
+    /// Verify that closing a session releases the lock.
+    #[tokio::test]
+    async fn test_session_close_releases_lock() {
+        let provider = Arc::new(InMemoryProvider::new(InMemoryConfig::default()));
+        let queue_name = QueueName::new("close-lock-test".to_string()).unwrap();
+        let session_id = SessionId::new("close-session".to_string()).unwrap();
+
+        // Send message to session
+        let msg = Message::new(Bytes::from("Session message")).with_session_id(session_id.clone());
+        provider.send_message(&queue_name, &msg).await.unwrap();
+
+        // Accept session
+        let session = provider
+            .accept_session(&queue_name, Some(session_id.clone()))
+            .await
+            .unwrap();
+
+        // Close session
+        let close_result = session.close_session().await;
+        assert!(close_result.is_ok(), "Session close should succeed");
+
+        // Another client should now be able to acquire the session
+        let session2 = provider
+            .accept_session(&queue_name, Some(session_id.clone()))
+            .await;
+        assert!(
+            session2.is_ok(),
+            "Session lock should be released after close"
+        );
+    }
+
+    /// Verify that concurrent session accept attempts handle locking correctly.
+    #[tokio::test]
+    async fn test_concurrent_session_accept_with_lock() {
+        let provider = Arc::new(InMemoryProvider::new(InMemoryConfig::default()));
+        let queue_name = QueueName::new("concurrent-accept-test".to_string()).unwrap();
+        let session_id = SessionId::new("concurrent-session".to_string()).unwrap();
+
+        // Send message to session
+        let msg = Message::new(Bytes::from("Session message")).with_session_id(session_id.clone());
+        provider.send_message(&queue_name, &msg).await.unwrap();
+
+        // Try to accept session from multiple threads concurrently
+        let mut handles = vec![];
+        for _ in 0..5 {
+            let provider_clone = provider.clone();
+            let queue_clone = queue_name.clone();
+            let session_clone = session_id.clone();
+
+            let handle = tokio::spawn(async move {
+                provider_clone
+                    .accept_session(&queue_clone, Some(session_clone))
+                    .await
+            });
+            handles.push(handle);
+        }
+
+        // Collect results
+        let mut results = vec![];
+        for handle in handles {
+            results.push(handle.await.unwrap());
+        }
+
+        // Exactly one should succeed
+        let success_count = results.iter().filter(|r| r.is_ok()).count();
+        assert_eq!(
+            success_count, 1,
+            "Only one client should acquire session lock"
+        );
+
+        // All others should have lock error
+        let lock_error_count = results
+            .iter()
+            .filter(|r| matches!(r, Err(QueueError::SessionLocked { .. })))
+            .count();
+        assert_eq!(lock_error_count, 4, "Other clients should get lock error");
+    }
+
+    /// Verify that session provider only receives messages for its session.
+    #[tokio::test]
+    async fn test_session_receive_only_session_messages() {
+        let provider = Arc::new(InMemoryProvider::new(InMemoryConfig::default()));
+        let queue_name = QueueName::new("session-filter-test".to_string()).unwrap();
+        let session_a = SessionId::new("session-a".to_string()).unwrap();
+        let session_b = SessionId::new("session-b".to_string()).unwrap();
+
+        // Send messages to both sessions
+        let msg_a1 = Message::new(Bytes::from("Message A1")).with_session_id(session_a.clone());
+        let msg_a2 = Message::new(Bytes::from("Message A2")).with_session_id(session_a.clone());
+        let msg_b = Message::new(Bytes::from("Message B")).with_session_id(session_b.clone());
+
+        provider.send_message(&queue_name, &msg_a1).await.unwrap();
+        provider.send_message(&queue_name, &msg_b).await.unwrap();
+        provider.send_message(&queue_name, &msg_a2).await.unwrap();
+
+        // Accept session A
+        let session_client = provider
+            .accept_session(&queue_name, Some(session_a.clone()))
+            .await
+            .unwrap();
+
+        // Receive messages - should only get session A messages
+        let received1 = session_client
+            .receive_message(Duration::seconds(1))
+            .await
+            .unwrap();
+        assert!(received1.is_some());
+        assert_eq!(received1.as_ref().unwrap().body, Bytes::from("Message A1"));
+
+        // Complete first message
+        session_client
+            .complete_message(received1.unwrap().receipt_handle)
+            .await
+            .unwrap();
+
+        // Receive second message from session A
+        let received2 = session_client
+            .receive_message(Duration::seconds(1))
+            .await
+            .unwrap();
+        assert!(received2.is_some());
+        assert_eq!(received2.as_ref().unwrap().body, Bytes::from("Message A2"));
+
+        // Should not receive session B message
+        session_client
+            .complete_message(received2.unwrap().receipt_handle)
+            .await
+            .unwrap();
+
+        let received3 = session_client
+            .receive_message(Duration::seconds(1))
+            .await
+            .unwrap();
+        assert!(
+            received3.is_none(),
+            "Should not receive messages from other sessions"
+        );
+    }
+
+    /// Verify that session operations validate lock ownership.
+    #[tokio::test]
+    async fn test_session_operations_validate_lock() {
+        let provider = Arc::new(InMemoryProvider::new(InMemoryConfig::default()));
+        let queue_name = QueueName::new("lock-validation-test".to_string()).unwrap();
+        let session_id = SessionId::new("lock-check-session".to_string()).unwrap();
+
+        // Send message to session
+        let msg = Message::new(Bytes::from("Session message")).with_session_id(session_id.clone());
+        provider.send_message(&queue_name, &msg).await.unwrap();
+
+        // Accept session
+        let session = provider
+            .accept_session(&queue_name, Some(session_id.clone()))
+            .await
+            .unwrap();
+
+        // Receive message
+        let received = session.receive_message(Duration::seconds(1)).await.unwrap();
+        assert!(received.is_some());
+
+        // Close session (releases lock)
+        session.close_session().await.unwrap();
+
+        // Try to complete message after lock released - should fail
+        let complete_result = session
+            .complete_message(received.unwrap().receipt_handle)
+            .await;
+
+        assert!(
+            complete_result.is_err(),
+            "Operations should fail after session lock released"
+        );
+    }
+
+    /// Verify that session expiration time is properly tracked.
+    #[tokio::test]
+    async fn test_session_expiration_time() {
+        let config = InMemoryConfig {
+            session_lock_duration: Duration::seconds(300), // 5 minutes
+            ..Default::default()
+        };
+        let provider = Arc::new(InMemoryProvider::new(config));
+        let queue_name = QueueName::new("expiration-test".to_string()).unwrap();
+        let session_id = SessionId::new("expiring-session".to_string()).unwrap();
+
+        // Send message to session
+        let msg = Message::new(Bytes::from("Session message")).with_session_id(session_id.clone());
+        provider.send_message(&queue_name, &msg).await.unwrap();
+
+        // Accept session
+        let session = provider
+            .accept_session(&queue_name, Some(session_id.clone()))
+            .await
+            .unwrap();
+
+        // Check expiration time is in the future
+        let expires_at = session.session_expires_at();
+        let now = Timestamp::now();
+
+        assert!(
+            expires_at > now,
+            "Session expiration should be in the future"
+        );
+
+        // Should be approximately 5 minutes from now (within 1 second tolerance)
+        let expected_duration = chrono::Duration::seconds(300);
+        let actual_duration = expires_at.as_datetime() - now.as_datetime();
+        let diff = (actual_duration - expected_duration).num_seconds().abs();
+
+        assert!(
+            diff <= 1,
+            "Session expiration should be approximately session_lock_duration"
+        );
+    }
+}
+
+// ============================================================================
+// Concurrency Tests
+// ============================================================================
+
+mod concurrency {
+    use super::*;
+
+    /// Verify concurrent send operations work correctly without data races.
+    ///
+    /// Tests assertion #18: Concurrent operations maintain consistency.
+    #[tokio::test]
+    async fn test_concurrent_send_operations() {
+        let provider = Arc::new(InMemoryProvider::new(InMemoryConfig::default()));
+        let queue_name = QueueName::new("concurrent-send-test".to_string()).unwrap();
+        let message_count = 100;
+
+        // Send messages concurrently from multiple threads
+        let mut handles = vec![];
+        for i in 0..message_count {
+            let provider_clone = provider.clone();
+            let queue_clone = queue_name.clone();
+
+            let handle = tokio::spawn(async move {
+                let msg = Message::new(Bytes::from(format!("Message {}", i)));
+                provider_clone.send_message(&queue_clone, &msg).await
+            });
+            handles.push(handle);
+        }
+
+        // Wait for all sends to complete
+        let mut results = vec![];
+        for handle in handles {
+            results.push(handle.await.unwrap());
+        }
+
+        // All sends should succeed
+        assert_eq!(
+            results.iter().filter(|r| r.is_ok()).count(),
+            message_count,
+            "All concurrent sends should succeed"
+        );
+
+        // Verify all messages are in the queue
+        let mut received_count = 0;
+        for _ in 0..message_count {
+            if let Ok(Some(_)) = provider
+                .receive_message(&queue_name, Duration::seconds(1))
+                .await
+            {
+                received_count += 1;
+            }
+        }
+
+        assert_eq!(
+            received_count, message_count,
+            "All sent messages should be receivable"
+        );
+    }
+
+    /// Verify concurrent receive operations work correctly.
+    #[tokio::test]
+    async fn test_concurrent_receive_operations() {
+        let provider = Arc::new(InMemoryProvider::new(InMemoryConfig::default()));
+        let queue_name = QueueName::new("concurrent-receive-test".to_string()).unwrap();
+        let message_count = 50;
+
+        // Send messages first
+        for i in 0..message_count {
+            let msg = Message::new(Bytes::from(format!("Message {}", i)));
+            provider.send_message(&queue_name, &msg).await.unwrap();
+        }
+
+        // Receive messages concurrently from multiple threads
+        let mut handles = vec![];
+        for _ in 0..message_count {
+            let provider_clone = provider.clone();
+            let queue_clone = queue_name.clone();
+
+            let handle = tokio::spawn(async move {
+                provider_clone
+                    .receive_message(&queue_clone, Duration::seconds(1))
+                    .await
+            });
+            handles.push(handle);
+        }
+
+        // Wait for all receives to complete
+        let mut results = vec![];
+        for handle in handles {
+            results.push(handle.await.unwrap());
+        }
+
+        // Count successful receives (should be exactly message_count)
+        let received_count = results
+            .iter()
+            .filter(|r| r.is_ok() && r.as_ref().unwrap().is_some())
+            .count();
+
+        assert_eq!(
+            received_count, message_count,
+            "Each message should be received exactly once"
+        );
+
+        // No message should be received twice (verify unique message IDs)
+        let mut message_ids: Vec<_> = results
+            .iter()
+            .filter_map(|r| {
+                r.as_ref()
+                    .ok()
+                    .and_then(|opt| opt.as_ref().map(|msg| msg.message_id.clone()))
+            })
+            .collect();
+
+        message_ids.sort();
+        let original_len = message_ids.len();
+        message_ids.dedup();
+
+        assert_eq!(
+            message_ids.len(),
+            original_len,
+            "No message should be received twice"
+        );
+    }
+
+    /// Verify concurrent complete operations work correctly.
+    #[tokio::test]
+    async fn test_concurrent_complete_operations() {
+        let provider = Arc::new(InMemoryProvider::new(InMemoryConfig::default()));
+        let queue_name = QueueName::new("concurrent-complete-test".to_string()).unwrap();
+        let message_count = 50;
+
+        // Send and receive messages first
+        let mut receipts = vec![];
+        for i in 0..message_count {
+            let msg = Message::new(Bytes::from(format!("Message {}", i)));
+            provider.send_message(&queue_name, &msg).await.unwrap();
+
+            if let Ok(Some(received)) = provider
+                .receive_message(&queue_name, Duration::seconds(1))
+                .await
+            {
+                receipts.push(received.receipt_handle);
+            }
+        }
+
+        assert_eq!(receipts.len(), message_count, "Should receive all messages");
+
+        // Complete messages concurrently
+        let mut handles = vec![];
+        for receipt in receipts {
+            let provider_clone = provider.clone();
+
+            let handle =
+                tokio::spawn(async move { provider_clone.complete_message(&receipt).await });
+            handles.push(handle);
+        }
+
+        // Wait for all completes to finish
+        let mut results = vec![];
+        for handle in handles {
+            results.push(handle.await.unwrap());
+        }
+
+        // All completes should succeed
+        assert_eq!(
+            results.iter().filter(|r| r.is_ok()).count(),
+            message_count,
+            "All concurrent completes should succeed"
+        );
+
+        // Queue should be empty
+        let result = provider
+            .receive_message(&queue_name, Duration::seconds(1))
+            .await
+            .unwrap();
+        assert!(
+            result.is_none(),
+            "Queue should be empty after all completes"
+        );
+    }
+
+    /// Verify that session locking prevents race conditions.
+    #[tokio::test]
+    async fn test_session_locking_prevents_race_conditions() {
+        let provider = Arc::new(InMemoryProvider::new(InMemoryConfig::default()));
+        let queue_name = QueueName::new("session-race-test".to_string()).unwrap();
+        let session_id = SessionId::new("race-session".to_string()).unwrap();
+
+        // Send multiple messages to session
+        for i in 0..10 {
+            let msg = Message::new(Bytes::from(format!("Message {}", i)))
+                .with_session_id(session_id.clone());
+            provider.send_message(&queue_name, &msg).await.unwrap();
+        }
+
+        // Try to process session from multiple threads
+        let mut handles = vec![];
+        for thread_id in 0..5 {
+            let provider_clone = provider.clone();
+            let queue_clone = queue_name.clone();
+            let session_clone = session_id.clone();
+
+            let handle = tokio::spawn(async move {
+                let session_result = provider_clone
+                    .accept_session(&queue_clone, Some(session_clone))
+                    .await;
+
+                if let Ok(session) = session_result {
+                    // Try to receive and process messages
+                    let mut processed = 0;
+                    while let Ok(Some(msg)) = session.receive_message(Duration::seconds(1)).await {
+                        session.complete_message(msg.receipt_handle).await.ok();
+                        processed += 1;
+                    }
+                    (thread_id, processed)
+                } else {
+                    (thread_id, 0)
+                }
+            });
+            handles.push(handle);
+        }
+
+        // Wait for all threads to complete
+        let mut results = vec![];
+        for handle in handles {
+            results.push(handle.await.unwrap());
+        }
+
+        // Only one thread should have processed messages
+        let threads_with_messages = results.iter().filter(|(_, count)| *count > 0).count();
+        assert_eq!(
+            threads_with_messages, 1,
+            "Only one thread should acquire session lock and process messages"
+        );
+
+        // That thread should have processed all 10 messages
+        let total_processed: usize = results.iter().map(|(_, count)| count).sum();
+        assert_eq!(
+            total_processed, 10,
+            "All messages should be processed by the locking thread"
+        );
+    }
+
+    /// Verify that multiple queues operate independently.
+    #[tokio::test]
+    async fn test_multiple_queues_independent() {
+        let provider = Arc::new(InMemoryProvider::new(InMemoryConfig::default()));
+        let queue_a = QueueName::new("queue-a".to_string()).unwrap();
+        let queue_b = QueueName::new("queue-b".to_string()).unwrap();
+        let message_count = 20;
+
+        // Send messages to both queues concurrently
+        let mut handles = vec![];
+
+        for i in 0..message_count {
+            let provider_clone = provider.clone();
+            let queue_clone = queue_a.clone();
+            let handle = tokio::spawn(async move {
+                let msg = Message::new(Bytes::from(format!("Queue A Message {}", i)));
+                provider_clone.send_message(&queue_clone, &msg).await
+            });
+            handles.push(handle);
+
+            let provider_clone = provider.clone();
+            let queue_clone = queue_b.clone();
+            let handle = tokio::spawn(async move {
+                let msg = Message::new(Bytes::from(format!("Queue B Message {}", i)));
+                provider_clone.send_message(&queue_clone, &msg).await
+            });
+            handles.push(handle);
+        }
+
+        // Wait for all sends
+        for handle in handles {
+            handle.await.unwrap();
+        }
+
+        // Receive from both queues concurrently
+        let mut receive_handles = vec![];
+
+        for _ in 0..message_count {
+            let provider_clone = provider.clone();
+            let queue_clone = queue_a.clone();
+            let handle = tokio::spawn(async move {
+                provider_clone
+                    .receive_message(&queue_clone, Duration::seconds(1))
+                    .await
+            });
+            receive_handles.push(handle);
+
+            let provider_clone = provider.clone();
+            let queue_clone = queue_b.clone();
+            let handle = tokio::spawn(async move {
+                provider_clone
+                    .receive_message(&queue_clone, Duration::seconds(1))
+                    .await
+            });
+            receive_handles.push(handle);
+        }
+
+        let mut results = vec![];
+        for handle in receive_handles {
+            results.push(handle.await.unwrap());
+        }
+
+        // All receives should succeed
+        let success_count = results
+            .iter()
+            .filter(|r| r.is_ok() && r.as_ref().unwrap().is_some())
+            .count();
+
+        assert_eq!(
+            success_count,
+            message_count * 2,
+            "Each queue should operate independently"
+        );
+    }
+}
