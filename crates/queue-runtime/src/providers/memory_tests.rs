@@ -1791,6 +1791,7 @@ mod concurrency {
             "No message should be received twice"
         );
     }
+
     /// Verify concurrent complete operations work correctly.
     #[tokio::test]
     async fn test_concurrent_complete_operations() {

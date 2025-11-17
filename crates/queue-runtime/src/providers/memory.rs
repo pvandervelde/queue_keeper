@@ -878,9 +878,6 @@ impl SessionProvider for InMemorySessionProvider {
             if let Some(inflight) = queue_state.in_flight.remove(receipt.handle()) {
                 let mut message = inflight.message;
 
-                // Increment delivery count
-                message.delivery_count += 1;
-
                 // Check if max delivery count reached
                 if message.delivery_count >= queue_state.config.max_delivery_count {
                     // Move to DLQ if enabled
