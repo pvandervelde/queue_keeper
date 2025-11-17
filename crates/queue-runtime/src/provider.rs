@@ -104,6 +104,10 @@ pub struct AwsSqsConfig {
 pub struct InMemoryConfig {
     pub max_queue_size: usize,
     pub enable_persistence: bool,
+    pub max_delivery_count: u32,
+    pub default_message_ttl: Option<Duration>,
+    pub enable_dead_letter_queue: bool,
+    pub session_lock_duration: Duration,
 }
 
 impl Default for InMemoryConfig {
@@ -111,6 +115,10 @@ impl Default for InMemoryConfig {
         Self {
             max_queue_size: 10000,
             enable_persistence: false,
+            max_delivery_count: 3,
+            default_message_ttl: None,
+            enable_dead_letter_queue: true,
+            session_lock_duration: Duration::minutes(5),
         }
     }
 }

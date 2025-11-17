@@ -5,6 +5,7 @@ use crate::message::{
     Message, MessageId, QueueName, ReceiptHandle, ReceivedMessage, SessionId, Timestamp,
 };
 use crate::provider::{InMemoryConfig, ProviderConfig, ProviderType, QueueConfig, SessionSupport};
+use crate::providers::InMemoryProvider;
 use async_trait::async_trait;
 use chrono::Duration;
 
@@ -401,97 +402,5 @@ impl SessionClient for StandardSessionClient {
 
     fn session_expires_at(&self) -> Timestamp {
         self.provider.session_expires_at()
-    }
-}
-
-/// In-memory provider implementation for testing
-pub struct InMemoryProvider;
-
-impl Default for InMemoryProvider {
-    fn default() -> Self {
-        Self
-    }
-}
-
-impl InMemoryProvider {
-    /// Create new in-memory provider
-    pub fn new(_config: crate::provider::InMemoryConfig) -> Self {
-        Self
-    }
-}
-
-#[async_trait]
-impl QueueProvider for InMemoryProvider {
-    async fn send_message(
-        &self,
-        _queue: &QueueName,
-        _message: &Message,
-    ) -> Result<MessageId, QueueError> {
-        unimplemented!("In-memory message sending not yet implemented")
-    }
-
-    async fn send_messages(
-        &self,
-        _queue: &QueueName,
-        _messages: &[Message],
-    ) -> Result<Vec<MessageId>, QueueError> {
-        unimplemented!("In-memory batch sending not yet implemented")
-    }
-
-    async fn receive_message(
-        &self,
-        _queue: &QueueName,
-        _timeout: Duration,
-    ) -> Result<Option<ReceivedMessage>, QueueError> {
-        unimplemented!("In-memory message receiving not yet implemented")
-    }
-
-    async fn receive_messages(
-        &self,
-        _queue: &QueueName,
-        _max_messages: u32,
-        _timeout: Duration,
-    ) -> Result<Vec<ReceivedMessage>, QueueError> {
-        unimplemented!("In-memory batch receiving not yet implemented")
-    }
-
-    async fn complete_message(&self, _receipt: &ReceiptHandle) -> Result<(), QueueError> {
-        unimplemented!("In-memory message completion not yet implemented")
-    }
-
-    async fn abandon_message(&self, _receipt: &ReceiptHandle) -> Result<(), QueueError> {
-        unimplemented!("In-memory message abandonment not yet implemented")
-    }
-
-    async fn dead_letter_message(
-        &self,
-        _receipt: &ReceiptHandle,
-        _reason: &str,
-    ) -> Result<(), QueueError> {
-        unimplemented!("In-memory dead letter handling not yet implemented")
-    }
-
-    async fn create_session_client(
-        &self,
-        _queue: &QueueName,
-        _session_id: Option<SessionId>,
-    ) -> Result<Box<dyn SessionProvider>, QueueError> {
-        unimplemented!("In-memory session client creation not yet implemented")
-    }
-
-    fn provider_type(&self) -> ProviderType {
-        ProviderType::InMemory
-    }
-
-    fn supports_sessions(&self) -> SessionSupport {
-        SessionSupport::Native
-    }
-
-    fn supports_batching(&self) -> bool {
-        true
-    }
-
-    fn max_batch_size(&self) -> u32 {
-        100
     }
 }

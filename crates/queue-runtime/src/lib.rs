@@ -24,11 +24,12 @@ pub mod client;
 pub mod error;
 pub mod message;
 pub mod provider;
+pub mod providers;
 
 // Re-export commonly used types at crate root for convenience
 pub use client::{
-    InMemoryProvider, QueueClient, QueueClientFactory, QueueProvider, SessionClient,
-    SessionProvider, StandardQueueClient,
+    QueueClient, QueueClientFactory, QueueProvider, SessionClient, SessionProvider,
+    StandardQueueClient,
 };
 pub use error::{ConfigurationError, QueueError, SerializationError, ValidationError};
 pub use message::{
@@ -39,3 +40,4 @@ pub use provider::{
     AwsSqsConfig, AzureServiceBusConfig, InMemoryConfig, ProviderConfig, ProviderType, QueueConfig,
     SessionSupport,
 };
+pub use providers::{InMemoryProvider, InMemorySessionProvider};
