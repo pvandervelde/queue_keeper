@@ -711,9 +711,9 @@ dependencies = [
 
 [[package]]
 name = "azure_core"
-version = "0.29.1"
+version = "0.30.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2abacab36defa6d5b0fc985d0394711d3320f0ae96f8f6d86a995f12b7ffbed2"
+checksum = "f35444aeeb91e29ca82d04dbb8ad904570f837c82093454dc1989c64a33554a7"
 dependencies = [
  "async-lock",
  "async-trait",
@@ -731,26 +731,25 @@ dependencies = [
 
 [[package]]
 name = "azure_core_macros"
-version = "0.3.1"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aa7bfabe73737f7a3edea57ab8d3029d71669b513a8e9b603fa6c4baa35d2341"
+checksum = "94f7cc1bbae04cfe11de9e39e2c6dc755947901e0f4e76180ab542b6deb5e15e"
 dependencies = [
  "proc-macro2",
  "quote",
  "syn",
  "tracing",
- "typespec_client_core",
 ]
 
 [[package]]
 name = "azure_identity"
-version = "0.29.0"
+version = "0.30.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5c5b86f84a851bc9200d1a9e771dcb3a99ec4bcf09e320f8a199556a9ed3c54"
+checksum = "0f07bb0ee212021e75c3645e82d078e436b4b4184bde1295e9e81fcbcef923af"
 dependencies = [
  "async-lock",
  "async-trait",
- "azure_core 0.29.1",
+ "azure_core 0.30.1",
  "futures",
  "pin-project",
  "serde",
@@ -1318,7 +1317,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1466,7 +1465,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2596,7 +2595,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3311,7 +3310,7 @@ dependencies = [
  "async-trait",
  "aws-config",
  "aws-sdk-sqs",
- "azure_core 0.29.1",
+ "azure_core 0.30.1",
  "azure_identity",
  "azure_messaging_servicebus",
  "base64 0.22.1",
@@ -3381,7 +3380,7 @@ dependencies = [
  "once_cell",
  "socket2 0.5.10",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3733,7 +3732,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.11.0",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4210,7 +4209,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.2",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4646,9 +4645,9 @@ checksum = "562d481066bde0658276a35467c4af00bdc6ee726305698a55b86e61d7ad82bb"
 
 [[package]]
 name = "typespec"
-version = "0.9.1"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d514778bfa243e275f2a968d0aafdc40a0d89567bf310e0c64e735837c878372"
+checksum = "44f91ea93fdd5fd4985fcc0a197ed8e8da18705912bef63c9b9b3148d6f35510"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -4660,9 +4659,9 @@ dependencies = [
 
 [[package]]
 name = "typespec_client_core"
-version = "0.8.1"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ba4b8443d3a1d1a2042ed4b92c0357bb2ab056c1208a6b7627d927fdd616999"
+checksum = "1a0f6f7345c3389663551a64fc4dca78fa9689ece758c5ca76e82d6da69349dc"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -4685,9 +4684,9 @@ dependencies = [
 
 [[package]]
 name = "typespec_macros"
-version = "0.8.1"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "530a5f141b8b7e9fc2ba8eb5c657520f68581daef103b36dfbc049d82c653d39"
+checksum = "6ecee5b05c459ea4cd97df7685db58699c32e070465f88dc806d7c98a5088edc"
 dependencies = [
  "proc-macro2",
  "quote",
