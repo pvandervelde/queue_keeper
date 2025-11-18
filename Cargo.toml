@@ -29,7 +29,7 @@ tower-http = { version = "0.6", features = [
 ] }
 
 # Error handling
-thiserror = "1.0"
+thiserror = "2.0"
 anyhow = "1.0"
 
 # Logging and tracing
@@ -48,6 +48,7 @@ sha2 = "0.10"
 
 # Configuration
 config = "0.15"
+toml = "0.9"
 clap = { version = "4.4", features = ["derive", "env"] }
 
 # Azure integrations
@@ -64,9 +65,11 @@ aws-sdk-secretsmanager = "1.0"
 
 # Utilities
 uuid = { version = "1.6", features = ["v4", "serde"] }
-ulid = "1.1"
+ulid = "1.2"
 bytes = "1.5"
 url = "2.5"
+rand = "0.9"
+hex = "0.4"
 
 # Testing
 mockall = "0.13"
