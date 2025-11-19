@@ -25,6 +25,7 @@ pub mod error;
 pub mod message;
 pub mod provider;
 pub mod providers;
+pub mod sessions;
 
 // Re-export commonly used types at crate root for convenience
 pub use client::{
@@ -41,3 +42,7 @@ pub use provider::{
     SessionSupport,
 };
 pub use providers::{InMemoryProvider, InMemorySessionProvider};
+pub use sessions::{
+    CompositeKeyStrategy, FallbackStrategy, NoOrderingStrategy, SessionKeyExtractor,
+    SessionKeyGenerator, SingleFieldStrategy,
+};
