@@ -25,7 +25,7 @@ tracing = { workspace = true }
 
 # Utilities
 uuid = { workspace = true }
-ulid = { version = "1.2", features = ["serde"] }
+ulid = { workspace = true, features = ["serde"] }
 bytes = { workspace = true }
 
 # Dependencies on library crates
