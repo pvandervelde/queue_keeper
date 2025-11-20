@@ -254,9 +254,28 @@ impl CompositeKeyStrategy {
 
 impl SessionKeyGenerator for CompositeKeyStrategy {
     fn generate_key(&self, extractor: &dyn SessionKeyExtractor) -> Option<SessionId> {
-        // TODO: implement
-        let _ = extractor;
-        None
+        // Return None if no fields specified
+        if self.fields.is_empty() {
+            return None;
+        }
+
+        // Collect all field values
+        let values: Vec<String> = self
+            .fields
+            .iter()
+            .filter_map(|field| extractor.get_metadata(field))
+            .collect();
+
+        // Return None if any required field is missing
+        if values.len() != self.fields.len() {
+            return None;
+        }
+
+        // Join values with separator
+        let key = values.join(&self.separator);
+
+        // Create session ID
+        SessionId::new(key).ok()
     }
 }
 
@@ -308,9 +327,18 @@ impl SingleFieldStrategy {
 
 impl SessionKeyGenerator for SingleFieldStrategy {
     fn generate_key(&self, extractor: &dyn SessionKeyExtractor) -> Option<SessionId> {
-        // TODO: implement
-        let _ = extractor;
-        None
+        // Get the field value
+        let value = extractor.get_metadata(&self.field_name)?;
+
+        // Build key with optional prefix
+        let key = if let Some(ref prefix) = self.prefix {
+            format!("{}-{}", prefix, value)
+        } else {
+            value
+        };
+
+        // Create session ID
+        SessionId::new(key).ok()
     }
 }
 
@@ -392,8 +420,14 @@ impl FallbackStrategy {
 
 impl SessionKeyGenerator for FallbackStrategy {
     fn generate_key(&self, extractor: &dyn SessionKeyExtractor) -> Option<SessionId> {
-        // TODO: implement
-        let _ = extractor;
+        // Try each strategy in order until one succeeds
+        for strategy in &self.strategies {
+            if let Some(session_id) = strategy.generate_key(extractor) {
+                return Some(session_id);
+            }
+        }
+
+        // All strategies failed
         None
     }
 }
