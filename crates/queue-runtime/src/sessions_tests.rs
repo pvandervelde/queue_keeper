@@ -346,3 +346,418 @@ mod fallback_strategy_tests {
         assert!(session_id.is_none()); // NoOrderingStrategy returns None
     }
 }
+
+// ============================================================================
+// SessionLock Tests
+// ============================================================================
+
+mod session_lock_tests {
+    use super::*;
+    use std::time::Duration;
+    use tokio::time::sleep;
+
+    /// Verify that a newly created lock is not expired.
+    #[tokio::test]
+    async fn test_new_lock_is_not_expired() {
+        let session_id = SessionId::new("test-session".to_string()).unwrap();
+        let lock = SessionLock::new(
+            session_id,
+            "consumer-1".to_string(),
+            Duration::from_secs(30),
+        );
+
+        assert!(!lock.is_expired());
+        assert_eq!(lock.owner(), "consumer-1");
+    }
+
+    /// Verify that lock tracks session ID and owner correctly.
+    #[tokio::test]
+    async fn test_lock_tracks_session_and_owner() {
+        let session_id = SessionId::new("order-123".to_string()).unwrap();
+        let lock = SessionLock::new(
+            session_id.clone(),
+            "worker-5".to_string(),
+            Duration::from_secs(60),
+        );
+
+        assert_eq!(lock.session_id(), &session_id);
+        assert_eq!(lock.owner(), "worker-5");
+        assert_eq!(lock.lock_duration(), Duration::from_secs(60));
+    }
+
+    /// Verify that lock expires after the specified duration.
+    #[tokio::test]
+    async fn test_lock_expires_after_duration() {
+        let session_id = SessionId::new("short-lived".to_string()).unwrap();
+        let lock = SessionLock::new(
+            session_id,
+            "consumer-1".to_string(),
+            Duration::from_millis(50),
+        );
+
+        assert!(!lock.is_expired());
+
+        sleep(Duration::from_millis(60)).await;
+
+        assert!(lock.is_expired());
+    }
+
+    /// Verify that time_remaining returns correct values.
+    #[tokio::test]
+    async fn test_time_remaining_calculation() {
+        let session_id = SessionId::new("timed-session".to_string()).unwrap();
+        let lock = SessionLock::new(
+            session_id,
+            "consumer-1".to_string(),
+            Duration::from_millis(100),
+        );
+
+        let remaining = lock.time_remaining();
+        assert!(remaining <= Duration::from_millis(100));
+        assert!(remaining > Duration::from_millis(50)); // Should still have time
+
+        sleep(Duration::from_millis(110)).await;
+
+        assert_eq!(lock.time_remaining(), Duration::ZERO);
+    }
+
+    /// Verify that lock can be renewed to extend expiration.
+    #[tokio::test]
+    async fn test_lock_renewal() {
+        let session_id = SessionId::new("renewable".to_string()).unwrap();
+        let original_lock = SessionLock::new(
+            session_id.clone(),
+            "consumer-1".to_string(),
+            Duration::from_millis(50),
+        );
+
+        sleep(Duration::from_millis(30)).await;
+
+        let renewed_lock = original_lock.renew(Duration::from_millis(100));
+
+        assert_eq!(renewed_lock.session_id(), &session_id);
+        assert_eq!(renewed_lock.owner(), "consumer-1");
+        assert!(!renewed_lock.is_expired());
+
+        // Original lock should still expire on schedule
+        sleep(Duration::from_millis(30)).await;
+        assert!(original_lock.is_expired());
+
+        // Renewed lock should still be valid
+        assert!(!renewed_lock.is_expired());
+    }
+}
+
+// ============================================================================
+// SessionLockManager Tests
+// ============================================================================
+
+mod session_lock_manager_tests {
+    use super::*;
+    use std::time::Duration;
+    use tokio::time::sleep;
+
+    /// Verify that a session can be locked successfully.
+    #[tokio::test]
+    async fn test_acquire_lock_succeeds() {
+        let manager = SessionLockManager::new(Duration::from_secs(30));
+        let session_id = SessionId::new("session-1".to_string()).unwrap();
+
+        let result = manager
+            .try_acquire_lock(session_id.clone(), "consumer-1".to_string())
+            .await;
+
+        assert!(result.is_ok());
+        let lock = result.unwrap();
+        assert_eq!(lock.session_id(), &session_id);
+        assert_eq!(lock.owner(), "consumer-1");
+    }
+
+    /// Verify that locking same session twice by different consumers fails.
+    #[tokio::test]
+    async fn test_acquire_locked_session_fails() {
+        let manager = SessionLockManager::new(Duration::from_secs(30));
+        let session_id = SessionId::new("contested-session".to_string()).unwrap();
+
+        // First consumer acquires lock
+        let _lock1 = manager
+            .try_acquire_lock(session_id.clone(), "consumer-1".to_string())
+            .await
+            .unwrap();
+
+        // Second consumer tries to acquire same session
+        let result = manager
+            .try_acquire_lock(session_id.clone(), "consumer-2".to_string())
+            .await;
+
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            QueueError::SessionLocked { .. }
+        ));
+    }
+
+    /// Verify that same consumer can acquire lock again (idempotent).
+    #[tokio::test]
+    async fn test_same_consumer_can_reacquire_lock() {
+        let manager = SessionLockManager::new(Duration::from_secs(30));
+        let session_id = SessionId::new("idempotent-session".to_string()).unwrap();
+
+        let _lock1 = manager
+            .try_acquire_lock(session_id.clone(), "consumer-1".to_string())
+            .await
+            .unwrap();
+
+        // Same consumer tries again - should succeed
+        let result = manager
+            .try_acquire_lock(session_id.clone(), "consumer-1".to_string())
+            .await;
+
+        assert!(result.is_ok());
+    }
+
+    /// Verify that expired locks can be acquired by new consumers.
+    #[tokio::test]
+    async fn test_expired_lock_can_be_reacquired() {
+        let manager = SessionLockManager::new(Duration::from_millis(50));
+        let session_id = SessionId::new("expiring-session".to_string()).unwrap();
+
+        // First consumer acquires lock
+        let _lock1 = manager
+            .try_acquire_lock(session_id.clone(), "consumer-1".to_string())
+            .await
+            .unwrap();
+
+        // Wait for lock to expire
+        sleep(Duration::from_millis(60)).await;
+
+        // Second consumer can now acquire the session
+        let result = manager
+            .try_acquire_lock(session_id.clone(), "consumer-2".to_string())
+            .await;
+
+        assert!(result.is_ok());
+        let lock = result.unwrap();
+        assert_eq!(lock.owner(), "consumer-2");
+    }
+
+    /// Verify that locks can be renewed successfully.
+    #[tokio::test]
+    async fn test_renew_lock_succeeds() {
+        let manager = SessionLockManager::new(Duration::from_secs(30));
+        let session_id = SessionId::new("renewable-session".to_string()).unwrap();
+
+        let _lock = manager
+            .try_acquire_lock(session_id.clone(), "consumer-1".to_string())
+            .await
+            .unwrap();
+
+        let result = manager
+            .renew_lock(&session_id, "consumer-1", Some(Duration::from_secs(60)))
+            .await;
+
+        assert!(result.is_ok());
+        let renewed = result.unwrap();
+        assert_eq!(renewed.lock_duration(), Duration::from_secs(60));
+    }
+
+    /// Verify that renewing lock for wrong owner fails.
+    #[tokio::test]
+    async fn test_renew_lock_wrong_owner_fails() {
+        let manager = SessionLockManager::new(Duration::from_secs(30));
+        let session_id = SessionId::new("owned-session".to_string()).unwrap();
+
+        let _lock = manager
+            .try_acquire_lock(session_id.clone(), "consumer-1".to_string())
+            .await
+            .unwrap();
+
+        let result = manager.renew_lock(&session_id, "consumer-2", None).await;
+
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            QueueError::SessionLocked { .. }
+        ));
+    }
+
+    /// Verify that renewing non-existent lock fails.
+    #[tokio::test]
+    async fn test_renew_nonexistent_lock_fails() {
+        let manager = SessionLockManager::new(Duration::from_secs(30));
+        let session_id = SessionId::new("nonexistent".to_string()).unwrap();
+
+        let result = manager.renew_lock(&session_id, "consumer-1", None).await;
+
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            QueueError::SessionNotFound { .. }
+        ));
+    }
+
+    /// Verify that locks can be released successfully.
+    #[tokio::test]
+    async fn test_release_lock_succeeds() {
+        let manager = SessionLockManager::new(Duration::from_secs(30));
+        let session_id = SessionId::new("releasable-session".to_string()).unwrap();
+
+        let _lock = manager
+            .try_acquire_lock(session_id.clone(), "consumer-1".to_string())
+            .await
+            .unwrap();
+
+        let result = manager.release_lock(&session_id, "consumer-1").await;
+        assert!(result.is_ok());
+
+        // Session should no longer be locked
+        assert!(!manager.is_locked(&session_id).await);
+    }
+
+    /// Verify that releasing lock for wrong owner fails.
+    #[tokio::test]
+    async fn test_release_lock_wrong_owner_fails() {
+        let manager = SessionLockManager::new(Duration::from_secs(30));
+        let session_id = SessionId::new("protected-session".to_string()).unwrap();
+
+        let _lock = manager
+            .try_acquire_lock(session_id.clone(), "consumer-1".to_string())
+            .await
+            .unwrap();
+
+        let result = manager.release_lock(&session_id, "consumer-2").await;
+
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            QueueError::SessionLocked { .. }
+        ));
+    }
+
+    /// Verify that is_locked returns correct status.
+    #[tokio::test]
+    async fn test_is_locked_status() {
+        let manager = SessionLockManager::new(Duration::from_secs(30));
+        let session_id = SessionId::new("status-check".to_string()).unwrap();
+
+        assert!(!manager.is_locked(&session_id).await);
+
+        let _lock = manager
+            .try_acquire_lock(session_id.clone(), "consumer-1".to_string())
+            .await
+            .unwrap();
+
+        assert!(manager.is_locked(&session_id).await);
+
+        manager
+            .release_lock(&session_id, "consumer-1")
+            .await
+            .unwrap();
+
+        assert!(!manager.is_locked(&session_id).await);
+    }
+
+    /// Verify that get_lock returns lock information.
+    #[tokio::test]
+    async fn test_get_lock_returns_info() {
+        let manager = SessionLockManager::new(Duration::from_secs(30));
+        let session_id = SessionId::new("info-session".to_string()).unwrap();
+
+        assert!(manager.get_lock(&session_id).await.is_none());
+
+        let _original = manager
+            .try_acquire_lock(session_id.clone(), "consumer-1".to_string())
+            .await
+            .unwrap();
+
+        let lock_info = manager.get_lock(&session_id).await;
+        assert!(lock_info.is_some());
+        assert_eq!(lock_info.unwrap().owner(), "consumer-1");
+    }
+
+    /// Verify that expired locks are cleaned up.
+    #[tokio::test]
+    async fn test_cleanup_expired_locks() {
+        let manager = SessionLockManager::new(Duration::from_millis(50));
+
+        // Create several locks
+        let session1 = SessionId::new("session-1".to_string()).unwrap();
+        let session2 = SessionId::new("session-2".to_string()).unwrap();
+
+        manager
+            .try_acquire_lock(session1.clone(), "consumer-1".to_string())
+            .await
+            .unwrap();
+        manager
+            .try_acquire_lock(session2.clone(), "consumer-2".to_string())
+            .await
+            .unwrap();
+
+        assert_eq!(manager.lock_count().await, 2);
+
+        // Wait for locks to expire
+        sleep(Duration::from_millis(60)).await;
+
+        let cleaned = manager.cleanup_expired_locks().await;
+        assert_eq!(cleaned, 2);
+        assert_eq!(manager.lock_count().await, 0);
+    }
+
+    /// Verify lock count tracking.
+    #[tokio::test]
+    async fn test_lock_count_tracking() {
+        let manager = SessionLockManager::new(Duration::from_secs(30));
+
+        assert_eq!(manager.lock_count().await, 0);
+        assert_eq!(manager.active_lock_count().await, 0);
+
+        let session1 = SessionId::new("session-1".to_string()).unwrap();
+        let session2 = SessionId::new("session-2".to_string()).unwrap();
+
+        manager
+            .try_acquire_lock(session1.clone(), "consumer-1".to_string())
+            .await
+            .unwrap();
+        manager
+            .try_acquire_lock(session2.clone(), "consumer-2".to_string())
+            .await
+            .unwrap();
+
+        assert_eq!(manager.lock_count().await, 2);
+        assert_eq!(manager.active_lock_count().await, 2);
+
+        manager.release_lock(&session1, "consumer-1").await.unwrap();
+
+        assert_eq!(manager.lock_count().await, 1);
+        assert_eq!(manager.active_lock_count().await, 1);
+    }
+
+    /// Verify that active lock count excludes expired locks.
+    #[tokio::test]
+    async fn test_active_lock_count_excludes_expired() {
+        let manager = SessionLockManager::new(Duration::from_millis(50));
+
+        let session1 = SessionId::new("active".to_string()).unwrap();
+        let session2 = SessionId::new("expired".to_string()).unwrap();
+
+        manager
+            .try_acquire_lock(session1.clone(), "consumer-1".to_string())
+            .await
+            .unwrap();
+
+        sleep(Duration::from_millis(30)).await;
+
+        manager
+            .try_acquire_lock(session2.clone(), "consumer-2".to_string())
+            .await
+            .unwrap();
+
+        assert_eq!(manager.lock_count().await, 2);
+
+        // Wait for first lock to expire
+        sleep(Duration::from_millis(30)).await;
+
+        assert_eq!(manager.lock_count().await, 2); // Still stored
+        assert_eq!(manager.active_lock_count().await, 1); // Only one active
+    }
+}

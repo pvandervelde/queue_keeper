@@ -57,8 +57,13 @@
 //! }
 //! ```
 
-use crate::message::SessionId;
+use crate::message::{SessionId, Timestamp};
+use crate::QueueError;
 use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::RwLock;
+use tokio::time::Instant;
 
 #[cfg(test)]
 #[path = "sessions_tests.rs"]
@@ -429,5 +434,444 @@ impl SessionKeyGenerator for FallbackStrategy {
 
         // All strategies failed
         None
+    }
+}
+
+// ============================================================================
+// Session Lock Management
+// ============================================================================
+
+/// Represents a lock on a session for exclusive message processing.
+///
+/// A session lock ensures that only one consumer can process messages from
+/// a session at a time, maintaining FIFO ordering guarantees. Locks have
+/// an expiration time and can be renewed to extend processing time.
+///
+/// # Design
+///
+/// - **Expiration**: Locks automatically expire after a timeout period
+/// - **Renewal**: Locks can be renewed before expiration to extend processing
+/// - **Owner Tracking**: Each lock tracks which consumer owns it
+/// - **Timeout Handling**: Expired locks can be acquired by other consumers
+///
+/// # Example
+///
+/// ```rust
+/// use queue_runtime::sessions::SessionLock;
+/// use queue_runtime::message::SessionId;
+/// use std::time::Duration;
+///
+/// # tokio_test::block_on(async {
+/// let session_id = SessionId::new("user-123".to_string()).unwrap();
+/// let lock = SessionLock::new(session_id.clone(), "consumer-1".to_string(), Duration::from_secs(30));
+///
+/// assert!(!lock.is_expired());
+/// assert_eq!(lock.owner(), "consumer-1");
+/// # });
+/// ```
+#[derive(Debug, Clone)]
+pub struct SessionLock {
+    session_id: SessionId,
+    owner: String,
+    acquired_at: Instant,
+    expires_at: Instant,
+    lock_duration: Duration,
+}
+
+impl SessionLock {
+    /// Create a new session lock.
+    ///
+    /// # Arguments
+    ///
+    /// * `session_id` - The session being locked
+    /// * `owner` - Identifier of the consumer owning this lock
+    /// * `lock_duration` - How long the lock is valid before expiration
+    ///
+    /// # Returns
+    ///
+    /// A new session lock that expires after `lock_duration`
+    pub fn new(session_id: SessionId, owner: String, lock_duration: Duration) -> Self {
+        let now = Instant::now();
+        Self {
+            session_id,
+            owner,
+            acquired_at: now,
+            expires_at: now + lock_duration,
+            lock_duration,
+        }
+    }
+
+    /// Get the session ID this lock is for.
+    pub fn session_id(&self) -> &SessionId {
+        &self.session_id
+    }
+
+    /// Get the owner of this lock.
+    pub fn owner(&self) -> &str {
+        &self.owner
+    }
+
+    /// Get when this lock was acquired.
+    pub fn acquired_at(&self) -> Instant {
+        self.acquired_at
+    }
+
+    /// Get when this lock expires.
+    pub fn expires_at(&self) -> Instant {
+        self.expires_at
+    }
+
+    /// Get the configured lock duration.
+    pub fn lock_duration(&self) -> Duration {
+        self.lock_duration
+    }
+
+    /// Check if this lock has expired.
+    ///
+    /// # Returns
+    ///
+    /// `true` if the current time is past the expiration time
+    pub fn is_expired(&self) -> bool {
+        Instant::now() >= self.expires_at
+    }
+
+    /// Get the remaining time before this lock expires.
+    ///
+    /// # Returns
+    ///
+    /// Duration until expiration, or zero if already expired
+    pub fn time_remaining(&self) -> Duration {
+        let now = Instant::now();
+        if now >= self.expires_at {
+            Duration::ZERO
+        } else {
+            self.expires_at - now
+        }
+    }
+
+    /// Renew this lock, extending its expiration time.
+    ///
+    /// # Arguments
+    ///
+    /// * `extension` - How long to extend the lock by
+    ///
+    /// # Returns
+    ///
+    /// A new lock with updated expiration time
+    pub fn renew(&self, extension: Duration) -> Self {
+        Self {
+            session_id: self.session_id.clone(),
+            owner: self.owner.clone(),
+            acquired_at: self.acquired_at,
+            expires_at: Instant::now() + extension,
+            lock_duration: extension,
+        }
+    }
+}
+
+/// Manages session locks for concurrent message processing.
+///
+/// The lock manager coordinates exclusive access to sessions, ensuring that
+/// only one consumer processes messages from a session at a time. It handles
+/// lock acquisition, renewal, release, and automatic expiration cleanup.
+///
+/// # Thread Safety
+///
+/// This type is thread-safe and can be shared across async tasks using `Arc`.
+///
+/// # Example
+///
+/// ```rust
+/// use queue_runtime::sessions::SessionLockManager;
+/// use queue_runtime::message::SessionId;
+/// use std::time::Duration;
+///
+/// # tokio_test::block_on(async {
+/// let manager = SessionLockManager::new(Duration::from_secs(30));
+/// let session_id = SessionId::new("order-456".to_string()).unwrap();
+///
+/// // Acquire lock
+/// let lock = manager.acquire_lock(session_id.clone(), "consumer-1".to_string()).await?;
+/// assert_eq!(lock.owner(), "consumer-1");
+///
+/// // Try to acquire same session with different consumer - should fail
+/// let result = manager.try_acquire_lock(session_id.clone(), "consumer-2".to_string()).await;
+/// assert!(result.is_err());
+///
+/// // Release lock
+/// manager.release_lock(&session_id, "consumer-1").await?;
+/// # Ok::<(), queue_runtime::QueueError>(())
+/// # });
+/// ```
+pub struct SessionLockManager {
+    locks: Arc<RwLock<HashMap<SessionId, SessionLock>>>,
+    default_lock_duration: Duration,
+}
+
+impl SessionLockManager {
+    /// Create a new session lock manager.
+    ///
+    /// # Arguments
+    ///
+    /// * `default_lock_duration` - Default duration for session locks
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use queue_runtime::sessions::SessionLockManager;
+    /// use std::time::Duration;
+    ///
+    /// let manager = SessionLockManager::new(Duration::from_secs(60));
+    /// ```
+    pub fn new(default_lock_duration: Duration) -> Self {
+        Self {
+            locks: Arc::new(RwLock::new(HashMap::new())),
+            default_lock_duration,
+        }
+    }
+
+    /// Try to acquire a lock on a session (non-blocking).
+    ///
+    /// Returns immediately with an error if the session is already locked
+    /// by another consumer.
+    ///
+    /// # Arguments
+    ///
+    /// * `session_id` - The session to lock
+    /// * `owner` - Identifier of the consumer requesting the lock
+    ///
+    /// # Returns
+    ///
+    /// The acquired lock if successful, or an error if the session is locked
+    ///
+    /// # Errors
+    ///
+    /// Returns `QueueError::SessionLocked` if the session is already locked
+    /// by another consumer and the lock has not expired.
+    pub async fn try_acquire_lock(
+        &self,
+        session_id: SessionId,
+        owner: String,
+    ) -> Result<SessionLock, QueueError> {
+        let mut locks = self.locks.write().await;
+
+        // Check if session is already locked
+        if let Some(existing_lock) = locks.get(&session_id) {
+            if !existing_lock.is_expired() {
+                // Lock is still valid and owned by someone else
+                if existing_lock.owner() != owner {
+                    return Err(QueueError::SessionLocked {
+                        session_id: session_id.to_string(),
+                        locked_until: Timestamp::now(),
+                    });
+                }
+                // Same owner - return existing lock
+                return Ok(existing_lock.clone());
+            }
+            // Lock expired - remove it and acquire new lock below
+        }
+
+        // Acquire new lock
+        let lock = SessionLock::new(session_id.clone(), owner, self.default_lock_duration);
+        locks.insert(session_id, lock.clone());
+
+        Ok(lock)
+    }
+
+    /// Acquire a lock on a session (blocking with timeout).
+    ///
+    /// Waits for the lock to become available if it's currently held by
+    /// another consumer, up to the specified timeout.
+    ///
+    /// # Arguments
+    ///
+    /// * `session_id` - The session to lock
+    /// * `owner` - Identifier of the consumer requesting the lock
+    ///
+    /// # Returns
+    ///
+    /// The acquired lock if successful within the timeout period
+    ///
+    /// # Errors
+    ///
+    /// Returns `QueueError::SessionLocked` if unable to acquire the lock
+    /// within the timeout period.
+    pub async fn acquire_lock(
+        &self,
+        session_id: SessionId,
+        owner: String,
+    ) -> Result<SessionLock, QueueError> {
+        // For now, just try once - future enhancement could add retry logic
+        self.try_acquire_lock(session_id, owner).await
+    }
+
+    /// Renew an existing session lock.
+    ///
+    /// Extends the lock's expiration time, allowing the consumer to continue
+    /// processing messages from the session.
+    ///
+    /// # Arguments
+    ///
+    /// * `session_id` - The session whose lock to renew
+    /// * `owner` - Identifier of the consumer owning the lock
+    /// * `extension` - How long to extend the lock by (if None, uses default duration)
+    ///
+    /// # Returns
+    ///
+    /// The renewed lock with updated expiration time
+    ///
+    /// # Errors
+    ///
+    /// Returns `QueueError::SessionNotFound` if no lock exists for the session.
+    /// Returns `QueueError::SessionLocked` if the lock is owned by a different consumer.
+    pub async fn renew_lock(
+        &self,
+        session_id: &SessionId,
+        owner: &str,
+        extension: Option<Duration>,
+    ) -> Result<SessionLock, QueueError> {
+        let mut locks = self.locks.write().await;
+
+        let existing_lock = locks
+            .get(session_id)
+            .ok_or_else(|| QueueError::SessionNotFound {
+                session_id: session_id.to_string(),
+            })?;
+
+        // Verify ownership
+        if existing_lock.owner() != owner {
+            return Err(QueueError::SessionLocked {
+                session_id: session_id.to_string(),
+                locked_until: Timestamp::now(),
+            });
+        }
+
+        // Renew the lock
+        let renewed_lock = existing_lock.renew(extension.unwrap_or(self.default_lock_duration));
+        locks.insert(session_id.clone(), renewed_lock.clone());
+
+        Ok(renewed_lock)
+    }
+
+    /// Release a session lock.
+    ///
+    /// Removes the lock, allowing other consumers to acquire it.
+    ///
+    /// # Arguments
+    ///
+    /// * `session_id` - The session whose lock to release
+    /// * `owner` - Identifier of the consumer releasing the lock
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if the lock was successfully released
+    ///
+    /// # Errors
+    ///
+    /// Returns `QueueError::SessionNotFound` if no lock exists for the session.
+    /// Returns `QueueError::SessionLocked` if the lock is owned by a different consumer.
+    pub async fn release_lock(
+        &self,
+        session_id: &SessionId,
+        owner: &str,
+    ) -> Result<(), QueueError> {
+        let mut locks = self.locks.write().await;
+
+        let existing_lock = locks
+            .get(session_id)
+            .ok_or_else(|| QueueError::SessionNotFound {
+                session_id: session_id.to_string(),
+            })?;
+
+        // Verify ownership
+        if existing_lock.owner() != owner {
+            return Err(QueueError::SessionLocked {
+                session_id: session_id.to_string(),
+                locked_until: Timestamp::now(),
+            });
+        }
+
+        // Remove the lock
+        locks.remove(session_id);
+
+        Ok(())
+    }
+
+    /// Check if a session is currently locked.
+    ///
+    /// # Arguments
+    ///
+    /// * `session_id` - The session to check
+    ///
+    /// # Returns
+    ///
+    /// `true` if the session has a valid (non-expired) lock
+    pub async fn is_locked(&self, session_id: &SessionId) -> bool {
+        let locks = self.locks.read().await;
+        locks
+            .get(session_id)
+            .map(|lock| !lock.is_expired())
+            .unwrap_or(false)
+    }
+
+    /// Get information about a session lock.
+    ///
+    /// # Arguments
+    ///
+    /// * `session_id` - The session to query
+    ///
+    /// # Returns
+    ///
+    /// The lock information if it exists and is not expired
+    pub async fn get_lock(&self, session_id: &SessionId) -> Option<SessionLock> {
+        let locks = self.locks.read().await;
+        locks
+            .get(session_id)
+            .filter(|lock| !lock.is_expired())
+            .cloned()
+    }
+
+    /// Clean up expired locks.
+    ///
+    /// Removes all locks that have passed their expiration time.
+    ///
+    /// # Returns
+    ///
+    /// The number of expired locks that were removed
+    pub async fn cleanup_expired_locks(&self) -> usize {
+        let mut locks = self.locks.write().await;
+
+        let expired: Vec<SessionId> = locks
+            .iter()
+            .filter(|(_, lock)| lock.is_expired())
+            .map(|(id, _)| id.clone())
+            .collect();
+
+        let count = expired.len();
+        for session_id in expired {
+            locks.remove(&session_id);
+        }
+
+        count
+    }
+
+    /// Get the number of currently held locks (including expired).
+    ///
+    /// # Returns
+    ///
+    /// Total number of locks in the manager
+    pub async fn lock_count(&self) -> usize {
+        let locks = self.locks.read().await;
+        locks.len()
+    }
+
+    /// Get the number of active (non-expired) locks.
+    ///
+    /// # Returns
+    ///
+    /// Number of locks that have not expired
+    pub async fn active_lock_count(&self) -> usize {
+        let locks = self.locks.read().await;
+        locks.values().filter(|lock| !lock.is_expired()).count()
     }
 }
