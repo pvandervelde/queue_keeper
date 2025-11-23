@@ -1787,3 +1787,494 @@ mod session_lifecycle_manager_tests {
         assert!(worker2_sessions.contains(&session3));
     }
 }
+
+// ============================================================================
+// Integration Tests: Concurrent Session Access and Ordering
+// ============================================================================
+
+mod integration_tests {
+    use super::*;
+    use std::sync::Arc;
+    use std::time::Duration;
+    use tokio::time::sleep;
+
+    /// Verify that lock and affinity work together for session exclusivity.
+    #[tokio::test]
+    async fn test_lock_and_affinity_integration() {
+        let lock_manager = Arc::new(SessionLockManager::new(Duration::from_secs(30)));
+        let affinity_tracker = Arc::new(SessionAffinityTracker::new(Duration::from_secs(60)));
+        let session_id = SessionId::new("integrated-session".to_string()).unwrap();
+
+        // Consumer 1 acquires lock
+        let lock1 = lock_manager
+            .try_acquire_lock(session_id.clone(), "consumer-1".to_string())
+            .await
+            .unwrap();
+        assert!(!lock1.is_expired());
+
+        // Consumer 1 establishes affinity
+        let affinity1 = affinity_tracker
+            .assign_session(session_id.clone(), "consumer-1".to_string())
+            .await
+            .unwrap();
+        assert_eq!(affinity1.consumer_id(), "consumer-1");
+
+        // Consumer 2 cannot acquire lock (locked by consumer 1)
+        let result = lock_manager
+            .try_acquire_lock(session_id.clone(), "consumer-2".to_string())
+            .await;
+        assert!(result.is_err());
+
+        // Consumer 2 cannot establish affinity (already assigned to consumer 1)
+        let result = affinity_tracker
+            .assign_session(session_id.clone(), "consumer-2".to_string())
+            .await;
+        assert!(result.is_err());
+
+        // Release lock and affinity
+        lock_manager
+            .release_lock(&session_id, "consumer-1")
+            .await
+            .unwrap();
+        affinity_tracker
+            .release_session(&session_id, "consumer-1")
+            .await
+            .unwrap();
+
+        // Now consumer 2 can acquire both
+        let lock2 = lock_manager
+            .try_acquire_lock(session_id.clone(), "consumer-2".to_string())
+            .await
+            .unwrap();
+        assert!(!lock2.is_expired());
+
+        let affinity2 = affinity_tracker
+            .assign_session(session_id.clone(), "consumer-2".to_string())
+            .await
+            .unwrap();
+        assert_eq!(affinity2.consumer_id(), "consumer-2");
+    }
+
+    /// Verify concurrent access to different sessions.
+    #[tokio::test]
+    async fn test_concurrent_access_different_sessions() {
+        let lock_manager = Arc::new(SessionLockManager::new(Duration::from_secs(30)));
+        let affinity_tracker = Arc::new(SessionAffinityTracker::new(Duration::from_secs(60)));
+
+        let session1 = SessionId::new("session-1".to_string()).unwrap();
+        let session2 = SessionId::new("session-2".to_string()).unwrap();
+        let session3 = SessionId::new("session-3".to_string()).unwrap();
+
+        // Spawn concurrent tasks for different sessions
+        let lock_mgr1 = Arc::clone(&lock_manager);
+        let affinity1 = Arc::clone(&affinity_tracker);
+        let s1 = session1.clone();
+        let handle1 = tokio::spawn(async move {
+            lock_mgr1
+                .try_acquire_lock(s1.clone(), "worker-1".to_string())
+                .await
+                .unwrap();
+            affinity1
+                .assign_session(s1, "worker-1".to_string())
+                .await
+                .unwrap();
+        });
+
+        let lock_mgr2 = Arc::clone(&lock_manager);
+        let affinity2 = Arc::clone(&affinity_tracker);
+        let s2 = session2.clone();
+        let handle2 = tokio::spawn(async move {
+            lock_mgr2
+                .try_acquire_lock(s2.clone(), "worker-2".to_string())
+                .await
+                .unwrap();
+            affinity2
+                .assign_session(s2, "worker-2".to_string())
+                .await
+                .unwrap();
+        });
+
+        let lock_mgr3 = Arc::clone(&lock_manager);
+        let affinity3 = Arc::clone(&affinity_tracker);
+        let s3 = session3.clone();
+        let handle3 = tokio::spawn(async move {
+            lock_mgr3
+                .try_acquire_lock(s3.clone(), "worker-3".to_string())
+                .await
+                .unwrap();
+            affinity3
+                .assign_session(s3, "worker-3".to_string())
+                .await
+                .unwrap();
+        });
+
+        // All should succeed
+        handle1.await.unwrap();
+        handle2.await.unwrap();
+        handle3.await.unwrap();
+
+        // Verify all sessions are locked and have affinity
+        assert!(lock_manager.is_locked(&session1).await);
+        assert!(lock_manager.is_locked(&session2).await);
+        assert!(lock_manager.is_locked(&session3).await);
+
+        assert_eq!(
+            affinity_tracker.get_consumer(&session1).await,
+            Some("worker-1".to_string())
+        );
+        assert_eq!(
+            affinity_tracker.get_consumer(&session2).await,
+            Some("worker-2".to_string())
+        );
+        assert_eq!(
+            affinity_tracker.get_consumer(&session3).await,
+            Some("worker-3".to_string())
+        );
+    }
+
+    /// Verify lifecycle management with locks and affinity.
+    #[tokio::test]
+    async fn test_lifecycle_with_locks_and_affinity() {
+        let lock_manager = Arc::new(SessionLockManager::new(Duration::from_secs(30)));
+        let affinity_tracker = Arc::new(SessionAffinityTracker::new(Duration::from_secs(60)));
+        let lifecycle_config = SessionLifecycleConfig {
+            max_session_duration: Duration::from_secs(60),
+            max_messages_per_session: 10,
+            session_timeout: Duration::from_secs(30),
+        };
+        let lifecycle_manager = Arc::new(SessionLifecycleManager::new(lifecycle_config));
+
+        let session_id = SessionId::new("managed-session".to_string()).unwrap();
+
+        // Start session lifecycle
+        lifecycle_manager
+            .start_session(session_id.clone(), "worker-1".to_string())
+            .await
+            .unwrap();
+
+        // Acquire lock and affinity
+        lock_manager
+            .try_acquire_lock(session_id.clone(), "worker-1".to_string())
+            .await
+            .unwrap();
+        affinity_tracker
+            .assign_session(session_id.clone(), "worker-1".to_string())
+            .await
+            .unwrap();
+
+        // Process messages
+        for _ in 0..5 {
+            lifecycle_manager.record_message(&session_id).await.unwrap();
+            lock_manager
+                .renew_lock(&session_id, "worker-1", None)
+                .await
+                .unwrap();
+            affinity_tracker.touch_session(&session_id).await.unwrap();
+        }
+
+        // Verify session is active
+        assert!(!lifecycle_manager.should_close_session(&session_id).await);
+        assert!(lock_manager.is_locked(&session_id).await);
+        assert!(affinity_tracker.has_affinity(&session_id).await);
+
+        // Clean up
+        lock_manager
+            .release_lock(&session_id, "worker-1")
+            .await
+            .unwrap();
+        affinity_tracker
+            .release_session(&session_id, "worker-1")
+            .await
+            .unwrap();
+        lifecycle_manager.stop_session(&session_id).await.unwrap();
+    }
+
+    /// Verify session recovery after lock expiration.
+    #[tokio::test]
+    async fn test_session_recovery_after_lock_expiration() {
+        let lock_manager = Arc::new(SessionLockManager::new(Duration::from_millis(50)));
+        let affinity_tracker = Arc::new(SessionAffinityTracker::new(Duration::from_millis(100)));
+        let session_id = SessionId::new("recovery-session".to_string()).unwrap();
+
+        // Consumer 1 acquires lock and affinity
+        lock_manager
+            .try_acquire_lock(session_id.clone(), "consumer-1".to_string())
+            .await
+            .unwrap();
+        affinity_tracker
+            .assign_session(session_id.clone(), "consumer-1".to_string())
+            .await
+            .unwrap();
+
+        // Wait for lock to expire (but not affinity)
+        sleep(Duration::from_millis(60)).await;
+
+        // Lock expired, so consumer 2 can acquire it
+        let lock = lock_manager
+            .try_acquire_lock(session_id.clone(), "consumer-2".to_string())
+            .await;
+        assert!(lock.is_ok());
+
+        // But affinity still belongs to consumer 1
+        assert_eq!(
+            affinity_tracker.get_consumer(&session_id).await,
+            Some("consumer-1".to_string())
+        );
+
+        // Consumer 2 cannot reassign affinity (still active for consumer 1)
+        let result = affinity_tracker
+            .assign_session(session_id.clone(), "consumer-2".to_string())
+            .await;
+        assert!(result.is_err());
+
+        // Wait for affinity to expire too
+        sleep(Duration::from_millis(50)).await;
+
+        // Now consumer 2 can establish affinity
+        let affinity = affinity_tracker
+            .assign_session(session_id.clone(), "consumer-2".to_string())
+            .await;
+        assert!(affinity.is_ok());
+        assert_eq!(affinity.unwrap().consumer_id(), "consumer-2");
+    }
+
+    /// Verify ordered processing with session locks.
+    #[tokio::test]
+    async fn test_ordered_processing_with_locks() {
+        let lock_manager = Arc::new(SessionLockManager::new(Duration::from_secs(30)));
+        let session_id = SessionId::new("ordered-session".to_string()).unwrap();
+        let processed_order = Arc::new(tokio::sync::Mutex::new(Vec::new()));
+
+        // Consumer 1 processes messages in order
+        let lock_mgr1 = Arc::clone(&lock_manager);
+        let session1 = session_id.clone();
+        let order1 = Arc::clone(&processed_order);
+        let handle1 = tokio::spawn(async move {
+            // Acquire lock
+            lock_mgr1
+                .try_acquire_lock(session1.clone(), "consumer-1".to_string())
+                .await
+                .unwrap();
+
+            // Process messages 1-3
+            for i in 1..=3 {
+                order1.lock().await.push(format!("consumer-1-msg-{}", i));
+                sleep(Duration::from_millis(10)).await;
+            }
+
+            // Release lock
+            lock_mgr1
+                .release_lock(&session1, "consumer-1")
+                .await
+                .unwrap();
+        });
+
+        // Wait for consumer 1 to start
+        sleep(Duration::from_millis(5)).await;
+
+        // Consumer 2 tries to process but must wait for lock
+        let lock_mgr2 = Arc::clone(&lock_manager);
+        let session2 = session_id.clone();
+        let order2 = Arc::clone(&processed_order);
+        let handle2 = tokio::spawn(async move {
+            // Try to acquire lock (will fail initially)
+            while lock_mgr2
+                .try_acquire_lock(session2.clone(), "consumer-2".to_string())
+                .await
+                .is_err()
+            {
+                sleep(Duration::from_millis(5)).await;
+            }
+
+            // Process messages 4-6
+            for i in 4..=6 {
+                order2.lock().await.push(format!("consumer-2-msg-{}", i));
+                sleep(Duration::from_millis(10)).await;
+            }
+
+            lock_mgr2
+                .release_lock(&session2, "consumer-2")
+                .await
+                .unwrap();
+        });
+
+        // Wait for both to complete
+        handle1.await.unwrap();
+        handle2.await.unwrap();
+
+        // Verify processing order: consumer 1 completed all before consumer 2 started
+        let order = processed_order.lock().await;
+        assert_eq!(order.len(), 6);
+
+        // First 3 should be from consumer 1
+        assert_eq!(order[0], "consumer-1-msg-1");
+        assert_eq!(order[1], "consumer-1-msg-2");
+        assert_eq!(order[2], "consumer-1-msg-3");
+
+        // Next 3 should be from consumer 2
+        assert_eq!(order[3], "consumer-2-msg-4");
+        assert_eq!(order[4], "consumer-2-msg-5");
+        assert_eq!(order[5], "consumer-2-msg-6");
+    }
+
+    /// Verify high concurrency stress test with multiple sessions and consumers.
+    #[tokio::test]
+    async fn test_high_concurrency_multiple_sessions() {
+        let lock_manager = Arc::new(SessionLockManager::new(Duration::from_secs(30)));
+        let affinity_tracker = Arc::new(SessionAffinityTracker::new(Duration::from_secs(60)));
+
+        let num_sessions = 20;
+        let num_consumers = 5;
+
+        let mut handles = vec![];
+
+        // Create concurrent tasks for multiple sessions
+        for session_num in 0..num_sessions {
+            let consumer_id = format!("worker-{}", session_num % num_consumers);
+            let session_id = SessionId::new(format!("session-{}", session_num)).unwrap();
+
+            let lock_mgr = Arc::clone(&lock_manager);
+            let affinity = Arc::clone(&affinity_tracker);
+
+            let handle = tokio::spawn(async move {
+                // Try to acquire lock
+                let lock_result = lock_mgr
+                    .try_acquire_lock(session_id.clone(), consumer_id.clone())
+                    .await;
+
+                if lock_result.is_ok() {
+                    // Try to establish affinity
+                    let affinity_result = affinity
+                        .assign_session(session_id.clone(), consumer_id.clone())
+                        .await;
+
+                    if affinity_result.is_ok() {
+                        // Simulate some work
+                        sleep(Duration::from_millis(5)).await;
+
+                        // Release
+                        let _ = affinity.release_session(&session_id, &consumer_id).await;
+                        let _ = lock_mgr.release_lock(&session_id, &consumer_id).await;
+
+                        return true;
+                    }
+                }
+                false
+            });
+
+            handles.push(handle);
+        }
+
+        // Wait for all to complete
+        let mut successes = 0;
+        for handle in handles {
+            if handle.await.unwrap() {
+                successes += 1;
+            }
+        }
+
+        // All should succeed since they're different sessions
+        assert_eq!(successes, num_sessions);
+
+        // Verify all were cleaned up
+        assert_eq!(lock_manager.lock_count().await, 0);
+        assert_eq!(affinity_tracker.affinity_count().await, 0);
+    }
+
+    /// Verify session cleanup with lifecycle, locks, and affinity.
+    #[tokio::test]
+    async fn test_integrated_cleanup() {
+        let lock_manager = Arc::new(SessionLockManager::new(Duration::from_millis(50)));
+        let affinity_tracker = Arc::new(SessionAffinityTracker::new(Duration::from_millis(50)));
+        let lifecycle_config = SessionLifecycleConfig {
+            max_session_duration: Duration::from_millis(50),
+            max_messages_per_session: 1000,
+            session_timeout: Duration::from_millis(50),
+        };
+        let lifecycle_manager = Arc::new(SessionLifecycleManager::new(lifecycle_config));
+
+        // Create multiple sessions
+        for i in 0..5 {
+            let session_id = SessionId::new(format!("cleanup-{}", i)).unwrap();
+
+            lifecycle_manager
+                .start_session(session_id.clone(), format!("worker-{}", i))
+                .await
+                .unwrap();
+
+            lock_manager
+                .try_acquire_lock(session_id.clone(), format!("worker-{}", i))
+                .await
+                .unwrap();
+
+            affinity_tracker
+                .assign_session(session_id.clone(), format!("worker-{}", i))
+                .await
+                .unwrap();
+        }
+
+        // Verify all are active
+        assert_eq!(lifecycle_manager.session_count().await, 5);
+        assert_eq!(lock_manager.lock_count().await, 5);
+        assert_eq!(affinity_tracker.affinity_count().await, 5);
+
+        // Wait for expiration
+        sleep(Duration::from_millis(60)).await;
+
+        // Cleanup all components
+        let expired_sessions = lifecycle_manager.cleanup_expired_sessions().await;
+        let expired_locks = lock_manager.cleanup_expired_locks().await;
+        let expired_affinities = affinity_tracker.cleanup_expired().await;
+
+        // All should be cleaned up
+        assert_eq!(expired_sessions.len(), 5);
+        assert_eq!(expired_locks, 5);
+        assert_eq!(expired_affinities, 5);
+
+        assert_eq!(lifecycle_manager.session_count().await, 0);
+        assert_eq!(lock_manager.lock_count().await, 0);
+        assert_eq!(affinity_tracker.affinity_count().await, 0);
+    }
+
+    /// Verify consumer can't bypass affinity even with valid lock.
+    #[tokio::test]
+    async fn test_affinity_enforcement() {
+        let lock_manager = Arc::new(SessionLockManager::new(Duration::from_secs(30)));
+        let affinity_tracker = Arc::new(SessionAffinityTracker::new(Duration::from_secs(60)));
+        let session_id = SessionId::new("enforced-session".to_string()).unwrap();
+
+        // Consumer 1 establishes lock and affinity
+        lock_manager
+            .try_acquire_lock(session_id.clone(), "consumer-1".to_string())
+            .await
+            .unwrap();
+        affinity_tracker
+            .assign_session(session_id.clone(), "consumer-1".to_string())
+            .await
+            .unwrap();
+
+        // Consumer 1 releases lock but keeps affinity
+        lock_manager
+            .release_lock(&session_id, "consumer-1")
+            .await
+            .unwrap();
+
+        // Consumer 2 can acquire lock (it's free)
+        let lock = lock_manager
+            .try_acquire_lock(session_id.clone(), "consumer-2".to_string())
+            .await;
+        assert!(lock.is_ok());
+
+        // But consumer 2 cannot establish affinity (still belongs to consumer 1)
+        let affinity = affinity_tracker
+            .assign_session(session_id.clone(), "consumer-2".to_string())
+            .await;
+        assert!(affinity.is_err());
+
+        // Verify affinity still belongs to consumer 1
+        assert_eq!(
+            affinity_tracker.get_consumer(&session_id).await,
+            Some("consumer-1".to_string())
+        );
+    }
+}
