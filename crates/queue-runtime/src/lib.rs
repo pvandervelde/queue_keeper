@@ -44,6 +44,7 @@ pub use provider::{
 pub use providers::{InMemoryProvider, InMemorySessionProvider};
 pub use sessions::{
     CompositeKeyStrategy, FallbackStrategy, NoOrderingStrategy, SessionAffinity,
-    SessionAffinityTracker, SessionKeyExtractor, SessionKeyGenerator, SessionLock,
-    SessionLockManager, SingleFieldStrategy,
+    SessionAffinityTracker, SessionInfo, SessionKeyExtractor, SessionKeyGenerator,
+    SessionLifecycleConfig, SessionLifecycleManager, SessionLock, SessionLockManager,
+    SingleFieldStrategy,
 };

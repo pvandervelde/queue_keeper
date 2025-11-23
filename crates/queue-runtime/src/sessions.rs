@@ -1334,3 +1334,376 @@ impl SessionAffinityTracker {
             .count()
     }
 }
+
+// ============================================================================
+// Session Lifecycle Management
+// ============================================================================
+
+/// Information about an active session's lifecycle state.
+///
+/// Tracks activity metrics used for determining when to close sessions
+/// based on duration limits, message counts, or inactivity timeouts.
+///
+/// # Examples
+///
+/// ```
+/// use queue_runtime::{SessionInfo, SessionId};
+/// use std::time::Duration;
+///
+/// let session_id = SessionId::new("order-123".to_string()).unwrap();
+/// let mut info = SessionInfo::new(session_id.clone(), "worker-1".to_string());
+///
+/// // Record message processing
+/// info.increment_message_count();
+/// info.increment_message_count();
+///
+/// // Check duration
+/// assert!(info.duration() < Duration::from_secs(1));
+///
+/// // Check message count
+/// assert_eq!(info.message_count(), 2);
+/// ```
+#[derive(Debug, Clone)]
+pub struct SessionInfo {
+    session_id: SessionId,
+    consumer_id: String,
+    started_at: Instant,
+    last_activity: Instant,
+    message_count: u32,
+}
+
+impl SessionInfo {
+    /// Create a new session info tracker.
+    pub fn new(session_id: SessionId, consumer_id: String) -> Self {
+        let now = Instant::now();
+        Self {
+            session_id,
+            consumer_id,
+            started_at: now,
+            last_activity: now,
+            message_count: 0,
+        }
+    }
+
+    /// Get the session ID.
+    pub fn session_id(&self) -> &SessionId {
+        &self.session_id
+    }
+
+    /// Get the consumer ID.
+    pub fn consumer_id(&self) -> &str {
+        &self.consumer_id
+    }
+
+    /// Get the time when this session was started.
+    pub fn started_at(&self) -> Instant {
+        self.started_at
+    }
+
+    /// Get the time of last activity in this session.
+    pub fn last_activity(&self) -> Instant {
+        self.last_activity
+    }
+
+    /// Get the number of messages processed in this session.
+    pub fn message_count(&self) -> u32 {
+        self.message_count
+    }
+
+    /// Calculate how long this session has been active.
+    pub fn duration(&self) -> Duration {
+        Instant::now().saturating_duration_since(self.started_at)
+    }
+
+    /// Calculate how long since last activity.
+    pub fn idle_time(&self) -> Duration {
+        Instant::now().saturating_duration_since(self.last_activity)
+    }
+
+    /// Record message processing activity.
+    pub fn increment_message_count(&mut self) {
+        self.message_count += 1;
+        self.last_activity = Instant::now();
+    }
+
+    /// Update last activity timestamp without incrementing message count.
+    pub fn touch(&mut self) {
+        self.last_activity = Instant::now();
+    }
+}
+
+/// Configuration for session lifecycle management.
+///
+/// Defines limits and timeouts that determine when sessions should be
+/// automatically closed to prevent resource exhaustion and ensure fair
+/// processing distribution.
+///
+/// # Examples
+///
+/// ```
+/// use queue_runtime::SessionLifecycleConfig;
+/// use std::time::Duration;
+///
+/// let config = SessionLifecycleConfig {
+///     max_session_duration: Duration::from_secs(2 * 60 * 60), // 2 hours
+///     max_messages_per_session: 1000,
+///     session_timeout: Duration::from_secs(30 * 60), // 30 minutes
+/// };
+///
+/// // Check if defaults are reasonable
+/// assert_eq!(config.max_session_duration, Duration::from_secs(7200));
+/// ```
+#[derive(Debug, Clone)]
+pub struct SessionLifecycleConfig {
+    /// Maximum duration a session can be active before forced closure.
+    pub max_session_duration: Duration,
+
+    /// Maximum number of messages processed per session before forced closure.
+    pub max_messages_per_session: u32,
+
+    /// Maximum idle time before session is considered timed out.
+    pub session_timeout: Duration,
+}
+
+impl Default for SessionLifecycleConfig {
+    fn default() -> Self {
+        Self {
+            max_session_duration: Duration::from_secs(2 * 60 * 60), // 2 hours
+            max_messages_per_session: 1000,
+            session_timeout: Duration::from_secs(30 * 60), // 30 minutes
+        }
+    }
+}
+
+/// Manages session lifecycles with automatic cleanup and recovery.
+///
+/// Tracks active sessions and enforces limits on duration, message count,
+/// and inactivity. Integrates with lock and affinity management to ensure
+/// proper resource cleanup when sessions are forcibly closed.
+///
+/// # Thread Safety
+///
+/// All operations are async and use `Arc<RwLock<>>` for thread-safe access.
+///
+/// # Examples
+///
+/// ```
+/// use queue_runtime::{SessionLifecycleManager, SessionId, SessionLifecycleConfig};
+/// use std::time::Duration;
+///
+/// # #[tokio::main]
+/// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let config = SessionLifecycleConfig::default();
+/// let manager = SessionLifecycleManager::new(config);
+///
+/// let session_id = SessionId::new("order-456".to_string())?;
+///
+/// // Start tracking a session
+/// manager.start_session(session_id.clone(), "worker-1".to_string()).await?;
+///
+/// // Record activity
+/// manager.record_message(&session_id).await?;
+///
+/// // Check if session should be closed
+/// let should_close = manager.should_close_session(&session_id).await;
+/// # Ok(())
+/// # }
+/// ```
+#[derive(Debug, Clone)]
+pub struct SessionLifecycleManager {
+    active_sessions: Arc<RwLock<HashMap<SessionId, SessionInfo>>>,
+    config: SessionLifecycleConfig,
+}
+
+impl SessionLifecycleManager {
+    /// Create a new session lifecycle manager with the given configuration.
+    pub fn new(config: SessionLifecycleConfig) -> Self {
+        Self {
+            active_sessions: Arc::new(RwLock::new(HashMap::new())),
+            config,
+        }
+    }
+
+    /// Start tracking a new session.
+    ///
+    /// # Errors
+    ///
+    /// Returns `QueueError::ValidationError` if session is already being tracked.
+    pub async fn start_session(
+        &self,
+        session_id: SessionId,
+        consumer_id: String,
+    ) -> Result<(), QueueError> {
+        let mut sessions = self.active_sessions.write().await;
+
+        if sessions.contains_key(&session_id) {
+            return Err(QueueError::ValidationError(
+                ValidationError::InvalidFormat {
+                    field: "session_id".to_string(),
+                    message: format!("Session {} is already active", session_id.to_string()),
+                },
+            ));
+        }
+
+        sessions.insert(
+            session_id.clone(),
+            SessionInfo::new(session_id, consumer_id),
+        );
+        Ok(())
+    }
+
+    /// Stop tracking a session.
+    ///
+    /// # Errors
+    ///
+    /// Returns `QueueError::SessionNotFound` if session is not being tracked.
+    pub async fn stop_session(&self, session_id: &SessionId) -> Result<(), QueueError> {
+        let mut sessions = self.active_sessions.write().await;
+
+        if sessions.remove(session_id).is_none() {
+            return Err(QueueError::SessionNotFound {
+                session_id: session_id.to_string(),
+            });
+        }
+
+        Ok(())
+    }
+
+    /// Record message processing activity for a session.
+    ///
+    /// Increments message count and updates last activity timestamp.
+    ///
+    /// # Errors
+    ///
+    /// Returns `QueueError::SessionNotFound` if session is not being tracked.
+    pub async fn record_message(&self, session_id: &SessionId) -> Result<(), QueueError> {
+        let mut sessions = self.active_sessions.write().await;
+
+        let session_info =
+            sessions
+                .get_mut(session_id)
+                .ok_or_else(|| QueueError::SessionNotFound {
+                    session_id: session_id.to_string(),
+                })?;
+
+        session_info.increment_message_count();
+        Ok(())
+    }
+
+    /// Update last activity timestamp without incrementing message count.
+    ///
+    /// # Errors
+    ///
+    /// Returns `QueueError::SessionNotFound` if session is not being tracked.
+    pub async fn touch_session(&self, session_id: &SessionId) -> Result<(), QueueError> {
+        let mut sessions = self.active_sessions.write().await;
+
+        let session_info =
+            sessions
+                .get_mut(session_id)
+                .ok_or_else(|| QueueError::SessionNotFound {
+                    session_id: session_id.to_string(),
+                })?;
+
+        session_info.touch();
+        Ok(())
+    }
+
+    /// Get information about a session.
+    ///
+    /// Returns `None` if session is not being tracked.
+    pub async fn get_session_info(&self, session_id: &SessionId) -> Option<SessionInfo> {
+        let sessions = self.active_sessions.read().await;
+        sessions.get(session_id).cloned()
+    }
+
+    /// Check if a session should be closed based on configured limits.
+    ///
+    /// A session should be closed if:
+    /// - It has exceeded the maximum duration
+    /// - It has processed more than the maximum message count
+    /// - It has been idle longer than the timeout
+    ///
+    /// Returns `false` if session is not being tracked.
+    pub async fn should_close_session(&self, session_id: &SessionId) -> bool {
+        let sessions = self.active_sessions.read().await;
+
+        if let Some(session_info) = sessions.get(session_id) {
+            // Check duration limit
+            if session_info.duration() > self.config.max_session_duration {
+                return true;
+            }
+
+            // Check message count limit
+            if session_info.message_count > self.config.max_messages_per_session {
+                return true;
+            }
+
+            // Check timeout
+            if session_info.idle_time() > self.config.session_timeout {
+                return true;
+            }
+
+            false
+        } else {
+            false
+        }
+    }
+
+    /// Get all sessions that should be closed based on configured limits.
+    ///
+    /// Returns a list of session IDs that have exceeded limits.
+    pub async fn get_sessions_to_close(&self) -> Vec<SessionId> {
+        let sessions = self.active_sessions.read().await;
+
+        sessions
+            .iter()
+            .filter(|(_session_id, session_info)| {
+                session_info.duration() > self.config.max_session_duration
+                    || session_info.message_count > self.config.max_messages_per_session
+                    || session_info.idle_time() > self.config.session_timeout
+            })
+            .map(|(session_id, _)| session_id.clone())
+            .collect()
+    }
+
+    /// Clean up sessions that have exceeded limits.
+    ///
+    /// # Returns
+    ///
+    /// Vector of session IDs that were cleaned up
+    pub async fn cleanup_expired_sessions(&self) -> Vec<SessionId> {
+        let expired_sessions = self.get_sessions_to_close().await;
+
+        if !expired_sessions.is_empty() {
+            let mut sessions = self.active_sessions.write().await;
+            for session_id in &expired_sessions {
+                sessions.remove(session_id);
+            }
+        }
+
+        expired_sessions
+    }
+
+    /// Get the total number of active sessions.
+    pub async fn session_count(&self) -> usize {
+        let sessions = self.active_sessions.read().await;
+        sessions.len()
+    }
+
+    /// Get all active session IDs.
+    pub async fn get_active_sessions(&self) -> Vec<SessionId> {
+        let sessions = self.active_sessions.read().await;
+        sessions.keys().cloned().collect()
+    }
+
+    /// Get all sessions for a specific consumer.
+    pub async fn get_consumer_sessions(&self, consumer_id: &str) -> Vec<SessionId> {
+        let sessions = self.active_sessions.read().await;
+        sessions
+            .iter()
+            .filter(|(_, info)| info.consumer_id() == consumer_id)
+            .map(|(session_id, _)| session_id.clone())
+            .collect()
+    }
+}

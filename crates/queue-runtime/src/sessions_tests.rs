@@ -1260,3 +1260,530 @@ mod session_affinity_tracker_tests {
         );
     }
 }
+
+// ============================================================================
+// SessionInfo Tests
+// ============================================================================
+
+mod session_info_tests {
+    use super::*;
+    use std::time::Duration;
+    use tokio::time::sleep;
+
+    /// Verify that SessionInfo tracks basic details correctly.
+    #[tokio::test]
+    async fn test_session_info_tracks_details() {
+        let session_id = SessionId::new("order-789".to_string()).unwrap();
+        let info = SessionInfo::new(session_id.clone(), "worker-1".to_string());
+
+        assert_eq!(info.session_id(), &session_id);
+        assert_eq!(info.consumer_id(), "worker-1");
+        assert_eq!(info.message_count(), 0);
+    }
+
+    /// Verify that message count increments correctly.
+    #[tokio::test]
+    async fn test_session_info_message_count() {
+        let session_id = SessionId::new("order-123".to_string()).unwrap();
+        let mut info = SessionInfo::new(session_id.clone(), "worker-1".to_string());
+
+        assert_eq!(info.message_count(), 0);
+
+        info.increment_message_count();
+        assert_eq!(info.message_count(), 1);
+
+        info.increment_message_count();
+        info.increment_message_count();
+        assert_eq!(info.message_count(), 3);
+    }
+
+    /// Verify that duration is calculated correctly.
+    #[tokio::test]
+    async fn test_session_info_duration() {
+        let session_id = SessionId::new("timed".to_string()).unwrap();
+        let info = SessionInfo::new(session_id, "worker-1".to_string());
+
+        let duration1 = info.duration();
+        sleep(Duration::from_millis(50)).await;
+        let duration2 = info.duration();
+
+        assert!(duration2 > duration1);
+        assert!(duration2 >= Duration::from_millis(50));
+    }
+
+    /// Verify that idle time is calculated correctly.
+    #[tokio::test]
+    async fn test_session_info_idle_time() {
+        let session_id = SessionId::new("idle-check".to_string()).unwrap();
+        let mut info = SessionInfo::new(session_id, "worker-1".to_string());
+
+        sleep(Duration::from_millis(50)).await;
+        let idle1 = info.idle_time();
+        assert!(idle1 >= Duration::from_millis(50));
+
+        // Activity resets idle time
+        info.increment_message_count();
+        let idle2 = info.idle_time();
+        assert!(idle2 < idle1);
+    }
+
+    /// Verify that touch updates last activity.
+    #[tokio::test]
+    async fn test_session_info_touch() {
+        let session_id = SessionId::new("touched".to_string()).unwrap();
+        let mut info = SessionInfo::new(session_id, "worker-1".to_string());
+
+        sleep(Duration::from_millis(50)).await;
+        let idle_before = info.idle_time();
+
+        info.touch();
+        let idle_after = info.idle_time();
+
+        assert!(idle_after < idle_before);
+        assert_eq!(info.message_count(), 0); // Touch doesn't increment count
+    }
+}
+
+// ============================================================================
+// SessionLifecycleConfig Tests
+// ============================================================================
+
+mod session_lifecycle_config_tests {
+    use super::*;
+    use std::time::Duration;
+
+    /// Verify default configuration values are reasonable.
+    #[test]
+    fn test_default_config() {
+        let config = SessionLifecycleConfig::default();
+
+        assert_eq!(
+            config.max_session_duration,
+            Duration::from_secs(2 * 60 * 60)
+        ); // 2 hours
+        assert_eq!(config.max_messages_per_session, 1000);
+        assert_eq!(config.session_timeout, Duration::from_secs(30 * 60)); // 30 minutes
+    }
+
+    /// Verify custom configuration can be created.
+    #[test]
+    fn test_custom_config() {
+        let config = SessionLifecycleConfig {
+            max_session_duration: Duration::from_secs(60 * 60), // 1 hour
+            max_messages_per_session: 500,
+            session_timeout: Duration::from_secs(15 * 60), // 15 minutes
+        };
+
+        assert_eq!(config.max_session_duration, Duration::from_secs(60 * 60));
+        assert_eq!(config.max_messages_per_session, 500);
+        assert_eq!(config.session_timeout, Duration::from_secs(15 * 60));
+    }
+}
+
+// ============================================================================
+// SessionLifecycleManager Tests
+// ============================================================================
+
+mod session_lifecycle_manager_tests {
+    use super::*;
+    use std::time::Duration;
+    use tokio::time::sleep;
+
+    /// Verify that sessions can be started and tracked.
+    #[tokio::test]
+    async fn test_start_session() {
+        let config = SessionLifecycleConfig::default();
+        let manager = SessionLifecycleManager::new(config);
+
+        let session_id = SessionId::new("session-1".to_string()).unwrap();
+
+        let result = manager
+            .start_session(session_id.clone(), "worker-1".to_string())
+            .await;
+
+        assert!(result.is_ok());
+
+        let info = manager.get_session_info(&session_id).await;
+        assert!(info.is_some());
+        assert_eq!(info.unwrap().consumer_id(), "worker-1");
+    }
+
+    /// Verify that starting same session twice fails.
+    #[tokio::test]
+    async fn test_start_session_twice_fails() {
+        let config = SessionLifecycleConfig::default();
+        let manager = SessionLifecycleManager::new(config);
+
+        let session_id = SessionId::new("duplicate".to_string()).unwrap();
+
+        manager
+            .start_session(session_id.clone(), "worker-1".to_string())
+            .await
+            .unwrap();
+
+        let result = manager
+            .start_session(session_id.clone(), "worker-2".to_string())
+            .await;
+
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            QueueError::ValidationError(_)
+        ));
+    }
+
+    /// Verify that sessions can be stopped.
+    #[tokio::test]
+    async fn test_stop_session() {
+        let config = SessionLifecycleConfig::default();
+        let manager = SessionLifecycleManager::new(config);
+
+        let session_id = SessionId::new("stoppable".to_string()).unwrap();
+
+        manager
+            .start_session(session_id.clone(), "worker-1".to_string())
+            .await
+            .unwrap();
+
+        assert_eq!(manager.session_count().await, 1);
+
+        let result = manager.stop_session(&session_id).await;
+        assert!(result.is_ok());
+
+        assert_eq!(manager.session_count().await, 0);
+    }
+
+    /// Verify that stopping nonexistent session fails.
+    #[tokio::test]
+    async fn test_stop_nonexistent_session_fails() {
+        let config = SessionLifecycleConfig::default();
+        let manager = SessionLifecycleManager::new(config);
+
+        let session_id = SessionId::new("nonexistent".to_string()).unwrap();
+
+        let result = manager.stop_session(&session_id).await;
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            QueueError::SessionNotFound { .. }
+        ));
+    }
+
+    /// Verify that message processing is recorded.
+    #[tokio::test]
+    async fn test_record_message() {
+        let config = SessionLifecycleConfig::default();
+        let manager = SessionLifecycleManager::new(config);
+
+        let session_id = SessionId::new("active".to_string()).unwrap();
+
+        manager
+            .start_session(session_id.clone(), "worker-1".to_string())
+            .await
+            .unwrap();
+
+        manager.record_message(&session_id).await.unwrap();
+        manager.record_message(&session_id).await.unwrap();
+
+        let info = manager.get_session_info(&session_id).await.unwrap();
+        assert_eq!(info.message_count(), 2);
+    }
+
+    /// Verify that recording message for nonexistent session fails.
+    #[tokio::test]
+    async fn test_record_message_nonexistent_fails() {
+        let config = SessionLifecycleConfig::default();
+        let manager = SessionLifecycleManager::new(config);
+
+        let session_id = SessionId::new("nonexistent".to_string()).unwrap();
+
+        let result = manager.record_message(&session_id).await;
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            QueueError::SessionNotFound { .. }
+        ));
+    }
+
+    /// Verify that touch_session updates activity.
+    #[tokio::test]
+    async fn test_touch_session() {
+        let config = SessionLifecycleConfig::default();
+        let manager = SessionLifecycleManager::new(config);
+
+        let session_id = SessionId::new("touched".to_string()).unwrap();
+
+        manager
+            .start_session(session_id.clone(), "worker-1".to_string())
+            .await
+            .unwrap();
+
+        sleep(Duration::from_millis(50)).await;
+        let info_before = manager.get_session_info(&session_id).await.unwrap();
+        let idle_before = info_before.idle_time();
+
+        manager.touch_session(&session_id).await.unwrap();
+
+        let info_after = manager.get_session_info(&session_id).await.unwrap();
+        let idle_after = info_after.idle_time();
+
+        assert!(idle_after < idle_before);
+        assert_eq!(info_after.message_count(), 0); // Touch doesn't increment count
+    }
+
+    /// Verify that session exceeding duration limit should be closed.
+    #[tokio::test]
+    async fn test_should_close_session_duration_limit() {
+        let config = SessionLifecycleConfig {
+            max_session_duration: Duration::from_millis(50),
+            max_messages_per_session: 1000,
+            session_timeout: Duration::from_secs(60),
+        };
+        let manager = SessionLifecycleManager::new(config);
+
+        let session_id = SessionId::new("long-running".to_string()).unwrap();
+
+        manager
+            .start_session(session_id.clone(), "worker-1".to_string())
+            .await
+            .unwrap();
+
+        assert!(!manager.should_close_session(&session_id).await);
+
+        sleep(Duration::from_millis(60)).await;
+
+        assert!(manager.should_close_session(&session_id).await);
+    }
+
+    /// Verify that session exceeding message count limit should be closed.
+    #[tokio::test]
+    async fn test_should_close_session_message_limit() {
+        let config = SessionLifecycleConfig {
+            max_session_duration: Duration::from_secs(60),
+            max_messages_per_session: 3,
+            session_timeout: Duration::from_secs(60),
+        };
+        let manager = SessionLifecycleManager::new(config);
+
+        let session_id = SessionId::new("busy".to_string()).unwrap();
+
+        manager
+            .start_session(session_id.clone(), "worker-1".to_string())
+            .await
+            .unwrap();
+
+        // Process messages up to limit
+        manager.record_message(&session_id).await.unwrap();
+        manager.record_message(&session_id).await.unwrap();
+        manager.record_message(&session_id).await.unwrap();
+
+        assert!(!manager.should_close_session(&session_id).await);
+
+        // One more exceeds limit
+        manager.record_message(&session_id).await.unwrap();
+
+        assert!(manager.should_close_session(&session_id).await);
+    }
+
+    /// Verify that session exceeding timeout should be closed.
+    #[tokio::test]
+    async fn test_should_close_session_timeout() {
+        let config = SessionLifecycleConfig {
+            max_session_duration: Duration::from_secs(60),
+            max_messages_per_session: 1000,
+            session_timeout: Duration::from_millis(50),
+        };
+        let manager = SessionLifecycleManager::new(config);
+
+        let session_id = SessionId::new("idle".to_string()).unwrap();
+
+        manager
+            .start_session(session_id.clone(), "worker-1".to_string())
+            .await
+            .unwrap();
+
+        assert!(!manager.should_close_session(&session_id).await);
+
+        sleep(Duration::from_millis(60)).await;
+
+        assert!(manager.should_close_session(&session_id).await);
+    }
+
+    /// Verify that get_sessions_to_close returns sessions exceeding limits.
+    #[tokio::test]
+    async fn test_get_sessions_to_close() {
+        let config = SessionLifecycleConfig {
+            max_session_duration: Duration::from_millis(50),
+            max_messages_per_session: 2,
+            session_timeout: Duration::from_millis(50),
+        };
+        let manager = SessionLifecycleManager::new(config);
+
+        let session1 = SessionId::new("session-1".to_string()).unwrap();
+        let session2 = SessionId::new("session-2".to_string()).unwrap();
+        let session3 = SessionId::new("session-3".to_string()).unwrap();
+
+        // Session 1: will exceed duration
+        manager
+            .start_session(session1.clone(), "worker-1".to_string())
+            .await
+            .unwrap();
+
+        sleep(Duration::from_millis(30)).await;
+
+        // Session 2: will exceed message count
+        manager
+            .start_session(session2.clone(), "worker-1".to_string())
+            .await
+            .unwrap();
+        manager.record_message(&session2).await.unwrap();
+        manager.record_message(&session2).await.unwrap();
+        manager.record_message(&session2).await.unwrap();
+
+        // Session 3: stays healthy
+        manager
+            .start_session(session3.clone(), "worker-1".to_string())
+            .await
+            .unwrap();
+        manager.record_message(&session3).await.unwrap();
+
+        sleep(Duration::from_millis(30)).await;
+
+        let to_close = manager.get_sessions_to_close().await;
+
+        assert_eq!(to_close.len(), 2);
+        assert!(to_close.contains(&session1)); // Exceeded duration
+        assert!(to_close.contains(&session2)); // Exceeded message count
+        assert!(!to_close.contains(&session3)); // Still healthy
+    }
+
+    /// Verify that cleanup_expired_sessions removes sessions exceeding limits.
+    #[tokio::test]
+    async fn test_cleanup_expired_sessions() {
+        let config = SessionLifecycleConfig {
+            max_session_duration: Duration::from_millis(50),
+            max_messages_per_session: 1000,
+            session_timeout: Duration::from_millis(50),
+        };
+        let manager = SessionLifecycleManager::new(config);
+
+        let expired1 = SessionId::new("expired-1".to_string()).unwrap();
+        let expired2 = SessionId::new("expired-2".to_string()).unwrap();
+        let active = SessionId::new("active".to_string()).unwrap();
+
+        // Create sessions
+        manager
+            .start_session(expired1.clone(), "worker-1".to_string())
+            .await
+            .unwrap();
+        manager
+            .start_session(expired2.clone(), "worker-1".to_string())
+            .await
+            .unwrap();
+
+        // Wait for expiration
+        sleep(Duration::from_millis(60)).await;
+
+        // Create active session
+        manager
+            .start_session(active.clone(), "worker-1".to_string())
+            .await
+            .unwrap();
+
+        assert_eq!(manager.session_count().await, 3);
+
+        let cleaned = manager.cleanup_expired_sessions().await;
+
+        assert_eq!(cleaned.len(), 2);
+        assert!(cleaned.contains(&expired1));
+        assert!(cleaned.contains(&expired2));
+        assert!(!cleaned.contains(&active));
+
+        assert_eq!(manager.session_count().await, 1);
+    }
+
+    /// Verify that session_count returns correct count.
+    #[tokio::test]
+    async fn test_session_count() {
+        let config = SessionLifecycleConfig::default();
+        let manager = SessionLifecycleManager::new(config);
+
+        assert_eq!(manager.session_count().await, 0);
+
+        let session1 = SessionId::new("session-1".to_string()).unwrap();
+        let session2 = SessionId::new("session-2".to_string()).unwrap();
+
+        manager
+            .start_session(session1.clone(), "worker-1".to_string())
+            .await
+            .unwrap();
+        manager
+            .start_session(session2.clone(), "worker-2".to_string())
+            .await
+            .unwrap();
+
+        assert_eq!(manager.session_count().await, 2);
+
+        manager.stop_session(&session1).await.unwrap();
+
+        assert_eq!(manager.session_count().await, 1);
+    }
+
+    /// Verify that get_active_sessions returns all session IDs.
+    #[tokio::test]
+    async fn test_get_active_sessions() {
+        let config = SessionLifecycleConfig::default();
+        let manager = SessionLifecycleManager::new(config);
+
+        let session1 = SessionId::new("session-1".to_string()).unwrap();
+        let session2 = SessionId::new("session-2".to_string()).unwrap();
+
+        manager
+            .start_session(session1.clone(), "worker-1".to_string())
+            .await
+            .unwrap();
+        manager
+            .start_session(session2.clone(), "worker-2".to_string())
+            .await
+            .unwrap();
+
+        let active = manager.get_active_sessions().await;
+
+        assert_eq!(active.len(), 2);
+        assert!(active.contains(&session1));
+        assert!(active.contains(&session2));
+    }
+
+    /// Verify that get_consumer_sessions returns sessions for specific consumer.
+    #[tokio::test]
+    async fn test_get_consumer_sessions() {
+        let config = SessionLifecycleConfig::default();
+        let manager = SessionLifecycleManager::new(config);
+
+        let session1 = SessionId::new("session-1".to_string()).unwrap();
+        let session2 = SessionId::new("session-2".to_string()).unwrap();
+        let session3 = SessionId::new("session-3".to_string()).unwrap();
+
+        manager
+            .start_session(session1.clone(), "worker-1".to_string())
+            .await
+            .unwrap();
+        manager
+            .start_session(session2.clone(), "worker-1".to_string())
+            .await
+            .unwrap();
+        manager
+            .start_session(session3.clone(), "worker-2".to_string())
+            .await
+            .unwrap();
+
+        let worker1_sessions = manager.get_consumer_sessions("worker-1").await;
+        assert_eq!(worker1_sessions.len(), 2);
+        assert!(worker1_sessions.contains(&session1));
+        assert!(worker1_sessions.contains(&session2));
+
+        let worker2_sessions = manager.get_consumer_sessions("worker-2").await;
+        assert_eq!(worker2_sessions.len(), 1);
+        assert!(worker2_sessions.contains(&session3));
+    }
+}
