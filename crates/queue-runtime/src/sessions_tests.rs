@@ -761,3 +761,502 @@ mod session_lock_manager_tests {
         assert_eq!(manager.active_lock_count().await, 1); // Only one active
     }
 }
+
+// ============================================================================
+// SessionAffinity Tests
+// ============================================================================
+
+mod session_affinity_tests {
+    use super::*;
+    use std::time::Duration;
+    use tokio::time::sleep;
+
+    /// Verify that a newly created affinity is not expired.
+    #[tokio::test]
+    async fn test_new_affinity_is_not_expired() {
+        let session_id = SessionId::new("session-1".to_string()).unwrap();
+        let affinity = SessionAffinity::new(
+            session_id.clone(),
+            "worker-1".to_string(),
+            Duration::from_secs(60),
+        );
+
+        assert!(!affinity.is_expired());
+        assert_eq!(affinity.consumer_id(), "worker-1");
+        assert_eq!(affinity.session_id(), &session_id);
+    }
+
+    /// Verify that affinity tracks session, consumer, and duration.
+    #[tokio::test]
+    async fn test_affinity_tracks_details() {
+        let session_id = SessionId::new("order-456".to_string()).unwrap();
+        let affinity = SessionAffinity::new(
+            session_id.clone(),
+            "processor-3".to_string(),
+            Duration::from_secs(300),
+        );
+
+        assert_eq!(affinity.session_id(), &session_id);
+        assert_eq!(affinity.consumer_id(), "processor-3");
+        assert_eq!(affinity.affinity_duration(), Duration::from_secs(300));
+    }
+
+    /// Verify that affinity expires after the specified duration.
+    #[tokio::test]
+    async fn test_affinity_expires_after_duration() {
+        let session_id = SessionId::new("short-affinity".to_string()).unwrap();
+        let affinity = SessionAffinity::new(
+            session_id,
+            "worker-1".to_string(),
+            Duration::from_millis(50),
+        );
+
+        assert!(!affinity.is_expired());
+
+        sleep(Duration::from_millis(60)).await;
+
+        assert!(affinity.is_expired());
+    }
+
+    /// Verify that time_remaining returns correct values.
+    #[tokio::test]
+    async fn test_affinity_time_remaining() {
+        let session_id = SessionId::new("timed-affinity".to_string()).unwrap();
+        let affinity = SessionAffinity::new(
+            session_id,
+            "worker-1".to_string(),
+            Duration::from_millis(100),
+        );
+
+        let remaining = affinity.time_remaining();
+        assert!(remaining <= Duration::from_millis(100));
+        assert!(remaining > Duration::from_millis(50));
+
+        sleep(Duration::from_millis(110)).await;
+
+        assert_eq!(affinity.time_remaining(), Duration::ZERO);
+    }
+
+    /// Verify that touch updates last activity time.
+    #[tokio::test]
+    async fn test_affinity_touch_updates_activity() {
+        let session_id = SessionId::new("active-session".to_string()).unwrap();
+        let mut affinity =
+            SessionAffinity::new(session_id, "worker-1".to_string(), Duration::from_secs(60));
+
+        sleep(Duration::from_millis(50)).await;
+        let idle_before = affinity.idle_time();
+
+        affinity.touch();
+
+        let idle_after = affinity.idle_time();
+        assert!(idle_after < idle_before);
+    }
+
+    /// Verify that affinity can be extended.
+    #[tokio::test]
+    async fn test_affinity_extend() {
+        let session_id = SessionId::new("extendable".to_string()).unwrap();
+        let original = SessionAffinity::new(
+            session_id.clone(),
+            "worker-1".to_string(),
+            Duration::from_millis(50),
+        );
+
+        sleep(Duration::from_millis(30)).await;
+
+        let extended = original.extend(Duration::from_millis(100));
+
+        assert_eq!(extended.session_id(), &session_id);
+        assert_eq!(extended.consumer_id(), "worker-1");
+        assert!(!extended.is_expired());
+
+        // Original should still expire on schedule
+        sleep(Duration::from_millis(30)).await;
+        assert!(original.is_expired());
+        assert!(!extended.is_expired());
+    }
+}
+
+// ============================================================================
+// SessionAffinityTracker Tests
+// ============================================================================
+
+mod session_affinity_tracker_tests {
+    use super::*;
+    use std::time::Duration;
+    use tokio::time::sleep;
+
+    /// Verify that a session can be assigned successfully.
+    #[tokio::test]
+    async fn test_assign_session_succeeds() {
+        let tracker = SessionAffinityTracker::new(Duration::from_secs(60));
+        let session_id = SessionId::new("session-1".to_string()).unwrap();
+
+        let result = tracker
+            .assign_session(session_id.clone(), "worker-1".to_string())
+            .await;
+
+        assert!(result.is_ok());
+        let affinity = result.unwrap();
+        assert_eq!(affinity.session_id(), &session_id);
+        assert_eq!(affinity.consumer_id(), "worker-1");
+    }
+
+    /// Verify that assigning same session twice to different consumers fails.
+    #[tokio::test]
+    async fn test_assign_session_twice_fails() {
+        let tracker = SessionAffinityTracker::new(Duration::from_secs(60));
+        let session_id = SessionId::new("contested".to_string()).unwrap();
+
+        // First assignment succeeds
+        let _affinity1 = tracker
+            .assign_session(session_id.clone(), "worker-1".to_string())
+            .await
+            .unwrap();
+
+        // Second assignment to different consumer fails
+        let result = tracker
+            .assign_session(session_id.clone(), "worker-2".to_string())
+            .await;
+
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            QueueError::SessionLocked { .. }
+        ));
+    }
+
+    /// Verify that same consumer can reacquire session (idempotent).
+    #[tokio::test]
+    async fn test_assign_session_same_consumer_idempotent() {
+        let tracker = SessionAffinityTracker::new(Duration::from_secs(60));
+        let session_id = SessionId::new("idempotent".to_string()).unwrap();
+
+        let affinity1 = tracker
+            .assign_session(session_id.clone(), "worker-1".to_string())
+            .await
+            .unwrap();
+
+        let affinity2 = tracker
+            .assign_session(session_id.clone(), "worker-1".to_string())
+            .await
+            .unwrap();
+
+        assert_eq!(affinity1.consumer_id(), affinity2.consumer_id());
+    }
+
+    /// Verify that expired affinity can be reassigned.
+    #[tokio::test]
+    async fn test_expired_affinity_can_be_reassigned() {
+        let tracker = SessionAffinityTracker::new(Duration::from_millis(50));
+        let session_id = SessionId::new("expiring".to_string()).unwrap();
+
+        // First assignment
+        let _affinity1 = tracker
+            .assign_session(session_id.clone(), "worker-1".to_string())
+            .await
+            .unwrap();
+
+        // Wait for expiration
+        sleep(Duration::from_millis(60)).await;
+
+        // Can now assign to different consumer
+        let result = tracker
+            .assign_session(session_id.clone(), "worker-2".to_string())
+            .await;
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().consumer_id(), "worker-2");
+    }
+
+    /// Verify that get_consumer returns correct consumer.
+    #[tokio::test]
+    async fn test_get_consumer() {
+        let tracker = SessionAffinityTracker::new(Duration::from_secs(60));
+        let session_id = SessionId::new("tracked".to_string()).unwrap();
+
+        // No consumer initially
+        assert_eq!(tracker.get_consumer(&session_id).await, None);
+
+        // Assign consumer
+        tracker
+            .assign_session(session_id.clone(), "worker-5".to_string())
+            .await
+            .unwrap();
+
+        // Now returns consumer
+        assert_eq!(
+            tracker.get_consumer(&session_id).await,
+            Some("worker-5".to_string())
+        );
+    }
+
+    /// Verify that has_affinity returns correct status.
+    #[tokio::test]
+    async fn test_has_affinity() {
+        let tracker = SessionAffinityTracker::new(Duration::from_secs(60));
+        let session_id = SessionId::new("check".to_string()).unwrap();
+
+        assert!(!tracker.has_affinity(&session_id).await);
+
+        tracker
+            .assign_session(session_id.clone(), "worker-1".to_string())
+            .await
+            .unwrap();
+
+        assert!(tracker.has_affinity(&session_id).await);
+    }
+
+    /// Verify that touch_session updates activity.
+    #[tokio::test]
+    async fn test_touch_session() {
+        let tracker = SessionAffinityTracker::new(Duration::from_secs(60));
+        let session_id = SessionId::new("active".to_string()).unwrap();
+
+        tracker
+            .assign_session(session_id.clone(), "worker-1".to_string())
+            .await
+            .unwrap();
+
+        let result = tracker.touch_session(&session_id).await;
+        assert!(result.is_ok());
+    }
+
+    /// Verify that touching nonexistent session fails.
+    #[tokio::test]
+    async fn test_touch_nonexistent_session_fails() {
+        let tracker = SessionAffinityTracker::new(Duration::from_secs(60));
+        let session_id = SessionId::new("nonexistent".to_string()).unwrap();
+
+        let result = tracker.touch_session(&session_id).await;
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            QueueError::SessionNotFound { .. }
+        ));
+    }
+
+    /// Verify that release_session removes affinity.
+    #[tokio::test]
+    async fn test_release_session() {
+        let tracker = SessionAffinityTracker::new(Duration::from_secs(60));
+        let session_id = SessionId::new("releasable".to_string()).unwrap();
+
+        tracker
+            .assign_session(session_id.clone(), "worker-1".to_string())
+            .await
+            .unwrap();
+
+        assert!(tracker.has_affinity(&session_id).await);
+
+        let result = tracker.release_session(&session_id, "worker-1").await;
+        assert!(result.is_ok());
+
+        assert!(!tracker.has_affinity(&session_id).await);
+    }
+
+    /// Verify that wrong consumer cannot release session.
+    #[tokio::test]
+    async fn test_release_session_wrong_consumer_fails() {
+        let tracker = SessionAffinityTracker::new(Duration::from_secs(60));
+        let session_id = SessionId::new("protected".to_string()).unwrap();
+
+        tracker
+            .assign_session(session_id.clone(), "worker-1".to_string())
+            .await
+            .unwrap();
+
+        let result = tracker.release_session(&session_id, "worker-2").await;
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            QueueError::ValidationError(_)
+        ));
+
+        // Affinity still exists
+        assert!(tracker.has_affinity(&session_id).await);
+    }
+
+    /// Verify that extend_affinity extends expiration.
+    #[tokio::test]
+    async fn test_extend_affinity() {
+        let tracker = SessionAffinityTracker::new(Duration::from_millis(100));
+        let session_id = SessionId::new("extendable".to_string()).unwrap();
+
+        tracker
+            .assign_session(session_id.clone(), "worker-1".to_string())
+            .await
+            .unwrap();
+
+        sleep(Duration::from_millis(50)).await;
+
+        let result = tracker
+            .extend_affinity(&session_id, "worker-1", Duration::from_millis(200))
+            .await;
+
+        assert!(result.is_ok());
+
+        // Original would have expired by now
+        sleep(Duration::from_millis(60)).await;
+
+        // But extended version is still active
+        assert!(tracker.has_affinity(&session_id).await);
+    }
+
+    /// Verify that wrong consumer cannot extend affinity.
+    #[tokio::test]
+    async fn test_extend_affinity_wrong_consumer_fails() {
+        let tracker = SessionAffinityTracker::new(Duration::from_secs(60));
+        let session_id = SessionId::new("owned".to_string()).unwrap();
+
+        tracker
+            .assign_session(session_id.clone(), "worker-1".to_string())
+            .await
+            .unwrap();
+
+        let result = tracker
+            .extend_affinity(&session_id, "worker-2", Duration::from_secs(30))
+            .await;
+
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            QueueError::ValidationError(_)
+        ));
+    }
+
+    /// Verify that get_consumer_sessions returns correct sessions.
+    #[tokio::test]
+    async fn test_get_consumer_sessions() {
+        let tracker = SessionAffinityTracker::new(Duration::from_secs(60));
+        let session1 = SessionId::new("session-1".to_string()).unwrap();
+        let session2 = SessionId::new("session-2".to_string()).unwrap();
+        let session3 = SessionId::new("session-3".to_string()).unwrap();
+
+        tracker
+            .assign_session(session1.clone(), "worker-1".to_string())
+            .await
+            .unwrap();
+        tracker
+            .assign_session(session2.clone(), "worker-1".to_string())
+            .await
+            .unwrap();
+        tracker
+            .assign_session(session3.clone(), "worker-2".to_string())
+            .await
+            .unwrap();
+
+        let worker1_sessions = tracker.get_consumer_sessions("worker-1").await;
+        assert_eq!(worker1_sessions.len(), 2);
+        assert!(worker1_sessions.contains(&session1));
+        assert!(worker1_sessions.contains(&session2));
+
+        let worker2_sessions = tracker.get_consumer_sessions("worker-2").await;
+        assert_eq!(worker2_sessions.len(), 1);
+        assert!(worker2_sessions.contains(&session3));
+    }
+
+    /// Verify that cleanup_expired removes expired affinities.
+    #[tokio::test]
+    async fn test_cleanup_expired() {
+        let tracker = SessionAffinityTracker::new(Duration::from_millis(20));
+        let active = SessionId::new("active".to_string()).unwrap();
+        let expired1 = SessionId::new("expired1".to_string()).unwrap();
+        let expired2 = SessionId::new("expired2".to_string()).unwrap();
+
+        // Assign expired sessions
+        tracker
+            .assign_session(expired1.clone(), "worker-1".to_string())
+            .await
+            .unwrap();
+        tracker
+            .assign_session(expired2.clone(), "worker-1".to_string())
+            .await
+            .unwrap();
+
+        // Wait for expiration
+        sleep(Duration::from_millis(30)).await;
+
+        // Assign active session
+        tracker
+            .assign_session(active.clone(), "worker-1".to_string())
+            .await
+            .unwrap();
+
+        assert_eq!(tracker.affinity_count().await, 3);
+
+        let removed = tracker.cleanup_expired().await;
+        assert_eq!(removed, 2);
+
+        assert_eq!(tracker.affinity_count().await, 1);
+        assert!(tracker.has_affinity(&active).await);
+        assert!(!tracker.has_affinity(&expired1).await);
+        assert!(!tracker.has_affinity(&expired2).await);
+    }
+
+    /// Verify that affinity_count and active_affinity_count work correctly.
+    #[tokio::test]
+    async fn test_affinity_counts() {
+        let tracker = SessionAffinityTracker::new(Duration::from_millis(20));
+        let active = SessionId::new("active".to_string()).unwrap();
+        let expired = SessionId::new("expired".to_string()).unwrap();
+
+        // Assign expired session
+        tracker
+            .assign_session(expired.clone(), "worker-1".to_string())
+            .await
+            .unwrap();
+
+        // Wait for expiration
+        sleep(Duration::from_millis(30)).await;
+
+        // Assign active session
+        tracker
+            .assign_session(active.clone(), "worker-1".to_string())
+            .await
+            .unwrap();
+
+        assert_eq!(tracker.affinity_count().await, 2); // Both stored
+        assert_eq!(tracker.active_affinity_count().await, 1); // Only one active
+    }
+
+    /// Verify concurrent affinity assignments to different sessions.
+    #[tokio::test]
+    async fn test_concurrent_affinity_assignments() {
+        let tracker = Arc::new(SessionAffinityTracker::new(Duration::from_secs(60)));
+        let session1 = SessionId::new("session-1".to_string()).unwrap();
+        let session2 = SessionId::new("session-2".to_string()).unwrap();
+
+        let tracker1 = Arc::clone(&tracker);
+        let session1_clone = session1.clone();
+        let handle1 = tokio::spawn(async move {
+            tracker1
+                .assign_session(session1_clone, "worker-1".to_string())
+                .await
+        });
+
+        let tracker2 = Arc::clone(&tracker);
+        let session2_clone = session2.clone();
+        let handle2 = tokio::spawn(async move {
+            tracker2
+                .assign_session(session2_clone, "worker-2".to_string())
+                .await
+        });
+
+        let result1 = handle1.await.unwrap();
+        let result2 = handle2.await.unwrap();
+
+        assert!(result1.is_ok());
+        assert!(result2.is_ok());
+
+        assert_eq!(
+            tracker.get_consumer(&session1).await,
+            Some("worker-1".to_string())
+        );
+        assert_eq!(
+            tracker.get_consumer(&session2).await,
+            Some("worker-2".to_string())
+        );
+    }
+}

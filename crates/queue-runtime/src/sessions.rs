@@ -57,6 +57,7 @@
 //! }
 //! ```
 
+use crate::error::ValidationError;
 use crate::message::{SessionId, Timestamp};
 use crate::QueueError;
 use std::collections::HashMap;
@@ -873,5 +874,463 @@ impl SessionLockManager {
     pub async fn active_lock_count(&self) -> usize {
         let locks = self.locks.read().await;
         locks.values().filter(|lock| !lock.is_expired()).count()
+    }
+}
+
+// ============================================================================
+// Session Affinity Tracking
+// ============================================================================
+
+/// Mapping of a session to its assigned consumer.
+///
+/// Session affinity ensures that all messages for a given session are processed
+/// by the same consumer, maintaining ordering and state consistency.
+///
+/// # Examples
+///
+/// ```
+/// use queue_runtime::sessions::SessionAffinity;
+/// use queue_runtime::message::SessionId;
+/// use std::time::{SystemTime, Duration};
+///
+/// # tokio_test::block_on(async {
+/// let session_id = SessionId::new("order-789".to_string()).unwrap();
+/// let affinity = SessionAffinity::new(
+///     session_id.clone(),
+///     "worker-3".to_string(),
+///     Duration::from_secs(300)
+/// );
+///
+/// assert_eq!(affinity.session_id(), &session_id);
+/// assert_eq!(affinity.consumer_id(), "worker-3");
+/// assert!(!affinity.is_expired());
+/// # });
+/// ```
+#[derive(Debug, Clone)]
+pub struct SessionAffinity {
+    session_id: SessionId,
+    consumer_id: String,
+    assigned_at: Instant,
+    expires_at: Instant,
+    affinity_duration: Duration,
+    last_activity: Instant,
+}
+
+impl SessionAffinity {
+    /// Create a new session affinity mapping.
+    ///
+    /// # Arguments
+    ///
+    /// * `session_id` - The session being tracked
+    /// * `consumer_id` - Identifier of the consumer assigned to this session
+    /// * `affinity_duration` - How long the affinity is valid
+    ///
+    /// # Returns
+    ///
+    /// A new `SessionAffinity` instance
+    pub fn new(session_id: SessionId, consumer_id: String, affinity_duration: Duration) -> Self {
+        let now = Instant::now();
+        Self {
+            session_id,
+            consumer_id,
+            assigned_at: now,
+            expires_at: now + affinity_duration,
+            affinity_duration,
+            last_activity: now,
+        }
+    }
+
+    /// Get the session ID.
+    pub fn session_id(&self) -> &SessionId {
+        &self.session_id
+    }
+
+    /// Get the consumer ID.
+    pub fn consumer_id(&self) -> &str {
+        &self.consumer_id
+    }
+
+    /// Get the affinity duration.
+    pub fn affinity_duration(&self) -> Duration {
+        self.affinity_duration
+    }
+
+    /// Get when the affinity was assigned.
+    pub fn assigned_at(&self) -> Instant {
+        self.assigned_at
+    }
+
+    /// Check if the affinity has expired.
+    ///
+    /// # Returns
+    ///
+    /// `true` if the affinity has expired, `false` otherwise
+    pub fn is_expired(&self) -> bool {
+        Instant::now() >= self.expires_at
+    }
+
+    /// Get the remaining time before expiration.
+    ///
+    /// # Returns
+    ///
+    /// Duration remaining, or zero if expired
+    pub fn time_remaining(&self) -> Duration {
+        let now = Instant::now();
+        if now >= self.expires_at {
+            Duration::ZERO
+        } else {
+            self.expires_at - now
+        }
+    }
+
+    /// Update the last activity time.
+    ///
+    /// This is called when a message is processed for the session,
+    /// keeping the affinity fresh.
+    pub fn touch(&mut self) {
+        self.last_activity = Instant::now();
+    }
+
+    /// Get the time since last activity.
+    pub fn idle_time(&self) -> Duration {
+        Instant::now().duration_since(self.last_activity)
+    }
+
+    /// Extend the affinity expiration.
+    ///
+    /// # Arguments
+    ///
+    /// * `additional_duration` - Additional time to add to expiration
+    ///
+    /// # Returns
+    ///
+    /// A new `SessionAffinity` with extended expiration
+    pub fn extend(&self, additional_duration: Duration) -> Self {
+        let mut extended = self.clone();
+        extended.expires_at = Instant::now() + additional_duration;
+        extended
+    }
+}
+
+/// Tracks session-to-consumer affinity mappings for ordered processing.
+///
+/// The affinity tracker ensures that all messages for a given session are
+/// routed to the same consumer, maintaining message ordering and processing
+/// consistency within sessions.
+///
+/// # Thread Safety
+///
+/// This type uses `Arc<RwLock<>>` internally and can be safely shared across
+/// threads and tasks.
+///
+/// # Examples
+///
+/// ```
+/// use queue_runtime::sessions::SessionAffinityTracker;
+/// use queue_runtime::message::SessionId;
+/// use std::time::Duration;
+///
+/// # tokio_test::block_on(async {
+/// let tracker = SessionAffinityTracker::new(Duration::from_secs(600));
+/// let session_id = SessionId::new("session-123".to_string()).unwrap();
+///
+/// // Assign session to consumer
+/// let affinity = tracker.assign_session(session_id.clone(), "worker-1".to_string()).await.unwrap();
+/// assert_eq!(affinity.consumer_id(), "worker-1");
+///
+/// // Query affinity
+/// let consumer = tracker.get_consumer(&session_id).await;
+/// assert_eq!(consumer, Some("worker-1".to_string()));
+/// # });
+/// ```
+#[derive(Clone)]
+pub struct SessionAffinityTracker {
+    affinities: Arc<RwLock<HashMap<SessionId, SessionAffinity>>>,
+    default_affinity_duration: Duration,
+}
+
+impl SessionAffinityTracker {
+    /// Create a new session affinity tracker.
+    ///
+    /// # Arguments
+    ///
+    /// * `default_affinity_duration` - Default duration for affinity mappings
+    ///
+    /// # Returns
+    ///
+    /// A new `SessionAffinityTracker` instance
+    pub fn new(default_affinity_duration: Duration) -> Self {
+        Self {
+            affinities: Arc::new(RwLock::new(HashMap::new())),
+            default_affinity_duration,
+        }
+    }
+
+    /// Assign a session to a consumer.
+    ///
+    /// If the session is already assigned and not expired, returns an error.
+    /// If the session affinity has expired, reassigns to the new consumer.
+    ///
+    /// # Arguments
+    ///
+    /// * `session_id` - The session to assign
+    /// * `consumer_id` - The consumer to assign the session to
+    ///
+    /// # Returns
+    ///
+    /// The created affinity mapping on success, or an error if the session
+    /// is already assigned to a different consumer.
+    ///
+    /// # Errors
+    ///
+    /// Returns `QueueError::SessionLocked` if the session is already assigned
+    /// to a different consumer and the affinity has not expired.
+    pub async fn assign_session(
+        &self,
+        session_id: SessionId,
+        consumer_id: String,
+    ) -> Result<SessionAffinity, QueueError> {
+        let mut affinities = self.affinities.write().await;
+
+        // Check if session is already assigned
+        if let Some(existing) = affinities.get(&session_id) {
+            if !existing.is_expired() {
+                if existing.consumer_id() != consumer_id {
+                    // Session assigned to different consumer
+                    return Err(QueueError::SessionLocked {
+                        session_id: session_id.to_string(),
+                        locked_until: Timestamp::now(), // Approximate
+                    });
+                }
+                // Same consumer - return existing affinity
+                return Ok(existing.clone());
+            }
+            // Expired - will reassign below
+        }
+
+        // Create new affinity
+        let affinity = SessionAffinity::new(
+            session_id.clone(),
+            consumer_id,
+            self.default_affinity_duration,
+        );
+
+        affinities.insert(session_id, affinity.clone());
+        Ok(affinity)
+    }
+
+    /// Get the consumer assigned to a session.
+    ///
+    /// # Arguments
+    ///
+    /// * `session_id` - The session to query
+    ///
+    /// # Returns
+    ///
+    /// The consumer ID if the session has an active affinity, `None` otherwise
+    pub async fn get_consumer(&self, session_id: &SessionId) -> Option<String> {
+        let affinities = self.affinities.read().await;
+        affinities
+            .get(session_id)
+            .filter(|affinity| !affinity.is_expired())
+            .map(|affinity| affinity.consumer_id().to_string())
+    }
+
+    /// Get the full affinity information for a session.
+    ///
+    /// # Arguments
+    ///
+    /// * `session_id` - The session to query
+    ///
+    /// # Returns
+    ///
+    /// The affinity information if the session has an active affinity
+    pub async fn get_affinity(&self, session_id: &SessionId) -> Option<SessionAffinity> {
+        let affinities = self.affinities.read().await;
+        affinities
+            .get(session_id)
+            .filter(|affinity| !affinity.is_expired())
+            .cloned()
+    }
+
+    /// Check if a session has an active affinity.
+    ///
+    /// # Arguments
+    ///
+    /// * `session_id` - The session to check
+    ///
+    /// # Returns
+    ///
+    /// `true` if the session has an active affinity
+    pub async fn has_affinity(&self, session_id: &SessionId) -> bool {
+        self.get_consumer(session_id).await.is_some()
+    }
+
+    /// Update the last activity time for a session.
+    ///
+    /// This should be called when a message is processed for the session.
+    ///
+    /// # Arguments
+    ///
+    /// * `session_id` - The session to update
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if successful, error if session not found or expired
+    pub async fn touch_session(&self, session_id: &SessionId) -> Result<(), QueueError> {
+        let mut affinities = self.affinities.write().await;
+
+        if let Some(affinity) = affinities.get_mut(session_id) {
+            if !affinity.is_expired() {
+                affinity.touch();
+                return Ok(());
+            }
+        }
+
+        Err(QueueError::SessionNotFound {
+            session_id: session_id.to_string(),
+        })
+    }
+
+    /// Release a session affinity.
+    ///
+    /// # Arguments
+    ///
+    /// * `session_id` - The session to release
+    /// * `consumer_id` - The consumer releasing the session (for validation)
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if successful
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the consumer doesn't own the session
+    pub async fn release_session(
+        &self,
+        session_id: &SessionId,
+        consumer_id: &str,
+    ) -> Result<(), QueueError> {
+        let mut affinities = self.affinities.write().await;
+
+        if let Some(affinity) = affinities.get(session_id) {
+            if affinity.consumer_id() != consumer_id {
+                return Err(QueueError::ValidationError(
+                    ValidationError::InvalidFormat {
+                        field: "consumer_id".to_string(),
+                        message: format!(
+                            "Session owned by {}, cannot release from {}",
+                            affinity.consumer_id(),
+                            consumer_id
+                        ),
+                    },
+                ));
+            }
+        }
+
+        affinities.remove(session_id);
+        Ok(())
+    }
+
+    /// Extend the affinity duration for a session.
+    ///
+    /// # Arguments
+    ///
+    /// * `session_id` - The session to extend
+    /// * `consumer_id` - The consumer requesting the extension (for validation)
+    /// * `additional_duration` - Additional time to add
+    ///
+    /// # Returns
+    ///
+    /// The updated affinity on success
+    ///
+    /// # Errors
+    ///
+    /// Returns error if consumer doesn't own the session or session not found
+    pub async fn extend_affinity(
+        &self,
+        session_id: &SessionId,
+        consumer_id: &str,
+        additional_duration: Duration,
+    ) -> Result<SessionAffinity, QueueError> {
+        let mut affinities = self.affinities.write().await;
+
+        if let Some(affinity) = affinities.get(session_id) {
+            if affinity.consumer_id() != consumer_id {
+                return Err(QueueError::ValidationError(
+                    ValidationError::InvalidFormat {
+                        field: "consumer_id".to_string(),
+                        message: format!(
+                            "Session owned by {}, cannot extend from {}",
+                            affinity.consumer_id(),
+                            consumer_id
+                        ),
+                    },
+                ));
+            }
+
+            let extended = affinity.extend(additional_duration);
+            affinities.insert(session_id.clone(), extended.clone());
+            return Ok(extended);
+        }
+
+        Err(QueueError::SessionNotFound {
+            session_id: session_id.to_string(),
+        })
+    }
+
+    /// Get all sessions assigned to a consumer.
+    ///
+    /// # Arguments
+    ///
+    /// * `consumer_id` - The consumer to query
+    ///
+    /// # Returns
+    ///
+    /// List of session IDs assigned to the consumer
+    pub async fn get_consumer_sessions(&self, consumer_id: &str) -> Vec<SessionId> {
+        let affinities = self.affinities.read().await;
+        affinities
+            .iter()
+            .filter(|(_, affinity)| !affinity.is_expired() && affinity.consumer_id() == consumer_id)
+            .map(|(session_id, _)| session_id.clone())
+            .collect()
+    }
+
+    /// Clean up expired affinities.
+    ///
+    /// # Returns
+    ///
+    /// Number of affinities removed
+    pub async fn cleanup_expired(&self) -> usize {
+        let mut affinities = self.affinities.write().await;
+
+        let expired: Vec<SessionId> = affinities
+            .iter()
+            .filter(|(_, affinity)| affinity.is_expired())
+            .map(|(session_id, _)| session_id.clone())
+            .collect();
+
+        let count = expired.len();
+        for session_id in expired {
+            affinities.remove(&session_id);
+        }
+
+        count
+    }
+
+    /// Get the total number of affinity mappings (including expired).
+    pub async fn affinity_count(&self) -> usize {
+        let affinities = self.affinities.read().await;
+        affinities.len()
+    }
+
+    /// Get the number of active (non-expired) affinities.
+    pub async fn active_affinity_count(&self) -> usize {
+        let affinities = self.affinities.read().await;
+        affinities
+            .values()
+            .filter(|affinity| !affinity.is_expired())
+            .count()
     }
 }
