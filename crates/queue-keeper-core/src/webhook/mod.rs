@@ -572,105 +572,60 @@ pub enum SecretError {
 }
 
 // ============================================================================
-// Default Implementations (Stubs)
+// Default Implementations
 // ============================================================================
 
-/// Default webhook processor implementation (stub)
-pub struct DefaultWebhookProcessor;
-
-#[async_trait]
-impl WebhookProcessor for DefaultWebhookProcessor {
-    async fn process_webhook(
-        &self,
-        request: WebhookRequest,
-    ) -> Result<EventEnvelope, WebhookError> {
-        info!(
-            event_type = %request.event_type(),
-            delivery_id = %request.delivery_id(),
-            "Processing webhook request"
-        );
-
-        // 1. Validate headers and basic structure
-        request.headers.validate()?;
-
-        // 2. Validate webhook signature (if present)
-        if let Some(signature) = request.signature() {
-            self.validate_signature(&request.body, signature, request.event_type())
-                .await?;
-        }
-
-        // 3. Store raw payload for audit/replay
-        let validation_status = ValidationStatus::Valid;
-        let _storage_ref = self.store_raw_payload(&request, validation_status).await?;
-
-        // 4. Normalize to standard event format
-        let event_envelope = self.normalize_event(&request).await?;
-
-        info!(
-            event_id = %event_envelope.event_id,
-            session_id = %event_envelope.session_id,
-            entity = ?event_envelope.entity,
-            "Successfully processed webhook"
-        );
-
-        Ok(event_envelope)
-    }
-
-    async fn validate_signature(
-        &self,
-        _payload: &[u8],
-        _signature: &str,
-        _event_type: &str,
-    ) -> Result<(), ValidationError> {
-        // TODO: Implement signature validation
-        // See specs/interfaces/webhook-processing.md
-        unimplemented!("Signature validation not yet implemented")
-    }
-
-    async fn store_raw_payload(
-        &self,
-        _request: &WebhookRequest,
-        _validation_status: ValidationStatus,
-    ) -> Result<StorageReference, StorageError> {
-        // TODO: Implement payload storage
-        // See specs/interfaces/webhook-processing.md
-        unimplemented!("Payload storage not yet implemented")
-    }
-
-    async fn normalize_event(
-        &self,
-        request: &WebhookRequest,
-    ) -> Result<EventEnvelope, NormalizationError> {
-        // Parse JSON payload
-        let payload: serde_json::Value = serde_json::from_slice(&request.body)?;
-
-        // Extract repository (required for all events)
-        let repository = self.extract_repository(&payload)?;
-
-        // Extract entity based on event type
-        let entity = EventEntity::from_payload(request.event_type(), &payload);
-
-        // Extract action if present
-        let action = payload
-            .get("action")
-            .and_then(|a| a.as_str())
-            .map(String::from);
-
-        // Create normalized event envelope
-        let event = EventEnvelope::new(
-            request.event_type().to_string(),
-            action,
-            repository,
-            entity,
-            payload,
-        );
-
-        Ok(event)
-    }
+/// Webhook processor implementation with dependency injection
+///
+/// This implementation follows the dependency injection pattern to allow
+/// for testability and flexibility. Optional dependencies can be omitted
+/// for testing or when features are not yet implemented.
+pub struct WebhookProcessorImpl {
+    signature_validator: Option<std::sync::Arc<dyn SignatureValidator>>,
+    payload_storer: Option<std::sync::Arc<dyn PayloadStorer>>,
 }
 
-impl DefaultWebhookProcessor {
+impl WebhookProcessorImpl {
+    /// Create new webhook processor with optional dependencies
+    ///
+    /// # Arguments
+    ///
+    /// * `signature_validator` - Optional signature validator for webhook authentication
+    /// * `payload_storer` - Optional payload storer for audit trail
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use queue_keeper_core::webhook::WebhookProcessorImpl;
+    ///
+    /// // Create processor without dependencies (for testing)
+    /// let processor = WebhookProcessorImpl::new(None, None);
+    ///
+    /// // Create processor with signature validation only
+    /// // let validator = Arc::new(my_validator);
+    /// // let processor = WebhookProcessorImpl::new(Some(validator), None);
+    /// ```
+    pub fn new(
+        signature_validator: Option<std::sync::Arc<dyn SignatureValidator>>,
+        payload_storer: Option<std::sync::Arc<dyn PayloadStorer>>,
+    ) -> Self {
+        Self {
+            signature_validator,
+            payload_storer,
+        }
+    }
+
     /// Extract repository information from payload
+    ///
+    /// Parses repository data from GitHub webhook payload, including
+    /// repository metadata and owner information.
+    ///
+    /// # Errors
+    ///
+    /// Returns `NormalizationError` if:
+    /// - Repository field is missing
+    /// - Required repository fields are missing or invalid
+    /// - Owner information is incomplete
     fn extract_repository(
         &self,
         payload: &serde_json::Value,
@@ -751,6 +706,153 @@ impl DefaultWebhookProcessor {
         Ok(repository)
     }
 }
+
+#[async_trait]
+impl WebhookProcessor for WebhookProcessorImpl {
+    async fn process_webhook(
+        &self,
+        request: WebhookRequest,
+    ) -> Result<EventEnvelope, WebhookError> {
+        info!(
+            event_type = %request.event_type(),
+            delivery_id = %request.delivery_id(),
+            "Processing webhook request"
+        );
+
+        // 1. Validate headers and basic structure
+        request.headers.validate()?;
+
+        // 2. Validate webhook signature (if present and validator available)
+        if let Some(signature) = request.signature() {
+            self.validate_signature(&request.body, signature, request.event_type())
+                .await?;
+        }
+
+        // 3. Store raw payload for audit/replay (if storer available)
+        let validation_status = ValidationStatus::Valid;
+        let _storage_ref = self.store_raw_payload(&request, validation_status).await?;
+
+        // 4. Normalize to standard event format
+        let event_envelope = self.normalize_event(&request).await?;
+
+        info!(
+            event_id = %event_envelope.event_id,
+            session_id = %event_envelope.session_id,
+            entity = ?event_envelope.entity,
+            "Successfully processed webhook"
+        );
+
+        Ok(event_envelope)
+    }
+
+    async fn validate_signature(
+        &self,
+        payload: &[u8],
+        signature: &str,
+        event_type: &str,
+    ) -> Result<(), ValidationError> {
+        if let Some(validator) = &self.signature_validator {
+            // Get webhook secret for this event type
+            let secret = validator
+                .get_webhook_secret(event_type)
+                .await
+                .map_err(|e| ValidationError::InvalidFormat {
+                    field: "signature".to_string(),
+                    message: format!("Failed to retrieve webhook secret: {}", e),
+                })?;
+
+            // Validate signature using constant-time comparison
+            validator
+                .validate_signature(payload, signature, &secret)
+                .await?;
+
+            info!(
+                event_type = %event_type,
+                "Webhook signature validated successfully"
+            );
+        } else {
+            info!(
+                event_type = %event_type,
+                "Signature validation skipped - no validator configured"
+            );
+        }
+
+        Ok(())
+    }
+
+    async fn store_raw_payload(
+        &self,
+        request: &WebhookRequest,
+        validation_status: ValidationStatus,
+    ) -> Result<StorageReference, StorageError> {
+        if let Some(storer) = &self.payload_storer {
+            // Store payload with metadata
+            let storage_ref = storer.store_payload(request, validation_status).await?;
+
+            info!(
+                blob_path = %storage_ref.blob_path,
+                size_bytes = storage_ref.size_bytes,
+                "Webhook payload stored successfully"
+            );
+
+            Ok(storage_ref)
+        } else {
+            // No storer configured - return placeholder reference
+            // This allows processing to continue without storage (useful for testing)
+            info!("Payload storage skipped - no storer configured");
+
+            Ok(StorageReference {
+                blob_path: format!("not-stored/{}", request.delivery_id()),
+                stored_at: Timestamp::now(),
+                size_bytes: request.body.len() as u64,
+            })
+        }
+    }
+
+    async fn normalize_event(
+        &self,
+        request: &WebhookRequest,
+    ) -> Result<EventEnvelope, NormalizationError> {
+        // Parse JSON payload
+        let payload: serde_json::Value = serde_json::from_slice(&request.body)?;
+
+        // Extract repository (required for all events)
+        let repository = self.extract_repository(&payload)?;
+
+        // Extract entity based on event type
+        let entity = EventEntity::from_payload(request.event_type(), &payload);
+
+        // Extract action if present
+        let action = payload
+            .get("action")
+            .and_then(|a| a.as_str())
+            .map(String::from);
+
+        // Create normalized event envelope
+        let event = EventEnvelope::new(
+            request.event_type().to_string(),
+            action,
+            repository,
+            entity,
+            payload,
+        );
+
+        info!(
+            event_id = %event.event_id,
+            event_type = %event.event_type,
+            entity_type = %event.entity.entity_type(),
+            "Event normalized successfully"
+        );
+
+        Ok(event)
+    }
+}
+
+/// Default webhook processor implementation (backward compatibility)
+///
+/// This is a type alias for `WebhookProcessorImpl` without any dependencies.
+/// Provided for backward compatibility with existing code.
+pub type DefaultWebhookProcessor = WebhookProcessorImpl;
 
 #[cfg(test)]
 #[path = "mod_tests.rs"]
