@@ -6,7 +6,9 @@ use axum_test::TestServer;
 #[tokio::test]
 async fn test_health_endpoint() {
     let config = ServiceConfig::default();
-    let webhook_processor = Arc::new(queue_keeper_core::webhook::DefaultWebhookProcessor);
+    let webhook_processor = Arc::new(queue_keeper_core::webhook::DefaultWebhookProcessor::new(
+        None, None,
+    ));
     let health_checker = Arc::new(DefaultHealthChecker);
     let event_store = Arc::new(DefaultEventStore);
     let metrics = ServiceMetrics::new().expect("Failed to create metrics");
