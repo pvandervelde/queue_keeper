@@ -36,27 +36,135 @@ impl BotConfiguration {
     /// - `BotConfigError::FileNotFound` - Configuration file missing
     /// - `BotConfigError::ParseError` - Invalid YAML/JSON syntax
     /// - `BotConfigError::ValidationError` - Invalid configuration structure
-    pub fn load_from_file(_path: &Path) -> Result<Self, BotConfigError> {
-        unimplemented!("See specs/interfaces/bot-configuration.md")
+    pub fn load_from_file(path: &Path) -> Result<Self, BotConfigError> {
+        // Check if file exists
+        if !path.exists() {
+            return Err(BotConfigError::FileNotFound {
+                path: path.display().to_string(),
+            });
+        }
+
+        // Read file contents
+        let contents = std::fs::read_to_string(path).map_err(|e| BotConfigError::ParseError {
+            message: format!("Failed to read file: {}", e),
+        })?;
+
+        // Determine file type from extension
+        let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+
+        // Parse based on file extension
+        let config: BotConfiguration = match extension.to_lowercase().as_str() {
+            "yaml" | "yml" => {
+                serde_yaml::from_str(&contents).map_err(|e| BotConfigError::ParseError {
+                    message: format!("Invalid YAML: {}", e),
+                })?
+            }
+            "json" => serde_json::from_str(&contents).map_err(|e| BotConfigError::ParseError {
+                message: format!("Invalid JSON: {}", e),
+            })?,
+            _ => {
+                // Try JSON first, then YAML
+                serde_json::from_str(&contents)
+                    .or_else(|_| serde_yaml::from_str(&contents))
+                    .map_err(|e| BotConfigError::ParseError {
+                        message: format!("Failed to parse as JSON or YAML: {}", e),
+                    })?
+            }
+        };
+
+        // Validate configuration
+        config.validate()?;
+
+        Ok(config)
     }
 
     /// Load configuration from environment variables
     ///
     /// Expected format: JSON string in `BOT_CONFIGURATION` environment variable
     pub fn load_from_env() -> Result<Self, BotConfigError> {
-        unimplemented!("See specs/interfaces/bot-configuration.md")
+        let config_str = std::env::var("BOT_CONFIGURATION").map_err(|_| {
+            BotConfigError::SourceUnavailable(
+                "BOT_CONFIGURATION environment variable not set".to_string(),
+            )
+        })?;
+
+        let config: BotConfiguration =
+            serde_json::from_str(&config_str).map_err(|e| BotConfigError::ParseError {
+                message: format!("Invalid JSON in BOT_CONFIGURATION: {}", e),
+            })?;
+
+        // Validate configuration
+        config.validate()?;
+
+        Ok(config)
     }
 
     /// Validate configuration structure and constraints
     ///
     /// Checks for duplicate bot names, invalid queue names, unknown event types
     pub fn validate(&self) -> Result<(), BotConfigError> {
-        unimplemented!("See specs/interfaces/bot-configuration.md")
+        let mut errors = Vec::new();
+
+        // Check maximum number of bots
+        if self.bots.len() > self.settings.max_bots {
+            errors.push(format!(
+                "Too many bots configured: {} (max: {})",
+                self.bots.len(),
+                self.settings.max_bots
+            ));
+        }
+
+        // Check for duplicate bot names
+        let mut seen_names = std::collections::HashSet::new();
+        for bot in &self.bots {
+            if !seen_names.insert(bot.name.as_str()) {
+                errors.push(format!("Duplicate bot name: {}", bot.name.as_str()));
+            }
+        }
+
+        // Validate each bot subscription
+        for bot in &self.bots {
+            // Validate queue name format
+            if !bot.queue.as_str().starts_with("queue-keeper-") {
+                errors.push(format!(
+                    "Bot '{}': Queue name must start with 'queue-keeper-'",
+                    bot.name.as_str()
+                ));
+            }
+
+            // Validate event patterns
+            if bot.events.is_empty() {
+                errors.push(format!(
+                    "Bot '{}': Must have at least one event subscription",
+                    bot.name.as_str()
+                ));
+            }
+
+            // Validate repository filters if present
+            if let Some(ref filter) = bot.repository_filter {
+                if let Err(e) = filter.validate() {
+                    errors.push(format!(
+                        "Bot '{}': Invalid repository filter: {}",
+                        bot.name.as_str(),
+                        e
+                    ));
+                }
+            }
+        }
+
+        if !errors.is_empty() {
+            return Err(BotConfigError::ValidationError { errors });
+        }
+
+        Ok(())
     }
 
     /// Get all bots that should receive the given event
-    pub fn get_target_bots(&self, _event: &EventEnvelope) -> Vec<&BotSubscription> {
-        unimplemented!("See specs/interfaces/bot-configuration.md")
+    pub fn get_target_bots(&self, event: &EventEnvelope) -> Vec<&BotSubscription> {
+        self.bots
+            .iter()
+            .filter(|bot| bot.matches_event(event))
+            .collect()
     }
 }
 
@@ -86,8 +194,40 @@ pub struct BotSubscription {
 
 impl BotSubscription {
     /// Check if this bot should receive the given event
-    pub fn matches_event(&self, _event: &EventEnvelope) -> bool {
-        unimplemented!("See specs/interfaces/bot-configuration.md")
+    pub fn matches_event(&self, event: &EventEnvelope) -> bool {
+        // Check if event type matches any of the bot's subscribed patterns
+        let event_matches = self.events.iter().any(|pattern| {
+            match pattern {
+                EventTypePattern::Exclude(_) => false, // Exclusions handled separately
+                _ => pattern.matches(&event.event_type),
+            }
+        });
+
+        if !event_matches {
+            return false;
+        }
+
+        // Check if any exclusion patterns apply
+        let excluded = self.events.iter().any(|pattern| {
+            if let EventTypePattern::Exclude(excluded_type) = pattern {
+                &event.event_type == excluded_type
+            } else {
+                false
+            }
+        });
+
+        if excluded {
+            return false;
+        }
+
+        // Check repository filter if specified
+        if let Some(ref filter) = self.repository_filter {
+            if !filter.matches(&event.repository) {
+                return false;
+            }
+        }
+
+        true
     }
 
     /// Get the effective queue name for this bot
@@ -123,27 +263,88 @@ pub enum EventTypePattern {
 
 impl EventTypePattern {
     /// Check if this pattern matches the given event type
-    pub fn matches(&self, _event_type: &str) -> bool {
-        unimplemented!("See specs/interfaces/bot-configuration.md")
+    pub fn matches(&self, event_type: &str) -> bool {
+        match self {
+            EventTypePattern::Exact(exact) => event_type == exact,
+            EventTypePattern::Wildcard(wildcard) => {
+                // Simple wildcard matching (*.suffix or prefix.*)
+                if wildcard.ends_with('*') {
+                    let prefix = &wildcard[..wildcard.len() - 1];
+                    event_type.starts_with(prefix)
+                } else if wildcard.starts_with('*') {
+                    let suffix = &wildcard[1..];
+                    event_type.ends_with(suffix)
+                } else {
+                    false
+                }
+            }
+            EventTypePattern::EntityAll(entity) => {
+                event_type.starts_with(&format!("{}.", entity)) || event_type == entity
+            }
+            EventTypePattern::Exclude(_) => {
+                // Exclusions are handled by the subscription logic
+                false
+            }
+        }
     }
 
     /// Get the base entity type (pull_request, issues, etc.)
     pub fn get_entity_type(&self) -> Option<&str> {
-        unimplemented!("See specs/interfaces/bot-configuration.md")
+        match self {
+            EventTypePattern::EntityAll(entity) => Some(entity.as_str()),
+            EventTypePattern::Wildcard(wildcard) => {
+                // Extract entity from wildcard pattern (e.g., "issues.*" -> "issues")
+                if wildcard.ends_with(".*") {
+                    Some(&wildcard[..wildcard.len() - 2])
+                } else {
+                    None
+                }
+            }
+            EventTypePattern::Exact(_) => None,
+            EventTypePattern::Exclude(_) => None,
+        }
     }
 }
 
 impl FromStr for EventTypePattern {
     type Err = BotConfigError;
 
-    fn from_str(_pattern: &str) -> Result<Self, Self::Err> {
-        // TODO: Implement pattern parsing
-        // Examples:
-        // - "issues.opened" → Exact("issues.opened")
-        // - "issues.*" → Wildcard("issues.*")
-        // - "pull_request" → EntityAll("pull_request")
-        // - "!push" → Exclude("push")
-        unimplemented!("See specs/interfaces/bot-configuration.md")
+    fn from_str(pattern: &str) -> Result<Self, Self::Err> {
+        if pattern.is_empty() {
+            return Err(BotConfigError::UnknownEventType {
+                pattern: pattern.to_string(),
+            });
+        }
+
+        // Handle exclusion pattern (starts with !)
+        if let Some(excluded) = pattern.strip_prefix('!') {
+            return Ok(EventTypePattern::Exclude(excluded.to_string()));
+        }
+
+        // Handle wildcard pattern (contains *)
+        if pattern.contains('*') {
+            return Ok(EventTypePattern::Wildcard(pattern.to_string()));
+        }
+
+        // Check if it's an entity-all pattern (no dot in name, common entity types)
+        if !pattern.contains('.') {
+            // Known entity types that should use EntityAll
+            let known_entities = [
+                "pull_request",
+                "issues",
+                "push",
+                "release",
+                "repository",
+                "create",
+                "delete",
+            ];
+            if known_entities.contains(&pattern) {
+                return Ok(EventTypePattern::EntityAll(pattern.to_string()));
+            }
+        }
+
+        // Otherwise, treat as exact match
+        Ok(EventTypePattern::Exact(pattern.to_string()))
     }
 }
 
@@ -173,13 +374,77 @@ pub enum RepositoryFilter {
 
 impl RepositoryFilter {
     /// Check if this filter matches the given repository
-    pub fn matches(&self, _repository: &Repository) -> bool {
-        unimplemented!("See specs/interfaces/bot-configuration.md")
+    pub fn matches(&self, repository: &Repository) -> bool {
+        match self {
+            RepositoryFilter::Exact { owner, name } => {
+                repository.owner.login == *owner && repository.name == *name
+            }
+            RepositoryFilter::Owner(filter_owner) => repository.owner.login == *filter_owner,
+            RepositoryFilter::NamePattern(pattern) => {
+                // Use regex matching for name patterns
+                if let Ok(re) = regex::Regex::new(pattern) {
+                    re.is_match(&repository.name)
+                } else {
+                    false
+                }
+            }
+            RepositoryFilter::AnyOf(filters) => {
+                // OR logic - any filter matches
+                filters.iter().any(|f| f.matches(repository))
+            }
+            RepositoryFilter::AllOf(filters) => {
+                // AND logic - all filters must match
+                filters.iter().all(|f| f.matches(repository))
+            }
+        }
     }
 
     /// Validate filter patterns (especially regex)
     pub fn validate(&self) -> Result<(), BotConfigError> {
-        unimplemented!("See specs/interfaces/bot-configuration.md")
+        match self {
+            RepositoryFilter::Exact { owner, name } => {
+                if owner.is_empty() || name.is_empty() {
+                    return Err(BotConfigError::InvalidRepositoryFilter {
+                        filter: format!("Exact({}/{})", owner, name),
+                        reason: "Owner and name cannot be empty".to_string(),
+                    });
+                }
+                Ok(())
+            }
+            RepositoryFilter::Owner(owner) => {
+                if owner.is_empty() {
+                    return Err(BotConfigError::InvalidRepositoryFilter {
+                        filter: format!("Owner({})", owner),
+                        reason: "Owner cannot be empty".to_string(),
+                    });
+                }
+                Ok(())
+            }
+            RepositoryFilter::NamePattern(pattern) => {
+                // Validate regex pattern
+                regex::Regex::new(pattern).map_err(|e| {
+                    BotConfigError::InvalidRepositoryFilter {
+                        filter: pattern.clone(),
+                        reason: format!("Invalid regex: {}", e),
+                    }
+                })?;
+                Ok(())
+            }
+            RepositoryFilter::AnyOf(filters) => {
+                // Validate all nested filters
+                for filter in filters {
+                    filter.validate()?;
+                }
+                Ok(())
+            }
+            RepositoryFilter::AllOf(filters) => {
+                // Validate all nested filters
+                for filter in filters {
+                    filter.validate()?;
+                }
+                Ok(())
+            }
+        }
     }
 }
 
@@ -553,16 +818,31 @@ impl BotConfigurationProvider for DefaultBotConfigurationProvider {
 
     async fn get_target_bots(
         &self,
-        _event: &EventEnvelope,
+        event: &EventEnvelope,
     ) -> Result<Vec<BotSubscription>, BotConfigError> {
-        unimplemented!("See specs/interfaces/bot-configuration.md")
+        let matching_bots = self
+            .configuration
+            .bots
+            .iter()
+            .filter(|bot| self.event_matcher.matches_subscription(event, bot))
+            .cloned()
+            .collect();
+
+        Ok(matching_bots)
     }
 
     async fn get_bot_subscription(
         &self,
-        _bot_name: &BotName,
+        bot_name: &BotName,
     ) -> Result<Option<BotSubscription>, BotConfigError> {
-        unimplemented!("See specs/interfaces/bot-configuration.md")
+        let subscription = self
+            .configuration
+            .bots
+            .iter()
+            .find(|bot| &bot.name == bot_name)
+            .cloned();
+
+        Ok(subscription)
     }
 
     async fn list_bot_names(&self) -> Result<Vec<BotName>, BotConfigError> {
@@ -575,7 +855,10 @@ impl BotConfigurationProvider for DefaultBotConfigurationProvider {
     }
 
     async fn validate_queue_connectivity(&self) -> Result<(), BotConfigError> {
-        unimplemented!("See specs/interfaces/bot-configuration.md")
+        // This is a stub implementation that would need actual queue client integration
+        // For now, we just return Ok since we don't have queue clients yet
+        // Task 14.0 will integrate the actual queue validation
+        Ok(())
     }
 }
 
@@ -614,20 +897,33 @@ impl ConfigurationLoader for FileConfigurationLoader {
 pub struct DefaultEventMatcher;
 
 impl EventMatcher for DefaultEventMatcher {
-    fn matches_subscription(
-        &self,
-        _event: &EventEnvelope,
-        _subscription: &BotSubscription,
-    ) -> bool {
-        unimplemented!("See specs/interfaces/bot-configuration.md")
+    fn matches_subscription(&self, event: &EventEnvelope, subscription: &BotSubscription) -> bool {
+        // Check if event type matches any subscription pattern
+        let event_matches = subscription
+            .events
+            .iter()
+            .any(|pattern| self.matches_pattern(&event.event_type, pattern));
+
+        if !event_matches {
+            return false;
+        }
+
+        // Check repository filter if present
+        if let Some(ref filter) = subscription.repository_filter {
+            if !self.matches_repository(&event.repository, filter) {
+                return false;
+            }
+        }
+
+        true
     }
 
-    fn matches_pattern(&self, _event_type: &str, _pattern: &EventTypePattern) -> bool {
-        unimplemented!("See specs/interfaces/bot-configuration.md")
+    fn matches_pattern(&self, event_type: &str, pattern: &EventTypePattern) -> bool {
+        pattern.matches(event_type)
     }
 
-    fn matches_repository(&self, _repository: &Repository, _filter: &RepositoryFilter) -> bool {
-        unimplemented!("See specs/interfaces/bot-configuration.md")
+    fn matches_repository(&self, repository: &Repository, filter: &RepositoryFilter) -> bool {
+        filter.matches(repository)
     }
 }
 
