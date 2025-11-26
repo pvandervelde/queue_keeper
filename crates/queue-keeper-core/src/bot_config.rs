@@ -50,10 +50,7 @@ impl BotConfiguration {
         })?;
 
         // Determine file type from extension
-        let extension = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("");
+        let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
         // Parse based on file extension
         let config: BotConfiguration = match extension.to_lowercase().as_str() {
@@ -425,9 +422,11 @@ impl RepositoryFilter {
             }
             RepositoryFilter::NamePattern(pattern) => {
                 // Validate regex pattern
-                regex::Regex::new(pattern).map_err(|e| BotConfigError::InvalidRepositoryFilter {
-                    filter: pattern.clone(),
-                    reason: format!("Invalid regex: {}", e),
+                regex::Regex::new(pattern).map_err(|e| {
+                    BotConfigError::InvalidRepositoryFilter {
+                        filter: pattern.clone(),
+                        reason: format!("Invalid regex: {}", e),
+                    }
                 })?;
                 Ok(())
             }
@@ -898,15 +897,12 @@ impl ConfigurationLoader for FileConfigurationLoader {
 pub struct DefaultEventMatcher;
 
 impl EventMatcher for DefaultEventMatcher {
-    fn matches_subscription(
-        &self,
-        event: &EventEnvelope,
-        subscription: &BotSubscription,
-    ) -> bool {
+    fn matches_subscription(&self, event: &EventEnvelope, subscription: &BotSubscription) -> bool {
         // Check if event type matches any subscription pattern
-        let event_matches = subscription.events.iter().any(|pattern| {
-            self.matches_pattern(&event.event_type, pattern)
-        });
+        let event_matches = subscription
+            .events
+            .iter()
+            .any(|pattern| self.matches_pattern(&event.event_type, pattern));
 
         if !event_matches {
             return false;
