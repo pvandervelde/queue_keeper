@@ -831,6 +831,9 @@ pub mod event_replay;
 /// Audit logging module for compliance and security
 pub mod audit_logging;
 
+/// Queue integration module for event routing
+pub mod queue_integration;
+
 // Re-export key types for convenience
 pub use audit_logging::{
     AuditActor, AuditContext, AuditError, AuditEvent, AuditEventType, AuditLogId, AuditLogger,
@@ -848,6 +851,10 @@ pub use event_replay::{
 pub use key_vault::{
     CachedSecret, KeyVaultConfiguration, KeyVaultError, KeyVaultProvider, SecretCache, SecretName,
     SecretRotationHandler, SecretValue, StandardSecrets,
+};
+pub use queue_integration::{
+    DefaultEventRouter, DeliveryResult, EventRouter, FailedDelivery, QueueDeliveryError,
+    SuccessfulDelivery,
 };
 pub use webhook::{EventEntity, EventEnvelope, WebhookError, WebhookProcessor};
 
