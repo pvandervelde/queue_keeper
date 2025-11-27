@@ -854,7 +854,7 @@ pub use key_vault::{
 };
 pub use queue_integration::{
     DefaultEventRouter, DeliveryResult, EventRouter, FailedDelivery, QueueDeliveryError,
-    RoutingContext, SuccessfulDelivery,
+    SuccessfulDelivery,
 };
 pub use webhook::{EventEntity, EventEnvelope, WebhookError, WebhookProcessor};
 

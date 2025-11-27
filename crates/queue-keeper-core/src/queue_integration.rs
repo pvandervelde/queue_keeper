@@ -85,15 +85,6 @@ pub struct FailedDelivery {
     pub is_transient: bool,
 }
 
-/// Context for routing operations
-///
-/// Contains event, configuration, and queue client needed for routing decisions.
-pub struct RoutingContext<'a> {
-    pub event: &'a EventEnvelope,
-    pub config: &'a BotConfiguration,
-    pub queue_client: &'a dyn QueueClient,
-}
-
 // ============================================================================
 // Error Types
 // ============================================================================
