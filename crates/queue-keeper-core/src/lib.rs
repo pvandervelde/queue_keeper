@@ -22,7 +22,7 @@
 //! let session_id = SessionId::from_parts("owner", "repo", "pull_request", "123");
 //! ```
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Datelike, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
@@ -486,6 +486,26 @@ impl Timestamp {
         Self(self.0 - chrono_duration)
     }
 
+    /// Get year component
+    pub fn year(&self) -> i32 {
+        self.0.year()
+    }
+
+    /// Get month component (1-12)
+    pub fn month(&self) -> u32 {
+        self.0.month()
+    }
+
+    /// Get day component (1-31)
+    pub fn day(&self) -> u32 {
+        self.0.day()
+    }
+
+    /// Get hour component (0-23)
+    pub fn hour(&self) -> u32 {
+        self.0.hour()
+    }
+
     /// Get duration since another timestamp
     pub fn duration_since(&self, other: Self) -> Duration {
         let chrono_duration = self.0.signed_duration_since(other.0);
@@ -834,10 +854,21 @@ pub mod audit_logging;
 /// Queue integration module for event routing
 pub mod queue_integration;
 
+/// Blob storage module for webhook payload persistence
+pub mod blob_storage;
+
+/// Storage adapters module for infrastructure implementations
+pub mod adapters;
+
 // Re-export key types for convenience
+pub use adapters::FilesystemBlobStorage;
 pub use audit_logging::{
     AuditActor, AuditContext, AuditError, AuditEvent, AuditEventType, AuditLogId, AuditLogger,
     AuditQuery, AuditResource, AuditResult, SecurityAuditEvent, WebhookProcessingAction,
+};
+pub use blob_storage::{
+    BlobMetadata, BlobStorage, BlobStorageError, DateRange, PayloadFilter, PayloadMetadata,
+    StorageHealthStatus, StorageMetrics, StoredWebhook, WebhookPayload,
 };
 pub use bot_config::{
     BotConfigError, BotConfiguration, BotConfigurationProvider, BotSubscription,
