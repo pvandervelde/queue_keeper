@@ -43,7 +43,7 @@ pub type QueueKeeperResult<T> = Result<T, QueueKeeperError>;
 ///
 /// Uses ULID for lexicographic sorting and global uniqueness.
 /// See specs/interfaces/shared-types.md for full specification.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct EventId(Ulid);
 
 impl EventId {
