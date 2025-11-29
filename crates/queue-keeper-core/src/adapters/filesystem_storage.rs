@@ -3,10 +3,11 @@
 //! Local filesystem implementation of BlobStorage trait for development and testing.
 
 use crate::blob_storage::*;
-use crate::EventId;
+use crate::{EventId, Timestamp};
 use async_trait::async_trait;
 use std::path::PathBuf;
 use tokio::fs;
+use tokio::io::AsyncWriteExt;
 
 /// Filesystem-based blob storage implementation
 ///
@@ -60,37 +61,253 @@ impl FilesystemBlobStorage {
 impl BlobStorage for FilesystemBlobStorage {
     async fn store_payload(
         &self,
-        _event_id: &EventId,
-        _payload: &WebhookPayload,
+        event_id: &EventId,
+        payload: &WebhookPayload,
     ) -> Result<BlobMetadata, BlobStorageError> {
-        // TODO: Implement in Phase 2
-        unimplemented!("store_payload not yet implemented")
+        let blob_path = self.get_blob_path(event_id);
+
+        // Create parent directories
+        if let Some(parent) = blob_path.parent() {
+            fs::create_dir_all(parent)
+                .await
+                .map_err(|e| BlobStorageError::InternalError {
+                    message: format!("Failed to create directory structure: {}", e),
+                })?;
+        }
+
+        // Create full metadata before serialization
+        let created_at = Timestamp::now();
+        let blob_metadata = BlobMetadata {
+            event_id: event_id.clone(),
+            blob_path: event_id.to_blob_path(),
+            size_bytes: 0, // Will be updated after writing
+            content_type: "application/json".to_string(),
+            created_at: created_at.clone(),
+            metadata: payload.metadata.clone(),
+        };
+
+        let stored_webhook = StoredWebhook {
+            metadata: blob_metadata,
+            payload: payload.clone(),
+        };
+
+        // Serialize complete webhook to JSON
+        let json = serde_json::to_string_pretty(&stored_webhook).map_err(|e| {
+            BlobStorageError::SerializationFailed {
+                message: format!("Failed to serialize payload: {}", e),
+            }
+        })?;
+
+        // Write to temporary file first (atomic write pattern)
+        let temp_path = blob_path.with_extension("tmp");
+        let mut file =
+            fs::File::create(&temp_path)
+                .await
+                .map_err(|e| BlobStorageError::InternalError {
+                    message: format!("Failed to create temp file: {}", e),
+                })?;
+
+        file.write_all(json.as_bytes())
+            .await
+            .map_err(|e| BlobStorageError::InternalError {
+                message: format!("Failed to write payload: {}", e),
+            })?;
+
+        file.flush()
+            .await
+            .map_err(|e| BlobStorageError::InternalError {
+                message: format!("Failed to flush file: {}", e),
+            })?;
+
+        // Rename to final path (atomic on most filesystems)
+        fs::rename(&temp_path, &blob_path)
+            .await
+            .map_err(|e| BlobStorageError::InternalError {
+                message: format!("Failed to rename temp file: {}", e),
+            })?;
+
+        // Get file size and update metadata
+        let file_metadata =
+            fs::metadata(&blob_path)
+                .await
+                .map_err(|e| BlobStorageError::InternalError {
+                    message: format!("Failed to read file metadata: {}", e),
+                })?;
+
+        Ok(BlobMetadata {
+            event_id: event_id.clone(),
+            blob_path: event_id.to_blob_path(),
+            size_bytes: file_metadata.len(),
+            content_type: "application/json".to_string(),
+            created_at,
+            metadata: payload.metadata.clone(),
+        })
     }
 
     async fn get_payload(
         &self,
-        _event_id: &EventId,
+        event_id: &EventId,
     ) -> Result<Option<StoredWebhook>, BlobStorageError> {
-        // TODO: Implement in Phase 2
-        unimplemented!("get_payload not yet implemented")
+        let blob_path = self.get_blob_path(event_id);
+
+        // Check if file exists
+        if !blob_path.exists() {
+            return Ok(None);
+        }
+
+        // Read file contents
+        let json =
+            fs::read_to_string(&blob_path)
+                .await
+                .map_err(|e| BlobStorageError::InternalError {
+                    message: format!("Failed to read blob: {}", e),
+                })?;
+
+        // Deserialize stored webhook
+        let stored: StoredWebhook =
+            serde_json::from_str(&json).map_err(|e| BlobStorageError::SerializationFailed {
+                message: format!("Failed to deserialize payload: {}", e),
+            })?;
+
+        Ok(Some(stored))
     }
 
     async fn list_payloads(
         &self,
-        _filter: &PayloadFilter,
+        filter: &PayloadFilter,
     ) -> Result<Vec<BlobMetadata>, BlobStorageError> {
-        // TODO: Implement in Phase 2
-        unimplemented!("list_payloads not yet implemented")
+        let mut results = Vec::new();
+
+        // Walk the directory tree
+        let base_path = self.base_path.join("webhook-payloads");
+        if !base_path.exists() {
+            return Ok(results);
+        }
+
+        // Recursively find all .json files
+        let mut entries = vec![base_path];
+        while let Some(path) = entries.pop() {
+            let mut read_dir =
+                fs::read_dir(&path)
+                    .await
+                    .map_err(|e| BlobStorageError::InternalError {
+                        message: format!("Failed to read directory: {}", e),
+                    })?;
+
+            while let Some(entry) =
+                read_dir
+                    .next_entry()
+                    .await
+                    .map_err(|e| BlobStorageError::InternalError {
+                        message: format!("Failed to read directory entry: {}", e),
+                    })?
+            {
+                let entry_path = entry.path();
+                if entry_path.is_dir() {
+                    entries.push(entry_path);
+                } else if entry_path.extension().and_then(|s| s.to_str()) == Some("json") {
+                    // Read and parse this blob
+                    if let Ok(json) = fs::read_to_string(&entry_path).await {
+                        if let Ok(stored) = serde_json::from_str::<StoredWebhook>(&json) {
+                            // Apply filters
+                            let mut matches = true;
+
+                            if let Some(ref repo_filter) = filter.repository {
+                                if let Some(ref repo) = stored.payload.metadata.repository {
+                                    if &repo.full_name != repo_filter {
+                                        matches = false;
+                                    }
+                                } else {
+                                    matches = false;
+                                }
+                            }
+
+                            if let Some(ref event_type_filter) = filter.event_type {
+                                if &stored.payload.metadata.event_type != event_type_filter {
+                                    matches = false;
+                                }
+                            }
+
+                            if let Some(ref date_range) = filter.date_range {
+                                if stored.payload.metadata.received_at < date_range.start
+                                    || stored.payload.metadata.received_at >= date_range.end
+                                {
+                                    matches = false;
+                                }
+                            }
+
+                            if matches {
+                                results.push(stored.metadata);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Apply limit and offset
+        if let Some(offset) = filter.offset {
+            if offset < results.len() {
+                results = results.into_iter().skip(offset).collect();
+            } else {
+                results.clear();
+            }
+        }
+
+        if let Some(limit) = filter.limit {
+            results.truncate(limit);
+        }
+
+        Ok(results)
     }
 
-    async fn delete_payload(&self, _event_id: &EventId) -> Result<(), BlobStorageError> {
-        // TODO: Implement in Phase 2
-        unimplemented!("delete_payload not yet implemented")
+    async fn delete_payload(&self, event_id: &EventId) -> Result<(), BlobStorageError> {
+        let blob_path = self.get_blob_path(event_id);
+
+        if !blob_path.exists() {
+            return Err(BlobStorageError::BlobNotFound {
+                event_id: event_id.clone(),
+            });
+        }
+
+        fs::remove_file(&blob_path)
+            .await
+            .map_err(|e| BlobStorageError::InternalError {
+                message: format!("Failed to delete blob: {}", e),
+            })?;
+
+        Ok(())
     }
 
     async fn health_check(&self) -> Result<StorageHealthStatus, BlobStorageError> {
-        // TODO: Implement in Phase 2
-        unimplemented!("health_check not yet implemented")
+        // Check if base path is accessible
+        let accessible = self.base_path.exists() && self.base_path.is_dir();
+
+        if accessible {
+            Ok(StorageHealthStatus {
+                healthy: true,
+                connected: true,
+                last_success: Some(Timestamp::now()),
+                error_message: None,
+                metrics: StorageMetrics {
+                    avg_write_latency_ms: 0.0,
+                    avg_read_latency_ms: 0.0,
+                    success_rate: 1.0,
+                },
+            })
+        } else {
+            Ok(StorageHealthStatus {
+                healthy: false,
+                connected: false,
+                last_success: None,
+                error_message: Some("Base path not accessible".to_string()),
+                metrics: StorageMetrics {
+                    avg_write_latency_ms: 0.0,
+                    avg_read_latency_ms: 0.0,
+                    success_rate: 0.0,
+                },
+            })
+        }
     }
 }
 
