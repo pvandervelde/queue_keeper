@@ -8,6 +8,7 @@ use crate::{EventId, Repository, Timestamp};
 use async_trait::async_trait;
 use bytes::Bytes;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -29,6 +30,64 @@ mod bytes_serde {
         let vec: Vec<u8> = serde::Deserialize::deserialize(deserializer)?;
         Ok(Bytes::from(vec))
     }
+}
+
+// ============================================================================
+// Utility Functions
+// ============================================================================
+
+/// Compute SHA-256 checksum of data
+///
+/// Returns hex-encoded checksum string for tamper detection.
+///
+/// # Examples
+///
+/// ```
+/// use queue_keeper_core::blob_storage::compute_checksum;
+/// use bytes::Bytes;
+///
+/// let data = Bytes::from("test data");
+/// let checksum = compute_checksum(&data);
+/// assert_eq!(checksum.len(), 64); // SHA-256 hex is 64 characters
+/// ```
+pub fn compute_checksum(data: &Bytes) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    let result = hasher.finalize();
+    hex::encode(result)
+}
+
+/// Verify checksum matches expected value
+///
+/// Performs constant-time comparison to prevent timing attacks.
+///
+/// # Examples
+///
+/// ```
+/// use queue_keeper_core::blob_storage::{compute_checksum, verify_checksum};
+/// use bytes::Bytes;
+///
+/// let data = Bytes::from("test data");
+/// let checksum = compute_checksum(&data);
+/// assert!(verify_checksum(&data, &checksum));
+/// ```
+pub fn verify_checksum(data: &Bytes, expected_checksum: &str) -> bool {
+    let actual_checksum = compute_checksum(data);
+    // Use constant-time comparison to prevent timing attacks
+    constant_time_eq(actual_checksum.as_bytes(), expected_checksum.as_bytes())
+}
+
+/// Constant-time string comparison to prevent timing attacks
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+
+    let mut result = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        result |= x ^ y;
+    }
+    result == 0
 }
 
 // ============================================================================
@@ -246,6 +305,9 @@ pub struct BlobMetadata {
     /// When blob was created
     pub created_at: Timestamp,
 
+    /// SHA-256 checksum of the stored payload (hex-encoded)
+    pub checksum_sha256: String,
+
     /// Payload metadata
     pub metadata: PayloadMetadata,
 }
@@ -360,6 +422,14 @@ pub enum BlobStorageError {
     #[error("Network timeout: {timeout_ms}ms")]
     Timeout { timeout_ms: u64 },
 
+    /// Checksum mismatch detected (tampered data)
+    #[error("Checksum mismatch for {path}: expected {expected}, got {actual}")]
+    ChecksumMismatch {
+        path: String,
+        expected: String,
+        actual: String,
+    },
+
     /// Internal storage error
     #[error("Internal storage error: {message}")]
     InternalError { message: String },
@@ -383,6 +453,14 @@ impl BlobStorageError {
             self,
             Self::ConnectionFailed { .. } | Self::Timeout { .. } | Self::InternalError { .. }
         )
+    }
+
+    /// Check if error indicates data corruption or tampering
+    ///
+    /// Returns true for errors that indicate the stored data has been modified
+    /// or corrupted. These errors require investigation and should not be retried.
+    pub fn is_corrupted(&self) -> bool {
+        matches!(self, Self::ChecksumMismatch { .. })
     }
 }
 

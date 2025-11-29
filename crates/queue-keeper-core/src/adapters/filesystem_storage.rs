@@ -75,24 +75,39 @@ impl BlobStorage for FilesystemBlobStorage {
                 })?;
         }
 
-        // Create full metadata before serialization
+        // Create temporary metadata for initial serialization
         let created_at = Timestamp::now();
-        let blob_metadata = BlobMetadata {
+        let temp_metadata = BlobMetadata {
             event_id: event_id.clone(),
             blob_path: event_id.to_blob_path(),
             size_bytes: 0, // Will be updated after writing
             content_type: "application/json".to_string(),
             created_at: created_at.clone(),
+            checksum_sha256: String::new(), // Temporary placeholder
             metadata: payload.metadata.clone(),
         };
 
-        let stored_webhook = StoredWebhook {
-            metadata: blob_metadata,
+        let temp_webhook = StoredWebhook {
+            metadata: temp_metadata,
             payload: payload.clone(),
         };
 
-        // Serialize complete webhook to JSON
-        let json = serde_json::to_string_pretty(&stored_webhook).map_err(|e| {
+        // Compute checksum of the payload body (not the entire serialized JSON)
+        let checksum = crate::blob_storage::compute_checksum(&payload.body);
+
+        // Create final metadata with checksum
+        let final_metadata = BlobMetadata {
+            checksum_sha256: checksum.clone(),
+            ..temp_webhook.metadata
+        };
+
+        let final_webhook = StoredWebhook {
+            metadata: final_metadata,
+            payload: payload.clone(),
+        };
+
+        // Final serialization with correct checksum
+        let json = serde_json::to_string_pretty(&final_webhook).map_err(|e| {
             BlobStorageError::SerializationFailed {
                 message: format!("Failed to serialize payload: {}", e),
             }
@@ -140,6 +155,7 @@ impl BlobStorage for FilesystemBlobStorage {
             size_bytes: file_metadata.len(),
             content_type: "application/json".to_string(),
             created_at,
+            checksum_sha256: checksum,
             metadata: payload.metadata.clone(),
         })
     }
@@ -168,6 +184,19 @@ impl BlobStorage for FilesystemBlobStorage {
             serde_json::from_str(&json).map_err(|e| BlobStorageError::SerializationFailed {
                 message: format!("Failed to deserialize payload: {}", e),
             })?;
+
+        // Verify checksum against the payload body (not the entire JSON)
+        let computed_checksum = crate::blob_storage::compute_checksum(&stored.payload.body);
+        if !crate::blob_storage::verify_checksum(
+            &stored.payload.body,
+            &stored.metadata.checksum_sha256,
+        ) {
+            return Err(BlobStorageError::ChecksumMismatch {
+                path: blob_path.display().to_string(),
+                expected: stored.metadata.checksum_sha256.clone(),
+                actual: computed_checksum,
+            });
+        }
 
         Ok(Some(stored))
     }

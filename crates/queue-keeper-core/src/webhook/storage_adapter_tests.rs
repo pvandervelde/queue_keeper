@@ -62,6 +62,7 @@ impl BlobStorage for MockBlobStorage {
             size_bytes: payload.body.len() as u64,
             content_type: "application/json".to_string(),
             created_at: Timestamp::now(),
+            checksum_sha256: "mock-checksum".to_string(),
             metadata: payload.metadata.clone(),
         })
     }
@@ -83,11 +84,12 @@ impl BlobStorage for MockBlobStorage {
             .get(event_id)
             .map(|payload| StoredWebhook {
                 metadata: BlobMetadata {
-                    event_id: payload.metadata.event_id,
+                    event_id: *event_id,
                     blob_path: format!("webhook-payloads/test/{}.json", event_id),
                     size_bytes: payload.body.len() as u64,
                     content_type: "application/json".to_string(),
                     created_at: Timestamp::now(),
+                    checksum_sha256: "mock-checksum".to_string(),
                     metadata: payload.metadata.clone(),
                 },
                 payload: payload.clone(),
@@ -110,11 +112,12 @@ impl BlobStorage for MockBlobStorage {
             .unwrap()
             .iter()
             .map(|(event_id, payload)| BlobMetadata {
-                event_id: payload.metadata.event_id,
+                event_id: *event_id,
                 blob_path: format!("webhook-payloads/test/{}.json", event_id),
                 size_bytes: payload.body.len() as u64,
                 content_type: "application/json".to_string(),
                 created_at: Timestamp::now(),
+                checksum_sha256: "mock-checksum".to_string(),
                 metadata: payload.metadata.clone(),
             })
             .collect())

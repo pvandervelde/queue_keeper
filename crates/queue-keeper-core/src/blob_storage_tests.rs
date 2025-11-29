@@ -35,6 +35,7 @@ fn test_blob_metadata_creation() {
         size_bytes: 1024,
         content_type: "application/json".to_string(),
         created_at: Timestamp::now(),
+        checksum_sha256: "test-checksum".to_string(),
         metadata: PayloadMetadata {
             event_id: event_id.clone(),
             event_type: "issues".to_string(),
@@ -72,6 +73,7 @@ fn test_stored_webhook_structure() {
             size_bytes: 2,
             content_type: "application/json".to_string(),
             created_at: Timestamp::now(),
+            checksum_sha256: "test-checksum".to_string(),
             metadata: payload.metadata.clone(),
         },
         payload: payload.clone(),
@@ -342,6 +344,7 @@ fn test_blob_metadata_serialization() {
         size_bytes: 2048,
         content_type: "application/json".to_string(),
         created_at: Timestamp::now(),
+        checksum_sha256: "test-checksum".to_string(),
         metadata: PayloadMetadata {
             event_id: event_id.clone(),
             event_type: "pull_request".to_string(),
@@ -384,6 +387,7 @@ fn test_stored_webhook_serialization() {
             size_bytes: 2,
             content_type: "application/json".to_string(),
             created_at: Timestamp::now(),
+            checksum_sha256: "test-checksum".to_string(),
             metadata: payload.metadata.clone(),
         },
         payload: payload.clone(),
