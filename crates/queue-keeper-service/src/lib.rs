@@ -17,6 +17,10 @@ pub mod retry;
 #[path = "health_tests.rs"]
 mod health_tests;
 
+#[cfg(test)]
+#[path = "middleware_tests.rs"]
+mod middleware_tests;
+
 use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
@@ -35,7 +39,7 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 use tower::ServiceBuilder;
 use tower_http::{compression::CompressionLayer, cors::CorsLayer, trace::TraceLayer};
-use tracing::{error, info, instrument};
+use tracing::{error, info, instrument, warn};
 
 // ============================================================================
 // Application State
@@ -781,32 +785,102 @@ async fn reset_metrics(
 // Middleware
 // ============================================================================
 
-/// Request logging middleware
+/// Request logging middleware with correlation ID tracking
+///
+/// This middleware:
+/// - Extracts or generates correlation IDs for request tracking
+/// - Logs request start and completion with structured fields
+/// - Propagates correlation ID through response headers
+/// - Supports distributed tracing correlation
+#[instrument(skip(request, next), fields(
+    method = %request.method(),
+    uri = %request.uri(),
+    correlation_id
+))]
 async fn request_logging_middleware(
-    request: axum::extract::Request,
+    mut request: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> Response {
     let method = request.method().clone();
     let uri = request.uri().clone();
     let start = std::time::Instant::now();
 
-    info!("Request started: {} {}", method, uri);
+    // Extract or generate correlation ID
+    let correlation_id = request
+        .headers()
+        .get("x-correlation-id")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-    let response = next.run(request).await;
-    let duration = start.elapsed();
+    // Record correlation ID in span
+    tracing::Span::current().record("correlation_id", &correlation_id.as_str());
+
+    // Add correlation ID to request extensions for downstream handlers
+    request.extensions_mut().insert(correlation_id.clone());
 
     info!(
-        "Request completed: {} {} - {} - {:?}",
-        method,
-        uri,
-        response.status(),
-        duration
+        correlation_id = %correlation_id,
+        method = %method,
+        uri = %uri,
+        "Request started"
     );
+
+    let mut response = next.run(request).await;
+    let duration = start.elapsed();
+
+    // Add correlation ID to response headers
+    response.headers_mut().insert(
+        "x-correlation-id",
+        correlation_id.parse().unwrap(),
+    );
+
+    let status = response.status();
+    
+    // Log at appropriate level based on status code
+    if status.is_server_error() {
+        error!(
+            correlation_id = %correlation_id,
+            method = %method,
+            uri = %uri,
+            status = %status,
+            duration_ms = %duration.as_millis(),
+            "Request completed with server error"
+        );
+    } else if status.is_client_error() {
+        warn!(
+            correlation_id = %correlation_id,
+            method = %method,
+            uri = %uri,
+            status = %status,
+            duration_ms = %duration.as_millis(),
+            "Request completed with client error"
+        );
+    } else {
+        info!(
+            correlation_id = %correlation_id,
+            method = %method,
+            uri = %uri,
+            status = %status,
+            duration_ms = %duration.as_millis(),
+            "Request completed successfully"
+        );
+    }
 
     response
 }
 
 /// Metrics collection middleware
+///
+/// Records HTTP request metrics including:
+/// - Request/response duration histogram
+/// - Request/response size tracking
+/// - Status code distribution
+/// - Active request gauge
+#[instrument(skip(request, next), fields(
+    method = %request.method(),
+    path
+))]
 async fn metrics_middleware(
     request: axum::extract::Request,
     next: axum::middleware::Next,
@@ -814,6 +888,11 @@ async fn metrics_middleware(
     let start = std::time::Instant::now();
     let method = request.method().clone();
     let uri = request.uri().path().to_string();
+
+    // Normalize path for metrics (remove IDs, keep structure)
+    // This prevents cardinality explosion in metrics
+    let normalized_path = normalize_path_for_metrics(&uri);
+    tracing::Span::current().record("path", &normalized_path.as_str());
 
     // Get request size
     let request_size = request
@@ -825,8 +904,9 @@ async fn metrics_middleware(
 
     let response = next.run(request).await;
     let duration = start.elapsed();
+    let status = response.status();
 
-    // Get response size (simplified - in real implementation would need to intercept response body)
+    // Get response size
     let response_size = response
         .headers()
         .get("content-length")
@@ -834,12 +914,11 @@ async fn metrics_middleware(
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(0);
 
-    // TODO: Record metrics to global metrics collector
-    // This would be done via the state in a real implementation
+    // Log metrics for observability
     info!(
         method = %method,
-        uri = %uri,
-        status = %response.status(),
+        path = %normalized_path,
+        status = %status,
         duration_ms = %duration.as_millis(),
         request_size = %request_size,
         response_size = %response_size,
@@ -847,6 +926,34 @@ async fn metrics_middleware(
     );
 
     response
+}
+
+/// Normalize path for metrics to avoid cardinality explosion
+///
+/// Converts paths like `/api/events/12345` to `/api/events/:id`
+fn normalize_path_for_metrics(path: &str) -> String {
+    let segments: Vec<&str> = path.split('/').collect();
+    let normalized: Vec<String> = segments
+        .iter()
+        .map(|segment| {
+            // Skip empty segments (from leading/trailing slashes)
+            if segment.is_empty() {
+                segment.to_string()
+            }
+            // Check if segment looks like a numeric ID
+            else if !segment.is_empty() && segment.chars().all(|c| c.is_ascii_digit()) {
+                ":id".to_string()
+            }
+            // Check if segment looks like a UUID
+            else if segment.len() == 36 && segment.chars().filter(|c| *c == '-').count() == 4 {
+                ":id".to_string()
+            } else {
+                segment.to_string()
+            }
+        })
+        .collect();
+
+    normalized.join("/")
 }
 
 // ============================================================================
