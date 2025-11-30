@@ -21,6 +21,10 @@ mod health_tests;
 #[path = "middleware_tests.rs"]
 mod middleware_tests;
 
+#[cfg(test)]
+#[path = "shutdown_tests.rs"]
+mod shutdown_tests;
+
 use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
@@ -131,6 +135,9 @@ pub struct ServerConfig {
     /// Request timeout in seconds
     pub timeout_seconds: u64,
 
+    /// Graceful shutdown timeout in seconds
+    pub shutdown_timeout_seconds: u64,
+
     /// Maximum request size in bytes
     pub max_body_size: usize,
 
@@ -147,6 +154,7 @@ impl Default for ServerConfig {
             host: "0.0.0.0".to_string(),
             port: 8080,
             timeout_seconds: 30,
+            shutdown_timeout_seconds: 30,
             max_body_size: 10 * 1024 * 1024, // 10MB
             enable_cors: true,
             enable_compression: true,
@@ -338,11 +346,45 @@ pub async fn start_server(
 
     info!("Starting HTTP server on {}", addr);
 
+    // Set up graceful shutdown signal handling
+    let shutdown_signal = async {
+        let ctrl_c = async {
+            tokio::signal::ctrl_c()
+                .await
+                .expect("Failed to install Ctrl+C signal handler");
+        };
+
+        #[cfg(unix)]
+        let terminate = async {
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .expect("Failed to install SIGTERM signal handler")
+                .recv()
+                .await;
+        };
+
+        #[cfg(not(unix))]
+        let terminate = std::future::pending::<()>();
+
+        tokio::select! {
+            _ = ctrl_c => {
+                info!("Received SIGINT (Ctrl+C), initiating graceful shutdown");
+            },
+            _ = terminate => {
+                info!("Received SIGTERM, initiating graceful shutdown");
+            },
+        }
+    };
+
+    // Start server with graceful shutdown
     axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal)
         .await
         .map_err(|e| ServiceError::ServerFailed {
             message: e.to_string(),
-        })
+        })?;
+
+    info!("HTTP server shutdown complete");
+    Ok(())
 }
 
 // ============================================================================
