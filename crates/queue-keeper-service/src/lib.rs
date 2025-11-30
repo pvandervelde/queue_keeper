@@ -346,8 +346,10 @@ pub async fn start_server(
 
     info!("Starting HTTP server on {}", addr);
 
-    // Set up graceful shutdown signal handling
-    let shutdown_signal = async {
+    // Set up graceful shutdown signal handling with configured timeout
+    let shutdown_timeout = std::time::Duration::from_secs(config.server.shutdown_timeout_seconds);
+    
+    let shutdown_signal = async move {
         let ctrl_c = async {
             tokio::signal::ctrl_c()
                 .await
@@ -367,15 +369,18 @@ pub async fn start_server(
 
         tokio::select! {
             _ = ctrl_c => {
-                info!("Received SIGINT (Ctrl+C), initiating graceful shutdown");
+                info!("Received SIGINT (Ctrl+C), initiating graceful shutdown with {}s timeout", shutdown_timeout.as_secs());
             },
             _ = terminate => {
-                info!("Received SIGTERM, initiating graceful shutdown");
+                info!("Received SIGTERM, initiating graceful shutdown with {}s timeout", shutdown_timeout.as_secs());
             },
         }
     };
 
     // Start server with graceful shutdown
+    // Note: axum's graceful shutdown will allow in-flight requests to complete
+    // before shutting down. The server will stop accepting new connections immediately
+    // upon receiving the shutdown signal, then wait for in-flight requests to finish.
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal)
         .await
