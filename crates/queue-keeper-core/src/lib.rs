@@ -43,6 +43,10 @@ pub type QueueKeeperResult<T> = Result<T, QueueKeeperError>;
 ///
 /// Uses ULID for lexicographic sorting and global uniqueness.
 /// See specs/interfaces/shared-types.md for full specification.
+///
+/// Note: Implements Copy since ULID is a fixed-size value type (128 bits).
+/// This allows EventId to be used ergonomically in collections and iterations
+/// where the underlying Ulid would normally be copied anyway.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct EventId(Ulid);
 
@@ -451,6 +455,11 @@ impl Timestamp {
     /// Create timestamp for current moment
     pub fn now() -> Self {
         Self(Utc::now())
+    }
+
+    /// Create timestamp from DateTime
+    pub fn from_datetime(dt: DateTime<Utc>) -> Self {
+        Self(dt)
     }
 
     /// Parse timestamp from RFC3339 string

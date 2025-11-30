@@ -497,9 +497,21 @@ impl EventId {
     }
 
     /// Extract timestamp from ULID for path generation
+    ///
+    /// ULIDs encode milliseconds since Unix epoch in the first 48 bits,
+    /// allowing accurate time-based partitioning of stored payloads.
     fn timestamp(&self) -> Timestamp {
-        // ULID contains milliseconds since Unix epoch in first 48 bits
-        Timestamp::now() // TODO: Extract actual timestamp from ULID
+        // Extract milliseconds from ULID (first 48 bits)
+        let ms = self.0.timestamp_ms();
+
+        // Convert milliseconds to DateTime<Utc>
+        let secs = (ms / 1000) as i64;
+        let nanos = ((ms % 1000) * 1_000_000) as u32;
+
+        match chrono::DateTime::from_timestamp(secs, nanos) {
+            Some(dt) => Timestamp::from_datetime(dt),
+            None => Timestamp::now(), // Fallback to current time if conversion fails
+        }
     }
 }
 
