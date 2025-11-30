@@ -13,6 +13,10 @@
 // Public modules
 pub mod retry;
 
+#[cfg(test)]
+#[path = "health_tests.rs"]
+mod health_tests;
+
 use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
@@ -1186,21 +1190,60 @@ pub struct DefaultHealthChecker;
 #[async_trait::async_trait]
 impl HealthChecker for DefaultHealthChecker {
     async fn check_basic_health(&self) -> HealthStatus {
-        // TODO: Implement basic health check
-        // See specs/interfaces/http-service.md
-        unimplemented!("Basic health check not yet implemented")
+        let start = std::time::Instant::now();
+        let mut checks = HashMap::new();
+
+        // Basic service check - if we can respond, we're alive
+        checks.insert(
+            "service".to_string(),
+            HealthCheckResult {
+                healthy: true,
+                message: "Service is running".to_string(),
+                duration_ms: start.elapsed().as_millis() as u64,
+            },
+        );
+
+        HealthStatus {
+            is_healthy: true,
+            checks,
+        }
     }
 
     async fn check_deep_health(&self) -> HealthStatus {
-        // TODO: Implement deep health check
-        // See specs/interfaces/http-service.md
-        unimplemented!("Deep health check not yet implemented")
+        let start = std::time::Instant::now();
+        let mut checks = HashMap::new();
+        let overall_healthy = true;
+
+        // Service check
+        checks.insert(
+            "service".to_string(),
+            HealthCheckResult {
+                healthy: true,
+                message: "Service is running".to_string(),
+                duration_ms: start.elapsed().as_millis() as u64,
+            },
+        );
+
+        // TODO: Add dependency checks when integrated:
+        // - Queue provider connectivity
+        // - Blob storage accessibility
+        // - Key vault connectivity
+        // For now, deep health is same as basic health
+
+        HealthStatus {
+            is_healthy: overall_healthy,
+            checks,
+        }
     }
 
     async fn check_readiness(&self) -> bool {
-        // TODO: Implement readiness check
-        // See specs/interfaces/http-service.md
-        unimplemented!("Readiness check not yet implemented")
+        // Readiness check - service is ready to accept traffic
+        // For now, if the service is running, it's ready
+        // TODO: Add checks for:
+        // - Configuration loaded successfully
+        // - Required dependencies initialized
+        // - No circuit breakers open
+        true
     }
 }
 

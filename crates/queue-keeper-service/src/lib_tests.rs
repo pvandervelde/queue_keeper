@@ -57,7 +57,7 @@ fn test_config_defaults() {
 
 /// Mock webhook processor for testing immediate response behavior
 #[derive(Clone)]
-struct MockWebhookProcessor {
+pub(crate) struct MockWebhookProcessor {
     process_calls: Arc<Mutex<Vec<WebhookRequest>>>,
     process_result_factory:
         Arc<Mutex<Box<dyn Fn() -> Result<EventEnvelope, WebhookError> + Send + Sync>>>,
@@ -65,7 +65,7 @@ struct MockWebhookProcessor {
 }
 
 impl MockWebhookProcessor {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let default_envelope = EventEnvelope {
             event_id: EventId::new(),
             event_type: "pull_request".to_string(),
