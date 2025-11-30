@@ -854,6 +854,10 @@ impl WebhookProcessor for WebhookProcessorImpl {
 /// Provided for backward compatibility with existing code.
 pub type DefaultWebhookProcessor = WebhookProcessorImpl;
 
+// Storage adapter
+mod storage_adapter;
+pub use storage_adapter::BlobStorageAdapter;
+
 #[cfg(test)]
 #[path = "mod_tests.rs"]
 mod tests;

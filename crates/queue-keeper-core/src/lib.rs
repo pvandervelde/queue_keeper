@@ -22,7 +22,7 @@
 //! let session_id = SessionId::from_parts("owner", "repo", "pull_request", "123");
 //! ```
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Datelike, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
@@ -43,7 +43,11 @@ pub type QueueKeeperResult<T> = Result<T, QueueKeeperError>;
 ///
 /// Uses ULID for lexicographic sorting and global uniqueness.
 /// See specs/interfaces/shared-types.md for full specification.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+///
+/// Note: Implements Copy since ULID is a fixed-size value type (128 bits).
+/// This allows EventId to be used ergonomically in collections and iterations
+/// where the underlying Ulid would normally be copied anyway.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct EventId(Ulid);
 
 impl EventId {
@@ -453,6 +457,11 @@ impl Timestamp {
         Self(Utc::now())
     }
 
+    /// Create timestamp from DateTime
+    pub fn from_datetime(dt: DateTime<Utc>) -> Self {
+        Self(dt)
+    }
+
     /// Parse timestamp from RFC3339 string
     pub fn from_rfc3339(s: &str) -> Result<Self, ParseError> {
         let dt = DateTime::parse_from_rfc3339(s)
@@ -484,6 +493,26 @@ impl Timestamp {
     pub fn subtract_duration(&self, duration: Duration) -> Self {
         let chrono_duration = chrono::Duration::from_std(duration).unwrap_or_default();
         Self(self.0 - chrono_duration)
+    }
+
+    /// Get year component
+    pub fn year(&self) -> i32 {
+        self.0.year()
+    }
+
+    /// Get month component (1-12)
+    pub fn month(&self) -> u32 {
+        self.0.month()
+    }
+
+    /// Get day component (1-31)
+    pub fn day(&self) -> u32 {
+        self.0.day()
+    }
+
+    /// Get hour component (0-23)
+    pub fn hour(&self) -> u32 {
+        self.0.hour()
     }
 
     /// Get duration since another timestamp
@@ -834,10 +863,21 @@ pub mod audit_logging;
 /// Queue integration module for event routing
 pub mod queue_integration;
 
+/// Blob storage module for webhook payload persistence
+pub mod blob_storage;
+
+/// Storage adapters module for infrastructure implementations
+pub mod adapters;
+
 // Re-export key types for convenience
+pub use adapters::FilesystemBlobStorage;
 pub use audit_logging::{
     AuditActor, AuditContext, AuditError, AuditEvent, AuditEventType, AuditLogId, AuditLogger,
     AuditQuery, AuditResource, AuditResult, SecurityAuditEvent, WebhookProcessingAction,
+};
+pub use blob_storage::{
+    BlobMetadata, BlobStorage, BlobStorageError, DateRange, PayloadFilter, PayloadMetadata,
+    StorageHealthStatus, StorageMetrics, StoredWebhook, WebhookPayload,
 };
 pub use bot_config::{
     BotConfigError, BotConfiguration, BotConfigurationProvider, BotSubscription,
