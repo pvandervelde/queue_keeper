@@ -3232,6 +3232,7 @@ dependencies = [
  "opentelemetry-otlp",
  "prometheus",
  "queue-keeper-core",
+ "rand 0.8.5",
  "reqwest",
  "serde",
  "serde_json",

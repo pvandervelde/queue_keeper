@@ -342,6 +342,15 @@ pub async fn start_server(
 // ============================================================================
 
 /// Handle GitHub webhook requests
+///
+/// This handler implements the immediate response pattern to meet GitHub's 10-second timeout:
+/// 1. Parse and validate webhook headers (fast path)
+/// 2. Process webhook through processor (validation + normalization + blob storage - fast)
+/// 3. Return HTTP 200 OK immediately (target <500ms)
+/// 4. Queue delivery with retry happens asynchronously (TODO: implement when EventRouter is integrated)
+///
+/// This ensures GitHub receives a response within the timeout while allowing
+/// queue delivery to proceed in the background with proper retry logic.
 #[instrument(skip(state, headers, body))]
 async fn handle_webhook(
     State(state): State<AppState>,
@@ -368,7 +377,8 @@ async fn handle_webhook(
     // Create webhook request
     let webhook_request = WebhookRequest::new(webhook_headers, body);
 
-    // Process webhook through processor
+    // Process webhook through processor (validation + normalization + storage)
+    // This is the "fast path" - must complete within ~500ms
     let event_envelope = state
         .webhook_processor
         .process_webhook(webhook_request)
@@ -380,9 +390,50 @@ async fn handle_webhook(
         event_type = %event_envelope.event_type,
         repository = %event_envelope.repository.full_name,
         session_id = %event_envelope.session_id,
-        "Successfully processed webhook"
+        "Successfully processed webhook - returning immediate response"
     );
 
+    // TODO: Task 16.6 - Spawn async task for queue delivery with retry loop
+    // This will be implemented when EventRouter is integrated into AppState:
+    //
+    // tokio::spawn(async move {
+    //     let retry_policy = retry::RetryPolicy::default();
+    //     let mut retry_state = retry::RetryState::new();
+    //     
+    //     loop {
+    //         match event_router.route_event(&event_envelope, &bot_config, &queue_client).await {
+    //             Ok(delivery_result) if delivery_result.is_complete_success() => {
+    //                 info!("Successfully delivered event to all queues");
+    //                 break;
+    //             }
+    //             Ok(delivery_result) if !delivery_result.failed.is_empty() => {
+    //                 // Partial failure - retry only failed queues
+    //                 if retry_state.can_retry(&retry_policy) {
+    //                     let delay = retry_state.get_delay(&retry_policy);
+    //                     tokio::time::sleep(delay).await;
+    //                     retry_state.next_attempt();
+    //                     continue;
+    //                 } else {
+    //                     // Max retries exceeded - persist to DLQ
+    //                     persist_to_dlq(&event_envelope, &delivery_result).await;
+    //                     break;
+    //                 }
+    //             }
+    //             Err(error) if error.is_transient() && retry_state.can_retry(&retry_policy) => {
+    //                 let delay = retry_state.get_delay(&retry_policy);
+    //                 tokio::time::sleep(delay).await;
+    //                 retry_state.next_attempt();
+    //             }
+    //             Err(error) => {
+    //                 // Permanent error or max retries exceeded - persist to DLQ
+    //                 persist_to_dlq_with_error(&event_envelope, &error).await;
+    //                 break;
+    //             }
+    //         }
+    //     }
+    // });
+
+    // Return immediate response to GitHub (within 10-second timeout)
     Ok(Json(WebhookResponse {
         event_id: event_envelope.event_id,
         session_id: event_envelope.session_id,
@@ -1336,60 +1387,104 @@ impl ServiceMetrics {
 
 impl Default for ServiceMetrics {
     fn default() -> Self {
-        // This is not safe for production - should handle errors properly
-        // For now, we'll create a stub implementation
+        // This is a stub implementation for testing
+        // In production, use ServiceMetrics::new() instead
         use prometheus::{
             register_gauge, register_histogram, register_int_counter, register_int_gauge,
         };
 
+        // Use unique names with timestamp to avoid registration conflicts in tests
+        let suffix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
         Self {
-            http_requests_total: register_int_counter!("http_requests_total_default", "").unwrap(),
+            http_requests_total: register_int_counter!(
+                format!("http_requests_total_test_{}", suffix),
+                "Test HTTP requests"
+            )
+            .unwrap(),
             http_request_duration: register_histogram!(
-                "http_request_duration_seconds_default",
-                "",
+                format!("http_request_duration_seconds_test_{}", suffix),
+                "Test HTTP duration",
                 vec![]
             )
             .unwrap(),
-            http_request_size: register_histogram!("http_request_size_bytes_default", "", vec![])
-                .unwrap(),
-            http_response_size: register_histogram!("http_response_size_bytes_default", "", vec![])
-                .unwrap(),
-            webhook_requests_total: register_int_counter!("webhook_requests_total_default", "")
-                .unwrap(),
+            http_request_size: register_histogram!(
+                format!("http_request_size_bytes_test_{}", suffix),
+                "Test HTTP request size",
+                vec![]
+            )
+            .unwrap(),
+            http_response_size: register_histogram!(
+                format!("http_response_size_bytes_test_{}", suffix),
+                "Test HTTP response size",
+                vec![]
+            )
+            .unwrap(),
+            webhook_requests_total: register_int_counter!(
+                format!("webhook_requests_total_test_{}", suffix),
+                "Test webhook requests"
+            )
+            .unwrap(),
             webhook_duration_seconds: register_histogram!(
-                "webhook_duration_seconds_default",
-                "",
+                format!("webhook_duration_seconds_test_{}", suffix),
+                "Test webhook duration",
                 vec![]
             )
             .unwrap(),
             webhook_validation_failures: register_int_counter!(
-                "webhook_validation_failures_default",
-                ""
+                format!("webhook_validation_failures_test_{}", suffix),
+                "Test webhook validation failures"
             )
             .unwrap(),
             webhook_queue_routing_duration: register_histogram!(
-                "webhook_queue_routing_duration_seconds_default",
-                "",
+                format!("webhook_queue_routing_duration_seconds_test_{}", suffix),
+                "Test webhook queue routing duration",
                 vec![]
             )
             .unwrap(),
-            queue_depth_messages: register_int_gauge!("queue_depth_messages_default", "").unwrap(),
-            queue_processing_rate: register_gauge!("queue_processing_rate_default", "").unwrap(),
-            dead_letter_queue_depth: register_int_gauge!("dead_letter_queue_depth_default", "")
-                .unwrap(),
-            session_ordering_violations: register_int_counter!(
-                "session_ordering_violations_default",
-                ""
+            queue_depth_messages: register_int_gauge!(
+                format!("queue_depth_messages_test_{}", suffix),
+                "Test queue depth"
             )
             .unwrap(),
-            error_rate_by_category: register_int_counter!("error_rate_by_category_default", "")
-                .unwrap(),
-            circuit_breaker_state: register_int_gauge!("circuit_breaker_state_default", "")
-                .unwrap(),
-            retry_attempts_total: register_int_counter!("retry_attempts_total_default", "")
-                .unwrap(),
-            blob_storage_failures: register_int_counter!("blob_storage_failures_default", "")
-                .unwrap(),
+            queue_processing_rate: register_gauge!(
+                format!("queue_processing_rate_test_{}", suffix),
+                "Test queue processing rate"
+            )
+            .unwrap(),
+            dead_letter_queue_depth: register_int_gauge!(
+                format!("dead_letter_queue_depth_test_{}", suffix),
+                "Test DLQ depth"
+            )
+            .unwrap(),
+            session_ordering_violations: register_int_counter!(
+                format!("session_ordering_violations_test_{}", suffix),
+                "Test session ordering violations"
+            )
+            .unwrap(),
+            error_rate_by_category: register_int_counter!(
+                format!("error_rate_by_category_test_{}", suffix),
+                "Test error rate"
+            )
+            .unwrap(),
+            circuit_breaker_state: register_int_gauge!(
+                format!("circuit_breaker_state_test_{}", suffix),
+                "Test circuit breaker state"
+            )
+            .unwrap(),
+            retry_attempts_total: register_int_counter!(
+                format!("retry_attempts_total_test_{}", suffix),
+                "Test retry attempts"
+            )
+            .unwrap(),
+            blob_storage_failures: register_int_counter!(
+                format!("blob_storage_failures_test_{}", suffix),
+                "Test blob storage failures"
+            )
+            .unwrap(),
         }
     }
 }

@@ -59,7 +59,8 @@ fn test_config_defaults() {
 #[derive(Clone)]
 struct MockWebhookProcessor {
     process_calls: Arc<Mutex<Vec<WebhookRequest>>>,
-    process_result: Arc<Mutex<Result<EventEnvelope, String>>>,
+    process_result_factory:
+        Arc<Mutex<Box<dyn Fn() -> Result<EventEnvelope, WebhookError> + Send + Sync>>>,
     process_delay: Arc<Mutex<Option<Duration>>>,
 }
 
@@ -90,17 +91,21 @@ impl MockWebhookProcessor {
 
         Self {
             process_calls: Arc::new(Mutex::new(Vec::new())),
-            process_result: Arc::new(Mutex::new(Ok(default_envelope))),
+            process_result_factory: Arc::new(Mutex::new(Box::new(move || {
+                Ok(default_envelope.clone())
+            }))),
             process_delay: Arc::new(Mutex::new(None)),
         }
     }
 
-    fn set_result(&self, result: Result<EventEnvelope, String>) {
-        *self.process_result.lock().unwrap() = result;
+    fn set_result(&self, result: EventEnvelope) {
+        let r = result.clone();
+        *self.process_result_factory.lock().unwrap() = Box::new(move || Ok(r.clone()));
     }
 
-    fn set_error(&self, error: &str) {
-        *self.process_result.lock().unwrap() = Err(error.to_string());
+    fn set_error(&self, error_msg: String) {
+        *self.process_result_factory.lock().unwrap() =
+            Box::new(move || Err(WebhookError::InvalidSignature(error_msg.clone())));
     }
 
     fn set_delay(&self, delay: Duration) {
@@ -131,12 +136,8 @@ impl WebhookProcessor for MockWebhookProcessor {
             sleep(delay).await;
         }
 
-        // Return configured result
-        self.process_result
-            .lock()
-            .unwrap()
-            .clone()
-            .map_err(|e| WebhookError::MalformedPayload { message: e })
+        // Return configured result by calling factory
+        (self.process_result_factory.lock().unwrap())()
     }
 
     async fn validate_signature(
@@ -167,8 +168,10 @@ impl WebhookProcessor for MockWebhookProcessor {
         &self,
         _request: &WebhookRequest,
     ) -> Result<EventEnvelope, queue_keeper_core::webhook::NormalizationError> {
-        self.process_result.lock().unwrap().clone().map_err(|e| {
-            queue_keeper_core::webhook::NormalizationError::MissingRequiredField { field: e }
+        (self.process_result_factory.lock().unwrap())().map_err(|e| {
+            queue_keeper_core::webhook::NormalizationError::MissingRequiredField {
+                field: e.to_string(),
+            }
         })
     }
 }
@@ -223,7 +226,7 @@ async fn test_handle_webhook_returns_immediately_after_processing() {
 async fn test_handle_webhook_returns_error_on_validation_failure() {
     // Arrange: Configure processor to return validation error
     let processor = MockWebhookProcessor::new();
-    processor.set_error("Invalid signature");
+    processor.set_error("Invalid signature".to_string());
 
     let state = create_test_app_state_with_processor(Arc::new(processor));
 
@@ -351,6 +354,8 @@ fn create_test_app_state_with_processor(processor: Arc<dyn WebhookProcessor>) ->
     let config = ServiceConfig::default();
     let health_checker = Arc::new(DefaultHealthChecker);
     let event_store = Arc::new(DefaultEventStore);
+
+    // Use Default which creates stub metrics - tests don't need real prometheus metrics
     let metrics = Arc::new(ServiceMetrics::default());
     let telemetry_config = Arc::new(TelemetryConfig::default());
 
