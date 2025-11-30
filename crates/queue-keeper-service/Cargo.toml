@@ -50,6 +50,9 @@ prometheus = { version = "0.14", features = ["process"] }
 opentelemetry = { workspace = true }
 opentelemetry-otlp = { workspace = true }
 
+# Retry logic
+rand = "=0.8.5"
+
 [dev-dependencies]
 tempfile = "=3.23.0"
 tokio-test = "=0.4.4"

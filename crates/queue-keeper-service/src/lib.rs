@@ -10,6 +10,9 @@
 //!
 //! See specs/interfaces/http-service.md for complete specification.
 
+// Public modules
+pub mod retry;
+
 use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
