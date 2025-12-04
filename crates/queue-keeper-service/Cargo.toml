@@ -52,7 +52,7 @@ opentelemetry = { workspace = true }
 opentelemetry-otlp = { workspace = true }
 
 # Retry logic
-rand = "=0.8.5"
+rand = "0.8.5"
 
 [dev-dependencies]
 tempfile = "=3.23.0"

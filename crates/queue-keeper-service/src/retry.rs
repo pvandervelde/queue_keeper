@@ -4,7 +4,6 @@
 //!
 //! Provides configurable retry policies with jitter to prevent thundering herd problems.
 
-use rand::Rng;
 use std::time::Duration;
 
 /// Retry policy configuration for exponential backoff
@@ -189,7 +188,13 @@ impl RetryPolicy {
     /// # Returns
     ///
     /// Delay with jitter applied
+    ///
+    /// # Note
+    ///
+    /// Uses `thread_rng()` which is acceptable for retry scenarios (infrequent calls).
+    /// For high-frequency random generation in async contexts, consider `SmallRng` or `fastrand`.
     fn add_jitter(delay_secs: f64, jitter_percent: f64) -> f64 {
+        use rand::Rng;
         let mut rng = rand::thread_rng();
 
         // Calculate jitter range: ±jitter_percent of delay

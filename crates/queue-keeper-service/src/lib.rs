@@ -883,9 +883,9 @@ async fn request_logging_middleware(
     let duration = start.elapsed();
 
     // Add correlation ID to response headers
-    response
-        .headers_mut()
-        .insert("x-correlation-id", correlation_id.parse().unwrap());
+    if let Ok(header_value) = correlation_id.parse() {
+        response.headers_mut().insert("x-correlation-id", header_value);
+    }
 
     let status = response.status();
 
@@ -980,6 +980,37 @@ async fn metrics_middleware(
     response
 }
 
+/// Check if a string looks like a UUID with proper 8-4-4-4-12 hyphen pattern
+///
+/// Validates UUID format by checking:
+/// - Total length is 36 characters
+/// - Hyphens are at positions 8, 13, 18, 23
+/// - All other characters are hexadecimal digits
+fn is_uuid_like(s: &str) -> bool {
+    if s.len() != 36 {
+        return false;
+    }
+
+    let chars: Vec<char> = s.chars().collect();
+
+    // Check hyphen positions: 8-4-4-4-12 pattern
+    if chars[8] != '-' || chars[13] != '-' || chars[18] != '-' || chars[23] != '-' {
+        return false;
+    }
+
+    // Check all other positions are hex digits
+    for (i, ch) in chars.iter().enumerate() {
+        if i == 8 || i == 13 || i == 18 || i == 23 {
+            continue; // Skip hyphens
+        }
+        if !ch.is_ascii_hexdigit() {
+            return false;
+        }
+    }
+
+    true
+}
+
 /// Normalize path for metrics to avoid cardinality explosion
 ///
 /// Converts paths like `/api/events/12345` to `/api/events/:id`
@@ -996,8 +1027,8 @@ fn normalize_path_for_metrics(path: &str) -> String {
             else if !segment.is_empty() && segment.chars().all(|c| c.is_ascii_digit()) {
                 ":id".to_string()
             }
-            // Check if segment looks like a UUID
-            else if segment.len() == 36 && segment.chars().filter(|c| *c == '-').count() == 4 {
+            // Check if segment looks like a UUID (8-4-4-4-12 pattern)
+            else if is_uuid_like(segment) {
                 ":id".to_string()
             } else {
                 segment.to_string()
@@ -1373,9 +1404,9 @@ impl axum::response::IntoResponse for WebhookHandlerError {
 
         // Add Retry-After header for retryable errors
         if let Some(retry_seconds) = retry_after {
-            response
-                .headers_mut()
-                .insert("Retry-After", retry_seconds.to_string().parse().unwrap());
+            if let Ok(header_value) = retry_seconds.to_string().parse() {
+                response.headers_mut().insert("Retry-After", header_value);
+            }
         }
 
         response

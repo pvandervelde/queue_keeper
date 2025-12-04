@@ -204,3 +204,32 @@ async fn test_request_path_is_normalized_for_metrics() {
     // Test root path
     assert_eq!(normalize_path_for_metrics("/"), "/");
 }
+
+#[test]
+fn test_uuid_validation() {
+    // Valid UUIDs with correct 8-4-4-4-12 pattern
+    assert!(is_uuid_like("550e8400-e29b-41d4-a716-446655440000"));
+    assert!(is_uuid_like("f47ac10b-58cc-4372-a567-0e02b2c3d479"));
+    assert!(is_uuid_like("00000000-0000-0000-0000-000000000000"));
+    assert!(is_uuid_like("ffffffff-ffff-ffff-ffff-ffffffffffff"));
+
+    // Invalid: wrong length
+    assert!(!is_uuid_like("550e8400-e29b-41d4-a716-44665544000"));
+    assert!(!is_uuid_like("550e8400-e29b-41d4-a716-4466554400000"));
+
+    // Invalid: hyphens in wrong positions
+    assert!(!is_uuid_like("550e8400e-29b-41d4-a716-446655440000"));
+    assert!(!is_uuid_like("550e8400-e29b41d4-a716-446655440000"));
+    assert!(!is_uuid_like("550e8400-e29b-41d4a716-446655440000"));
+
+    // Invalid: non-hex characters
+    assert!(!is_uuid_like("550e8400-e29g-41d4-a716-446655440000"));
+    assert!(!is_uuid_like("550e8400-e29b-41d4-z716-446655440000"));
+
+    // Invalid: wrong number of hyphens
+    assert!(!is_uuid_like("550e8400-e29b-41d4-a716446655440000"));
+    assert!(!is_uuid_like("550e8400e29b41d4a716446655440000"));
+
+    // Invalid: hyphens but wrong pattern (not 8-4-4-4-12)
+    assert!(!is_uuid_like("550e840-0e29-b41d-4a71-6446655440000"));
+}
