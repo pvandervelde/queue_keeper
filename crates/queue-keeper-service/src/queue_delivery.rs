@@ -10,9 +10,7 @@
 //! See specs/interfaces/queue-client.md for queue operations specification.
 //! See specs/constraints.md for retry and performance requirements.
 
-use crate::dlq_storage::{
-    DlqReason, DlqStorageService, FailedEventRecord, FailedQueueInfo,
-};
+use crate::dlq_storage::{DlqReason, DlqStorageService, FailedEventRecord, FailedQueueInfo};
 use crate::retry::{RetryPolicy, RetryState};
 use queue_keeper_core::{
     bot_config::BotConfiguration,

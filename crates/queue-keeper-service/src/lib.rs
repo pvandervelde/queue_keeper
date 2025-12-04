@@ -1342,7 +1342,11 @@ impl axum::response::IntoResponse for WebhookHandlerError {
                 (StatusCode::REQUEST_TIMEOUT, self.to_string(), Some(5))
             }
             Self::PayloadTooLarge { size, max_size } => {
-                warn!(payload_size = size, max_size = max_size, "Payload too large");
+                warn!(
+                    payload_size = size,
+                    max_size = max_size,
+                    "Payload too large"
+                );
                 (StatusCode::PAYLOAD_TOO_LARGE, self.to_string(), None)
             }
             Self::RateLimitExceeded {
@@ -1369,10 +1373,9 @@ impl axum::response::IntoResponse for WebhookHandlerError {
 
         // Add Retry-After header for retryable errors
         if let Some(retry_seconds) = retry_after {
-            response.headers_mut().insert(
-                "Retry-After",
-                retry_seconds.to_string().parse().unwrap(),
-            );
+            response
+                .headers_mut()
+                .insert("Retry-After", retry_seconds.to_string().parse().unwrap());
         }
 
         response
