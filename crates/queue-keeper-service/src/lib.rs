@@ -884,7 +884,9 @@ async fn request_logging_middleware(
 
     // Add correlation ID to response headers
     if let Ok(header_value) = correlation_id.parse() {
-        response.headers_mut().insert("x-correlation-id", header_value);
+        response
+            .headers_mut()
+            .insert("x-correlation-id", header_value);
     }
 
     let status = response.status();
