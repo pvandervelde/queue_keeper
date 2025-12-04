@@ -9,6 +9,7 @@ repository = "https://github.com/pvandervelde/queue_keeper"
 [dependencies]
 # Core dependencies
 queue-keeper-core = { path = "../queue-keeper-core", version = "0.1.0" }
+queue-runtime = { path = "../queue-runtime", version = "0.1.0" }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
@@ -49,6 +50,9 @@ reqwest = { workspace = true }
 prometheus = { version = "0.14", features = ["process"] }
 opentelemetry = { workspace = true }
 opentelemetry-otlp = { workspace = true }
+
+# Retry logic
+rand = "0.8.5"
 
 [dev-dependencies]
 tempfile = "=3.23.0"
