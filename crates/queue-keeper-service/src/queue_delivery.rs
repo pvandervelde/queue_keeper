@@ -10,12 +10,15 @@
 //! See specs/interfaces/queue-client.md for queue operations specification.
 //! See specs/constraints.md for retry and performance requirements.
 
+use crate::dlq_storage::{
+    DlqReason, DlqStorageService, FailedEventRecord, FailedQueueInfo,
+};
 use crate::retry::{RetryPolicy, RetryState};
 use queue_keeper_core::{
     bot_config::BotConfiguration,
-    queue_integration::{DeliveryResult, EventRouter},
+    queue_integration::{DeliveryResult, EventRouter, FailedDelivery, SuccessfulDelivery},
     webhook::EventEnvelope,
-    EventId,
+    EventId, Timestamp,
 };
 use queue_runtime::QueueClient;
 use std::sync::Arc;
@@ -35,6 +38,10 @@ pub struct QueueDeliveryConfig {
 
     /// Enable DLQ persistence for permanent failures
     pub enable_dlq: bool,
+
+    /// Optional DLQ storage service for persisting failed events
+    /// When None and enable_dlq is true, failures will be logged but not persisted
+    pub dlq_service: Option<Arc<DlqStorageService>>,
 }
 
 impl Default for QueueDeliveryConfig {
@@ -42,7 +49,16 @@ impl Default for QueueDeliveryConfig {
         Self {
             retry_policy: RetryPolicy::default(),
             enable_dlq: true,
+            dlq_service: None,
         }
+    }
+}
+
+impl QueueDeliveryConfig {
+    /// Create a new configuration with a DLQ service
+    pub fn with_dlq_service(mut self, dlq_service: Arc<DlqStorageService>) -> Self {
+        self.dlq_service = Some(dlq_service);
+        self
     }
 }
 
@@ -158,6 +174,7 @@ pub async fn deliver_event_to_queues(
 ) -> QueueDeliveryOutcome {
     let event_id = event.event_id;
     let mut retry_state = RetryState::new();
+    let first_attempt_at = Timestamp::now();
 
     loop {
         // Attempt delivery to all target queues
@@ -218,10 +235,11 @@ pub async fn deliver_event_to_queues(
 
                 // Max retries exceeded or all failures are permanent
                 return handle_final_delivery_result(
-                    event_id,
+                    &event,
                     result,
                     retry_state.total_attempts,
-                    delivery_config.enable_dlq,
+                    first_attempt_at,
+                    &delivery_config,
                 )
                 .await;
             }
@@ -252,8 +270,15 @@ pub async fn deliver_event_to_queues(
                     "Queue delivery failed permanently"
                 );
 
-                // TODO: Task 16.8 - Persist to DLQ
-                let persisted_to_dlq = false; // Will be implemented in task 16.8
+                // Persist to DLQ if enabled
+                let persisted_to_dlq = persist_routing_error_to_dlq(
+                    &event,
+                    &error.to_string(),
+                    retry_state.total_attempts,
+                    first_attempt_at,
+                    &delivery_config,
+                )
+                .await;
 
                 return QueueDeliveryOutcome::CompleteFailure {
                     event_id,
@@ -269,11 +294,13 @@ pub async fn deliver_event_to_queues(
 ///
 /// Processes remaining failures and optionally persists to DLQ.
 async fn handle_final_delivery_result(
-    event_id: EventId,
+    event: &EventEnvelope,
     result: DeliveryResult,
     total_attempts: u32,
-    enable_dlq: bool,
+    first_attempt_at: Timestamp,
+    delivery_config: &QueueDeliveryConfig,
 ) -> QueueDeliveryOutcome {
+    let event_id = event.event_id;
     let successful_count = result.successful.len();
     let failed_count = result.failed.len();
 
@@ -296,16 +323,16 @@ async fn handle_final_delivery_result(
         );
     }
 
-    // TODO: Task 16.8 - Persist failed deliveries to DLQ
-    let persisted_to_dlq = false; // Will be implemented in task 16.8
-
-    if enable_dlq && !persisted_to_dlq {
-        warn!(
-            event_id = %event_id,
-            failed_count = failed_count,
-            "DLQ persistence not yet implemented"
-        );
-    }
+    // Persist failed deliveries to DLQ
+    let persisted_to_dlq = persist_delivery_failures_to_dlq(
+        event,
+        &result.successful,
+        &result.failed,
+        total_attempts,
+        first_attempt_at,
+        delivery_config,
+    )
+    .await;
 
     if successful_count > 0 {
         warn!(
@@ -313,6 +340,7 @@ async fn handle_final_delivery_result(
             successful_count = successful_count,
             failed_count = failed_count,
             total_attempts = total_attempts,
+            persisted_to_dlq = persisted_to_dlq,
             "Partial queue delivery completed with failures"
         );
 
@@ -327,6 +355,7 @@ async fn handle_final_delivery_result(
             event_id = %event_id,
             failed_count = failed_count,
             total_attempts = total_attempts,
+            persisted_to_dlq = persisted_to_dlq,
             "Complete queue delivery failure"
         );
 
@@ -334,6 +363,152 @@ async fn handle_final_delivery_result(
             event_id,
             error: format!("All {} queue deliveries failed", failed_count),
             persisted_to_dlq,
+        }
+    }
+}
+
+/// Persist delivery failures to DLQ storage
+///
+/// Creates a FailedEventRecord and persists it to blob storage.
+async fn persist_delivery_failures_to_dlq(
+    event: &EventEnvelope,
+    successful: &[SuccessfulDelivery],
+    failed: &[FailedDelivery],
+    total_attempts: u32,
+    first_attempt_at: Timestamp,
+    delivery_config: &QueueDeliveryConfig,
+) -> bool {
+    if !delivery_config.enable_dlq {
+        return false;
+    }
+
+    let dlq_service = match &delivery_config.dlq_service {
+        Some(service) => service,
+        None => {
+            warn!(
+                event_id = %event.event_id,
+                failed_count = failed.len(),
+                "DLQ service not configured - failed events not persisted"
+            );
+            return false;
+        }
+    };
+
+    // Build failed queue info
+    let failed_queues: Vec<FailedQueueInfo> = failed
+        .iter()
+        .map(|f| FailedQueueInfo {
+            bot_name: f.bot_name.as_str().to_string(),
+            queue_name: f.queue_name.as_str().to_string(),
+            error: f.error.clone(),
+            was_transient: f.is_transient,
+        })
+        .collect();
+
+    // Build successful queue names
+    let successful_queues: Vec<String> = successful
+        .iter()
+        .map(|s| format!("{}/{}", s.bot_name.as_str(), s.queue_name.as_str()))
+        .collect();
+
+    // Determine DLQ reason
+    let reason = if successful.is_empty() {
+        DlqReason::AllQueuesFailed {
+            queue_count: failed.len(),
+        }
+    } else {
+        DlqReason::RetriesExhausted {
+            attempts: total_attempts,
+        }
+    };
+
+    // Create the failed event record
+    let record = FailedEventRecord::new(
+        event.clone(),
+        reason,
+        failed_queues,
+        successful_queues,
+        total_attempts,
+        first_attempt_at,
+    );
+
+    // Persist to DLQ
+    match dlq_service.persist_failed_event(&record).await {
+        Ok(blob_path) => {
+            info!(
+                event_id = %event.event_id,
+                blob_path = %blob_path,
+                failed_count = failed.len(),
+                "Failed event persisted to DLQ"
+            );
+            true
+        }
+        Err(e) => {
+            error!(
+                event_id = %event.event_id,
+                error = %e,
+                "Failed to persist event to DLQ - event may be lost"
+            );
+            false
+        }
+    }
+}
+
+/// Persist routing error to DLQ storage
+///
+/// Creates a FailedEventRecord for routing errors and persists it.
+async fn persist_routing_error_to_dlq(
+    event: &EventEnvelope,
+    error: &str,
+    total_attempts: u32,
+    first_attempt_at: Timestamp,
+    delivery_config: &QueueDeliveryConfig,
+) -> bool {
+    if !delivery_config.enable_dlq {
+        return false;
+    }
+
+    let dlq_service = match &delivery_config.dlq_service {
+        Some(service) => service,
+        None => {
+            warn!(
+                event_id = %event.event_id,
+                error = %error,
+                "DLQ service not configured - routing error not persisted"
+            );
+            return false;
+        }
+    };
+
+    let reason = DlqReason::RoutingError {
+        error: error.to_string(),
+    };
+
+    let record = FailedEventRecord::new(
+        event.clone(),
+        reason,
+        vec![], // No specific queue failures for routing errors
+        vec![], // No successful deliveries
+        total_attempts,
+        first_attempt_at,
+    );
+
+    match dlq_service.persist_failed_event(&record).await {
+        Ok(blob_path) => {
+            info!(
+                event_id = %event.event_id,
+                blob_path = %blob_path,
+                "Routing error persisted to DLQ"
+            );
+            true
+        }
+        Err(e) => {
+            error!(
+                event_id = %event.event_id,
+                error = %e,
+                "Failed to persist routing error to DLQ"
+            );
+            false
         }
     }
 }

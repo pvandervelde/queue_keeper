@@ -290,6 +290,7 @@ fn create_fast_retry_config() -> QueueDeliveryConfig {
         )
         .without_jitter(), // disable jitter for deterministic tests
         enable_dlq: true,
+        dlq_service: None, // No DLQ storage for fast tests
     }
 }
 
@@ -524,6 +525,7 @@ async fn test_max_retries_respected() {
         )
         .without_jitter(),
         enable_dlq: true,
+        dlq_service: None,
     };
 
     // Act

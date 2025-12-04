@@ -11,6 +11,7 @@
 //! See specs/interfaces/http-service.md for complete specification.
 
 // Public modules
+pub mod dlq_storage;
 pub mod queue_delivery;
 pub mod retry;
 
