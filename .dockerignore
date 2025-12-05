@@ -1,0 +1,62 @@
+# Docker build context exclusions
+# Minimize context size and avoid copying unnecessary files into the build
+
+# Build artifacts and cache
+target/
+**/target/
+**/*.rs.bk
+Cargo.lock
+
+# Git and version control
+.git/
+.gitignore
+.github/
+.gitattributes
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# CI/CD and documentation
+.llm/
+.claude/
+docs/
+*.md
+!README.md
+LICENSE
+
+# Specifications (not needed in container)
+specs/
+github-bot-sdk-specs/
+queue-runtime-specs/
+
+# Test files and fixtures
+**/tests/
+**/*_tests.rs
+**/test_fixtures/
+**/testdata/
+
+# Development configuration
+.cargo/
+.env
+.env.*
+*.local
+
+# Temporary and log files
+tmp/
+temp/
+*.log
+*.tmp
+
+# Docker files themselves
+Dockerfile*
+.dockerignore
+docker-compose*.yml
+
+# Package manager files
+renovate.json
+deny.toml
