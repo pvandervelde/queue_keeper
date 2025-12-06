@@ -119,16 +119,37 @@ else
 # Test 2: Image size check
 Write-Step "Test 2: Verify image size (<200MB)"
 $imageSize = docker images $Tag --format "{{.Size}}"
-$imageSizeMB = [int]($imageSize -replace '[^0-9]', '')
 Write-Host "  Image size: $imageSize"
-if ($imageSizeMB -lt 200)
+
+if ($imageSize -match '^([0-9.]+)(MB|GB)$')
 {
-    Write-Success "Image size is within limits"
-    $testsPassed++
+    $sizeValue = [double]$Matches[1]
+    $sizeUnit = $Matches[2]
+
+    # Convert to MB for comparison
+    if ($sizeUnit -eq 'GB')
+    {
+        $imageSizeMB = $sizeValue * 1024
+    }
+    else
+    {
+        $imageSizeMB = $sizeValue
+    }
+
+    if ($imageSizeMB -lt 200)
+    {
+        Write-Success "Image size is within limits"
+        $testsPassed++
+    }
+    else
+    {
+        Write-Warning "Image size exceeds recommended 200MB limit"
+        $testsPassed++
+    }
 }
 else
 {
-    Write-Warning "Image size exceeds recommended 200MB limit"
+    Write-Warning "Could not parse image size: $imageSize"
     $testsPassed++
 }
 

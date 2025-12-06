@@ -92,11 +92,27 @@ fi
 step "Test 2: Verify image size (<200MB)"
 IMAGE_SIZE=$(docker images "$TAG" --format "{{.Size}}")
 echo "  Image size: $IMAGE_SIZE"
-if [[ "$IMAGE_SIZE" =~ ^[0-9]+MB$ ]] && [ "${IMAGE_SIZE//[^0-9]/}" -lt 200 ]; then
-    success "Image size is within limits"
-    ((TESTS_PASSED++))
+if [[ "$IMAGE_SIZE" =~ ^([0-9.]+)(MB|GB)$ ]]; then
+    SIZE_VALUE="${BASH_REMATCH[1]}"
+    SIZE_UNIT="${BASH_REMATCH[2]}"
+
+    # Convert to MB for comparison
+    if [ "$SIZE_UNIT" = "GB" ]; then
+        SIZE_MB=$(echo "$SIZE_VALUE * 1024" | bc)
+    else
+        SIZE_MB="$SIZE_VALUE"
+    fi
+
+    # Compare as integer (truncate decimals)
+    if [ "${SIZE_MB%.*}" -lt 200 ]; then
+        success "Image size is within limits"
+        ((TESTS_PASSED++))
+    else
+        warning "Image size exceeds recommended 200MB limit"
+        ((TESTS_PASSED++))
+    fi
 else
-    warning "Image size exceeds recommended 200MB limit"
+    warning "Could not parse image size: $IMAGE_SIZE"
     ((TESTS_PASSED++))
 fi
 
@@ -141,10 +157,11 @@ if docker run -d --name "$CONTAINER_NAME" -p 8090:8080 "$TAG" > /dev/null; then
     step "Test 6: Verify graceful shutdown"
     STOP_START=$(date +%s)
     docker stop "$CONTAINER_NAME" > /dev/null 2>&1
+    STOP_EXIT=$?
     STOP_END=$(date +%s)
     STOP_DURATION=$((STOP_END - STOP_START))
 
-    if [ $? -eq 0 ] && [ "$STOP_DURATION" -lt 35 ]; then
+    if [ $STOP_EXIT -eq 0 ] && [ "$STOP_DURATION" -lt 35 ]; then
         success "Container stopped gracefully in ${STOP_DURATION}s"
         ((TESTS_PASSED++))
     else
