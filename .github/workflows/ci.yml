@@ -155,6 +155,24 @@ jobs:
       - name: Run doc-tests
         run: cargo test --doc --all-features --workspace --exclude integration_tests
 
+  docker_build:
+    name: docker-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349 # v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75 # v6
+        with:
+          context: .
+          push: false
+          tags: queue-keeper:ci-test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
   # bench_test:
   #   name: bench-tests
   #   runs-on: ubuntu-latest
