@@ -5,6 +5,7 @@ This document provides instructions for building, running, and testing the Queue
 ## Overview
 
 The Queue-Keeper service is containerized using a multi-stage Docker build that:
+
 - Optimizes final image size (target: <200MB)
 - Runs as non-root user for security
 - Includes health check integration
@@ -29,6 +30,7 @@ docker build -t queue-keeper:v0.1.0 .
 ### Build Options
 
 The build process uses Rust's release profile for optimal performance:
+
 - Full optimization (opt-level = 3)
 - Link-time optimization (LTO)
 - Stripped debug symbols
@@ -92,6 +94,7 @@ docker run -d \
 ### Additional Configuration
 
 For production deployments, additional environment variables may be required:
+
 - GitHub webhook secrets (via Key Vault integration)
 - Queue connection strings (Azure Service Bus or AWS SQS)
 - Blob storage configuration
@@ -103,6 +106,7 @@ See `specs/architecture/container-deployment.md` for complete configuration deta
 ### Container Health Check
 
 The container includes an integrated health check that:
+
 - Runs every 30 seconds
 - Times out after 3 seconds
 - Allows 5 seconds startup grace period
@@ -130,6 +134,7 @@ curl http://localhost:8080/ready
 ```
 
 Expected response:
+
 ```json
 {
   "status": "healthy",
@@ -220,6 +225,7 @@ docker logs queue-keeper
 ```
 
 Common issues:
+
 - Port 8080 already in use (change with `-p` flag)
 - Missing configuration or environment variables
 - Insufficient permissions
@@ -233,6 +239,7 @@ docker inspect --format='{{json .State.Health}}' queue-keeper | jq
 ```
 
 Common causes:
+
 - Application startup taking longer than 5 seconds
 - Health endpoint returning non-200 status
 - Network connectivity issues
@@ -246,16 +253,19 @@ docker stats queue-keeper
 ```
 
 Expected resource usage:
+
 - CPU: <60% average under normal load
 - Memory: <256MB baseline, <512MB maximum
 
 ## Production Deployment
 
 For production deployments to Azure Container Apps, see:
+
 - `specs/architecture/container-deployment.md` - Deployment architecture
 - `specs/operations/deployment.md` - Deployment procedures
 
 Key considerations:
+
 - Use multi-replica deployment (minimum 2)
 - Configure resource limits (250m CPU, 256Mi memory baseline)
 - Enable auto-scaling based on load
@@ -273,6 +283,7 @@ The container follows security best practices:
 5. **Regular scans**: Use trivy for vulnerability scanning
 
 For production:
+
 - Scan images regularly for vulnerabilities
 - Update base images and dependencies
 - Rotate secrets and credentials

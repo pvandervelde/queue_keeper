@@ -5,7 +5,6 @@
 target/
 **/target/
 **/*.rs.bk
-Cargo.lock
 
 # Git and version control
 .git/
