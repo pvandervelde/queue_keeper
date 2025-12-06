@@ -25,6 +25,13 @@ ignore = [
     # Used transitively through azure_core v0.21.0 -> http-types -> fastrand -> instant
     # Will be resolved when Azure SDK updates to newer versions
     "RUSTSEC-2024-0384",
+
+    # rustls-pemfile crate unmaintained (RUSTSEC-2025-0134)
+    # Used transitively through AWS SDK (aws-smithy-http-client -> hyper-rustls -> rustls-native-certs -> rustls-pemfile)
+    # The functionality is now in rustls-pki-types since 1.9.0, but AWS SDK hasn't migrated yet
+    # Will be resolved when AWS SDK updates their dependencies
+    # Tracked: https://github.com/rustls/pemfile/issues/61
+    "RUSTSEC-2025-0134",
 ]
 
 [licenses]
