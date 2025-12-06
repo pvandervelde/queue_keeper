@@ -36,15 +36,19 @@ RUN mkdir -p crates/queue-keeper-core/src \
     crates/queue-runtime/src && \
     echo "fn main() {}" > crates/queue-keeper-service/src/main.rs && \
     echo "fn main() {}" > crates/queue-keeper-cli/src/main.rs && \
-    echo "// dummy" > crates/queue-keeper-core/src/lib.rs && \
-    echo "// dummy" > crates/github-bot-sdk/src/lib.rs && \
-    echo "// dummy" > crates/queue-runtime/src/lib.rs
+    echo "pub fn dummy() {}" > crates/queue-keeper-core/src/lib.rs && \
+    echo "pub fn dummy() {}" > crates/github-bot-sdk/src/lib.rs && \
+    echo "pub fn dummy() {}" > crates/queue-runtime/src/lib.rs
 
 # Build dependencies only (this layer will be cached)
-RUN cargo build --release --package queue-keeper-service
+# Note: This will fail to link but will cache all external dependencies
+RUN cargo build --release --package queue-keeper-service || true
 
-# Remove dummy source files
-RUN rm -rf crates/*/src
+# Remove dummy source files and build artifacts to force clean rebuild
+RUN rm -rf crates/*/src && \
+    rm -rf target/release/.fingerprint/queue-keeper-* && \
+    rm -rf target/release/.fingerprint/queue-runtime-* && \
+    rm -rf target/release/.fingerprint/github-bot-sdk-*
 
 # Copy actual source code
 COPY crates/ ./crates/
@@ -54,6 +58,7 @@ COPY crates/ ./crates/
 # - opt-level = 3 (maximum optimization)
 # - lto = true (link-time optimization)
 # - codegen-units = 1 (better optimization)
+# Force a clean rebuild of our crates (but keep cached dependencies)
 RUN cargo build --release --package queue-keeper-service
 
 # Strip debug symbols to reduce binary size
