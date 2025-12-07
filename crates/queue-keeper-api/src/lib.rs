@@ -413,7 +413,7 @@ pub async fn start_server(
 /// This ensures GitHub receives a response within the timeout while allowing
 /// queue delivery to proceed in the background with proper retry logic.
 #[instrument(skip(state, headers, body))]
-async fn handle_webhook(
+pub async fn handle_webhook(
     State(state): State<AppState>,
     headers: HeaderMap,
     body: Bytes,
