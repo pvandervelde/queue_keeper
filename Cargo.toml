@@ -2,9 +2,12 @@
 members = [
     "crates/queue-keeper-core",
     "crates/queue-keeper-cli",
+    "crates/queue-keeper-api",
     "crates/queue-keeper-service",
     "crates/github-bot-sdk",
     "crates/queue-runtime",
+    "crates/queue-keeper-integration-tests",
+    "crates/queue-keeper-e2e-tests",
 ]
 resolver = "2"
 

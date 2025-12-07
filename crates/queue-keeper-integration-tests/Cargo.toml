@@ -1,0 +1,28 @@
+[package]
+name = "queue-keeper-integration-tests"
+version = "0.1.0"
+edition = "2021"
+description = "Integration tests for Queue-Keeper API"
+publish = false
+
+[dev-dependencies]
+# Crates under test
+queue-keeper-api = { path = "../queue-keeper-api" }
+queue-keeper-core = { path = "../queue-keeper-core" }
+queue-runtime = { path = "../queue-runtime" }
+
+# Testing framework
+tokio = { workspace = true, features = ["full", "test-util"] }
+tokio-test = "0.4"
+
+# HTTP testing
+axum = "0.8"
+tower = { workspace = true }
+bytes = { workspace = true }
+
+# Serialization for test data
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Test utilities
+uuid = { workspace = true }

@@ -1,0 +1,54 @@
+[package]
+name = "queue-keeper-api"
+version = "0.1.0"
+edition = "2021"
+description = "HTTP API library for Queue-Keeper webhook processing"
+license = "MIT"
+repository = "https://github.com/pvandervelde/queue_keeper"
+
+[lib]
+name = "queue_keeper_api"
+path = "src/lib.rs"
+
+[dependencies]
+# Core dependencies
+queue-keeper-core = { path = "../queue-keeper-core", version = "0.1.0" }
+queue-runtime = { path = "../queue-runtime", version = "0.1.0" }
+tokio = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+
+# HTTP server
+axum = { version = "0.8", features = ["macros", "tracing"] }
+tower = { workspace = true }
+tower-http = { workspace = true }
+hyper = { workspace = true }
+bytes = { workspace = true }
+
+# Configuration
+toml = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# Security
+hmac = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+
+# Date/time
+chrono = { workspace = true }
+
+# Async traits
+async-trait = { workspace = true }
+
+# Observability
+prometheus = { version = "0.14", features = ["process"] }
+opentelemetry = { workspace = true }
+opentelemetry-otlp = { workspace = true }
+
+# Retry logic
+rand = "0.8.5"
