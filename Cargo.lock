@@ -3108,6 +3108,7 @@ dependencies = [
 name = "queue-keeper-integration-tests"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "axum",
  "bytes",
  "queue-keeper-api",

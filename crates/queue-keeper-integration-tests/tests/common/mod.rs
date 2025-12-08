@@ -12,10 +12,10 @@ use queue_keeper_api::{
 use queue_keeper_core::{
     webhook::{
         EventEntity, EventEnvelope, NormalizationError, StorageError, StorageReference,
-        ValidationError, ValidationStatus, WebhookError, WebhookProcessor, WebhookRequest,
+        ValidationStatus, WebhookError, WebhookProcessor, WebhookRequest,
     },
     CorrelationId, EventId, QueueKeeperError, Repository, RepositoryId, SessionId, Timestamp, User,
-    UserId, UserType,
+    UserId, UserType, ValidationError,
 };
 use std::sync::{Arc, Mutex};
 use tokio::time::{sleep, Duration};
@@ -152,7 +152,7 @@ impl HealthChecker for MockHealthChecker {
             queue_keeper_api::HealthCheckResult {
                 healthy,
                 duration_ms: 0,
-                message: None,
+                message: "Mock health check".to_string(),
             },
         );
         queue_keeper_api::HealthStatus {
@@ -195,6 +195,7 @@ impl MockEventStore {
     }
 }
 
+#[async_trait::async_trait]
 impl EventStore for MockEventStore {
     async fn get_event(&self, event_id: &EventId) -> Result<EventEnvelope, QueueKeeperError> {
         let events = self.events.lock().unwrap();
@@ -202,12 +203,9 @@ impl EventStore for MockEventStore {
             .iter()
             .find(|e| &e.event_id == event_id)
             .cloned()
-            .ok_or(QueueKeeperError::Validation(
-                queue_keeper_core::ValidationError::Invalid {
-                    field: "event_id".to_string(),
-                    message: "Event not found".to_string(),
-                },
-            ))
+            .ok_or(QueueKeeperError::Validation(ValidationError::Required {
+                field: "event_id".to_string(),
+            }))
     }
 
     async fn list_events(
@@ -215,13 +213,14 @@ impl EventStore for MockEventStore {
         params: queue_keeper_api::EventListParams,
     ) -> Result<queue_keeper_api::EventListResponse, QueueKeeperError> {
         let events = self.events.lock().unwrap();
-        let limit = params.limit.unwrap_or(100);
-        let offset = params.offset.unwrap_or(0);
+        let per_page = params.per_page.unwrap_or(100);
+        let page = params.page.unwrap_or(1);
+        let offset = (page - 1) * per_page;
 
         let items: Vec<queue_keeper_api::EventSummary> = events
             .iter()
             .skip(offset)
-            .take(limit)
+            .take(per_page)
             .map(|e| queue_keeper_api::EventSummary {
                 event_id: e.event_id.clone(),
                 event_type: e.event_type.clone(),
@@ -235,8 +234,8 @@ impl EventStore for MockEventStore {
         Ok(queue_keeper_api::EventListResponse {
             events: items,
             total: events.len(),
-            page: (offset / limit).max(1),
-            per_page: limit,
+            page,
+            per_page,
         })
     }
 
@@ -254,11 +253,9 @@ impl EventStore for MockEventStore {
         &self,
         _session_id: &SessionId,
     ) -> Result<queue_keeper_api::SessionDetails, QueueKeeperError> {
-        Err(QueueKeeperError::Validation(
-            queue_keeper_core::ValidationError::Required {
-                field: "session_id".to_string(),
-            },
-        ))
+        Err(QueueKeeperError::Validation(ValidationError::Required {
+            field: "session_id".to_string(),
+        }))
     }
 
     async fn get_statistics(

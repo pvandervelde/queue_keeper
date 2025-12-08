@@ -26,3 +26,4 @@ serde_json = { workspace = true }
 
 # Test utilities
 uuid = { workspace = true }
+async-trait = { workspace = true }
