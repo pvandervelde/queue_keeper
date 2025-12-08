@@ -1,0 +1,72 @@
+name: End-to-End Tests
+
+on:
+    push:
+        branches: [master, main]
+    pull_request:
+        branches: [master, main]
+    workflow_dispatch:
+
+env:
+    CARGO_TERM_COLOR: always
+    IMAGE_NAME: queue-keeper:test
+
+jobs:
+    e2e-tests:
+        name: E2E Tests (Docker Container)
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Set up Rust
+              uses: actions-rust-lang/setup-rust-toolchain@v1
+              with:
+                  toolchain: stable
+                  cache: true
+
+            - name: Install dependencies
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y libssl-dev pkg-config
+
+            - name: Build Docker image
+              run: |
+                  docker build -t ${{ env.IMAGE_NAME }} .
+                  echo "✅ Docker image built successfully"
+
+            - name: Verify Docker image exists
+              run: |
+                  docker images | grep queue-keeper
+                  docker inspect ${{ env.IMAGE_NAME }} > /dev/null
+                  echo "✅ Docker image verified"
+
+            - name: Run integration tests
+              run: |
+                  cargo test --package queue-keeper-integration-tests --verbose
+                  echo "✅ Integration tests passed"
+
+            - name: Run E2E tests against container
+              run: |
+                  cargo test --package queue-keeper-e2e-tests --verbose
+                  echo "✅ E2E tests passed"
+              env:
+                  RUST_BACKTRACE: 1
+
+            - name: Check container logs (on failure)
+              if: failure()
+              run: |
+                  echo "=== Recent container logs ==="
+                  docker ps -a
+                  CONTAINER_ID=$(docker ps -a --filter ancestor=${{ env.IMAGE_NAME }} --format "{{.ID}}" | head -n 1)
+                  if [ ! -z "$CONTAINER_ID" ]; then
+                    docker logs $CONTAINER_ID
+                  fi
+
+            - name: Cleanup containers
+              if: always()
+              run: |
+                  docker ps -a --filter ancestor=${{ env.IMAGE_NAME }} --format "{{.ID}}" | xargs -r docker stop
+                  docker ps -a --filter ancestor=${{ env.IMAGE_NAME }} --format "{{.ID}}" | xargs -r docker rm
+                  echo "✅ Cleanup complete"

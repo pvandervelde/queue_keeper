@@ -5,7 +5,7 @@ edition = "2021"
 description = "End-to-end tests for Queue-Keeper service"
 publish = false
 
-[dev-dependencies]
+[dependencies]
 # HTTP client for testing
 reqwest = { workspace = true, features = ["json"] }
 tokio = { workspace = true, features = ["full"] }
