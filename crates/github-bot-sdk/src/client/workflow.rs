@@ -107,7 +107,7 @@ impl InstallationClient {
     /// List workflows in a repository.
     ///
     /// See github-bot-sdk-specs/interfaces/additional-operations.md
-    pub async fn list_workflows(&self, owner: &str, repo: &str) -> Result<Vec<Workflow>, ApiError> {
+    pub async fn list_workflows(&self, _owner: &str, _repo: &str) -> Result<Vec<Workflow>, ApiError> {
         unimplemented!("See github-bot-sdk-specs/interfaces/additional-operations.md")
     }
 
@@ -116,9 +116,9 @@ impl InstallationClient {
     /// See github-bot-sdk-specs/interfaces/additional-operations.md
     pub async fn get_workflow(
         &self,
-        owner: &str,
-        repo: &str,
-        workflow_id: u64,
+        _owner: &str,
+        _repo: &str,
+        _workflow_id: u64,
     ) -> Result<Workflow, ApiError> {
         unimplemented!("See github-bot-sdk-specs/interfaces/additional-operations.md")
     }
@@ -128,10 +128,10 @@ impl InstallationClient {
     /// See github-bot-sdk-specs/interfaces/additional-operations.md
     pub async fn trigger_workflow(
         &self,
-        owner: &str,
-        repo: &str,
-        workflow_id: u64,
-        request: TriggerWorkflowRequest,
+        _owner: &str,
+        _repo: &str,
+        _workflow_id: u64,
+        _request: TriggerWorkflowRequest,
     ) -> Result<(), ApiError> {
         unimplemented!("See github-bot-sdk-specs/interfaces/additional-operations.md")
     }
@@ -145,9 +145,9 @@ impl InstallationClient {
     /// See github-bot-sdk-specs/interfaces/additional-operations.md
     pub async fn list_workflow_runs(
         &self,
-        owner: &str,
-        repo: &str,
-        workflow_id: u64,
+        _owner: &str,
+        _repo: &str,
+        _workflow_id: u64,
     ) -> Result<Vec<WorkflowRun>, ApiError> {
         unimplemented!("See github-bot-sdk-specs/interfaces/additional-operations.md")
     }
@@ -157,9 +157,9 @@ impl InstallationClient {
     /// See github-bot-sdk-specs/interfaces/additional-operations.md
     pub async fn get_workflow_run(
         &self,
-        owner: &str,
-        repo: &str,
-        run_id: u64,
+        _owner: &str,
+        _repo: &str,
+        _run_id: u64,
     ) -> Result<WorkflowRun, ApiError> {
         unimplemented!("See github-bot-sdk-specs/interfaces/additional-operations.md")
     }
@@ -169,9 +169,9 @@ impl InstallationClient {
     /// See github-bot-sdk-specs/interfaces/additional-operations.md
     pub async fn cancel_workflow_run(
         &self,
-        owner: &str,
-        repo: &str,
-        run_id: u64,
+        _owner: &str,
+        _repo: &str,
+        _run_id: u64,
     ) -> Result<(), ApiError> {
         unimplemented!("See github-bot-sdk-specs/interfaces/additional-operations.md")
     }
@@ -181,9 +181,9 @@ impl InstallationClient {
     /// See github-bot-sdk-specs/interfaces/additional-operations.md
     pub async fn rerun_workflow_run(
         &self,
-        owner: &str,
-        repo: &str,
-        run_id: u64,
+        _owner: &str,
+        _repo: &str,
+        _run_id: u64,
     ) -> Result<(), ApiError> {
         unimplemented!("See github-bot-sdk-specs/interfaces/additional-operations.md")
     }

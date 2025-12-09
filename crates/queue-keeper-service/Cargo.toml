@@ -4,11 +4,13 @@ path = "src/main.rs"
 
 [package]
 name = "queue-keeper-service"
-version = "0.1.0"
-edition = "2021"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
 description = "HTTP service for receiving GitHub webhooks"
-license = "MIT"
-repository = "https://github.com/pvandervelde/queue_keeper"
+
 
 [dependencies]
 # HTTP API library

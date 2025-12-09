@@ -1,10 +1,10 @@
 [package]
-name = "queue-runtime"
-version = "0.1.0"
-edition = "2021"
 description = "Multi-provider queue runtime for Queue-Keeper"
-license = "MIT"
+edition = "2021"
+license = "Apache-2.0"
+name = "queue-runtime"
 repository = "https://github.com/pvandervelde/queue_keeper"
+version = "0.1.0"
 
 [dependencies]
 # Core dependencies

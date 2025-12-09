@@ -11,7 +11,7 @@ use std::time::Duration;
 /// # Examples
 ///
 /// ```rust
-/// use queue_keeper_service::retry::RetryPolicy;
+/// use queue_keeper_api::retry::RetryPolicy;
 /// use std::time::Duration;
 ///
 /// // Default policy: 5 attempts, 1s initial, 16s max, 2.0x multiplier
@@ -67,7 +67,7 @@ impl RetryPolicy {
     /// # Examples
     ///
     /// ```rust
-    /// use queue_keeper_service::retry::RetryPolicy;
+    /// use queue_keeper_api::retry::RetryPolicy;
     /// use std::time::Duration;
     ///
     /// let policy = RetryPolicy::new(
@@ -121,7 +121,7 @@ impl RetryPolicy {
     /// # Examples
     ///
     /// ```rust
-    /// use queue_keeper_service::retry::RetryPolicy;
+    /// use queue_keeper_api::retry::RetryPolicy;
     ///
     /// let policy = RetryPolicy::default();
     ///
@@ -164,7 +164,7 @@ impl RetryPolicy {
     /// # Examples
     ///
     /// ```rust
-    /// use queue_keeper_service::retry::RetryPolicy;
+    /// use queue_keeper_api::retry::RetryPolicy;
     ///
     /// let policy = RetryPolicy::default(); // max_attempts = 5
     ///
@@ -216,7 +216,7 @@ impl RetryPolicy {
     /// # Examples
     ///
     /// ```rust
-    /// use queue_keeper_service::retry::RetryPolicy;
+    /// use queue_keeper_api::retry::RetryPolicy;
     ///
     /// let policy = RetryPolicy::default(); // max_attempts = 5
     /// assert_eq!(policy.total_attempts(), 6); // 1 initial + 5 retries

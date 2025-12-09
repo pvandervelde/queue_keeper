@@ -157,14 +157,14 @@ impl InstallationClient {
     /// List releases in a repository.
     ///
     /// See github-bot-sdk-specs/interfaces/additional-operations.md
-    pub async fn list_releases(&self, owner: &str, repo: &str) -> Result<Vec<Release>, ApiError> {
+    pub async fn list_releases(&self, _owner: &str, _repo: &str) -> Result<Vec<Release>, ApiError> {
         unimplemented!("See github-bot-sdk-specs/interfaces/additional-operations.md")
     }
 
     /// Get the latest published release.
     ///
     /// See github-bot-sdk-specs/interfaces/additional-operations.md
-    pub async fn get_latest_release(&self, owner: &str, repo: &str) -> Result<Release, ApiError> {
+    pub async fn get_latest_release(&self, _owner: &str, _repo: &str) -> Result<Release, ApiError> {
         unimplemented!("See github-bot-sdk-specs/interfaces/additional-operations.md")
     }
 
@@ -173,9 +173,9 @@ impl InstallationClient {
     /// See github-bot-sdk-specs/interfaces/additional-operations.md
     pub async fn get_release_by_tag(
         &self,
-        owner: &str,
-        repo: &str,
-        tag: &str,
+        _owner: &str,
+        _repo: &str,
+        _tag: &str,
     ) -> Result<Release, ApiError> {
         unimplemented!("See github-bot-sdk-specs/interfaces/additional-operations.md")
     }
@@ -185,9 +185,9 @@ impl InstallationClient {
     /// See github-bot-sdk-specs/interfaces/additional-operations.md
     pub async fn get_release(
         &self,
-        owner: &str,
-        repo: &str,
-        release_id: u64,
+        _owner: &str,
+        _repo: &str,
+        _release_id: u64,
     ) -> Result<Release, ApiError> {
         unimplemented!("See github-bot-sdk-specs/interfaces/additional-operations.md")
     }
@@ -197,9 +197,9 @@ impl InstallationClient {
     /// See github-bot-sdk-specs/interfaces/additional-operations.md
     pub async fn create_release(
         &self,
-        owner: &str,
-        repo: &str,
-        request: CreateReleaseRequest,
+        _owner: &str,
+        _repo: &str,
+        _request: CreateReleaseRequest,
     ) -> Result<Release, ApiError> {
         unimplemented!("See github-bot-sdk-specs/interfaces/additional-operations.md")
     }
@@ -209,10 +209,10 @@ impl InstallationClient {
     /// See github-bot-sdk-specs/interfaces/additional-operations.md
     pub async fn update_release(
         &self,
-        owner: &str,
-        repo: &str,
-        release_id: u64,
-        request: UpdateReleaseRequest,
+        _owner: &str,
+        _repo: &str,
+        _release_id: u64,
+        _request: UpdateReleaseRequest,
     ) -> Result<Release, ApiError> {
         unimplemented!("See github-bot-sdk-specs/interfaces/additional-operations.md")
     }
@@ -222,9 +222,9 @@ impl InstallationClient {
     /// See github-bot-sdk-specs/interfaces/additional-operations.md
     pub async fn delete_release(
         &self,
-        owner: &str,
-        repo: &str,
-        release_id: u64,
+        _owner: &str,
+        _repo: &str,
+        _release_id: u64,
     ) -> Result<(), ApiError> {
         unimplemented!("See github-bot-sdk-specs/interfaces/additional-operations.md")
     }

@@ -29,7 +29,7 @@ fn create_test_event() -> EventEnvelope {
             owner: "test-owner".to_string(),
             full_name: "test-owner/test-repo".to_string(),
         },
-        session_id: SessionId::new("pr-123"),
+        session_id: SessionId::from_parts("owner", "repo", "pull_request", "123"),
         occurred_at: Timestamp::now(),
         correlation_id: uuid::Uuid::new_v4(),
         payload_reference: None,
@@ -227,7 +227,7 @@ async fn test_exponential_backoff_with_jitter() {
 #[ignore = "Requires session-aware queue client integration"]
 async fn test_session_ordering_preserved() {
     // Arrange: Create multiple events with same session ID
-    let session_id = SessionId::new("pr-123");
+    let session_id = SessionId::from_parts("owner", "repo", "pull_request", "123");
 
     // TODO: Create events and verify they are delivered in order
     // This requires session-aware queue client integration

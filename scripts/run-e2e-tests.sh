@@ -52,7 +52,7 @@ fi
 echo ""
 echo "🧹 Cleaning up containers..."
 CONTAINERS=$(docker ps -a --filter "ancestor=$IMAGE_NAME" --format "{{.ID}}")
-if [ ! -z "$CONTAINERS" ]; then
+if [ -n "$CONTAINERS" ]; then
     echo "$CONTAINERS" | xargs docker stop > /dev/null 2>&1 || true
     echo "$CONTAINERS" | xargs docker rm > /dev/null 2>&1 || true
     COUNT=$(echo "$CONTAINERS" | wc -l)

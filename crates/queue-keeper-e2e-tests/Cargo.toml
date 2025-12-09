@@ -1,9 +1,11 @@
 [package]
-name = "queue-keeper-e2e-tests"
-version = "0.1.0"
-edition = "2021"
+authors.workspace = true
 description = "End-to-end tests for Queue-Keeper service"
+edition.workspace = true
+license.workspace = true
+name = "queue-keeper-e2e-tests"
 publish = false
+version.workspace = true
 
 [dependencies]
 # HTTP client for testing

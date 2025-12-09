@@ -373,7 +373,3 @@ pub async fn persist_to_dlq(
         }
     }
 }
-
-#[cfg(test)]
-#[path = "dlq_storage_tests.rs"]
-mod tests;

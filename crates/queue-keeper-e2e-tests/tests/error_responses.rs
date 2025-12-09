@@ -40,10 +40,8 @@ async fn test_404_includes_json_error() {
     assert_eq!(response.status(), 404);
 
     // May or may not have JSON body depending on implementation
-    // At minimum should have some response
-    let body = response.text().await.expect("Failed to read body");
+    let _body = response.text().await.expect("Failed to read body");
     // 404 handler may return HTML or JSON or empty - all are acceptable
-    assert!(body.len() >= 0);
 }
 
 /// Verify that invalid JSON returns 400

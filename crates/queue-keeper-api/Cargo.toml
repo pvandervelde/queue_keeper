@@ -1,10 +1,10 @@
 [package]
-name = "queue-keeper-api"
-version = "0.1.0"
-edition = "2021"
+authors.workspace = true
 description = "HTTP API library for Queue-Keeper webhook processing"
-license = "MIT"
-repository = "https://github.com/pvandervelde/queue_keeper"
+edition.workspace = true
+license.workspace = true
+name = "queue-keeper-api"
+version.workspace = true
 
 [lib]
 name = "queue_keeper_api"

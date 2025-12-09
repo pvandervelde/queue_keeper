@@ -128,7 +128,7 @@ impl Drop for TestContainer {
 fn find_available_port() -> u16 {
     use std::net::TcpListener;
 
-    let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind to find available port");
+    let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to find available port");
     let port = listener.local_addr().unwrap().port();
     drop(listener);
     port
