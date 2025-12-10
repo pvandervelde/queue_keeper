@@ -130,12 +130,14 @@ impl StoredMessage {
 }
 
 /// A message currently being processed
+#[allow(dead_code)]
 struct InFlightMessage {
     message: StoredMessage,
     receipt_handle: String,
     lock_expires_at: Timestamp,
 }
 
+#[allow(dead_code)]
 impl InFlightMessage {
     fn is_expired(&self) -> bool {
         Timestamp::now() >= self.lock_expires_at

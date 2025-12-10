@@ -12,6 +12,7 @@ use std::time::Duration;
 pub struct TestContainer {
     pub container_id: String,
     pub base_url: String,
+    #[allow(dead_code)]
     pub port: u16,
 }
 
@@ -101,6 +102,7 @@ impl TestContainer {
     }
 
     /// Get container logs
+    #[allow(dead_code)]
     pub fn logs(&self) -> String {
         let output = Command::new("docker")
             .arg("logs")
@@ -143,6 +145,7 @@ pub fn http_client() -> reqwest::Client {
 }
 
 /// Create valid GitHub webhook headers for testing
+#[allow(dead_code)]
 pub fn github_webhook_headers() -> reqwest::header::HeaderMap {
     let mut headers = reqwest::header::HeaderMap::new();
     headers.insert("x-github-event", "pull_request".parse().unwrap());
@@ -159,6 +162,7 @@ pub fn github_webhook_headers() -> reqwest::header::HeaderMap {
 }
 
 /// Sample webhook payload for testing
+#[allow(dead_code)]
 pub fn sample_webhook_payload() -> serde_json::Value {
     serde_json::json!({
         "action": "opened",
