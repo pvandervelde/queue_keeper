@@ -255,18 +255,21 @@ async fn test_malformed_payload_resilience() {
     let headers = github_webhook_headers();
 
     // Test various malformed payloads
-    let malformed_payloads = vec![
+    let large_junk = "a".repeat(10 * 1024); // 10KB of junk
+    let malformed_payloads: Vec<&str> = vec![
         "",                     // Empty
         "{",                    // Incomplete JSON
         "not json at all",      // Plain text
         "null",                 // Null
         "[]",                   // Array instead of object
         "123",                  // Number
-        &"a".repeat(10 * 1024), // 10KB of junk
     ];
 
-    // Act: Send all malformed payloads
-    for payload in malformed_payloads {
+    // Act: Send all malformed payloads (including the large one separately)
+    let mut all_payloads: Vec<String> = malformed_payloads.iter().map(|s| s.to_string()).collect();
+    all_payloads.push(large_junk);
+    
+    for payload in all_payloads {
         let mut request = client.post(server.url("/webhook"));
         for (key, value) in headers.iter() {
             request = request.header(key, value);

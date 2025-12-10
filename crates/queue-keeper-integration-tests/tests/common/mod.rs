@@ -203,10 +203,9 @@ impl EventStore for MockEventStore {
             .iter()
             .find(|e| &e.event_id == event_id)
             .cloned()
-            .ok_or(QueueKeeperError::Validation(ValidationError::InvalidFormat {
-                field: "event_id".to_string(),
-                message: "Event not found".to_string(),
-            }))
+            .ok_or(QueueKeeperError::Internal {
+                message: format!("Event not found: {}", event_id),
+            })
     }
 
     async fn list_events(
