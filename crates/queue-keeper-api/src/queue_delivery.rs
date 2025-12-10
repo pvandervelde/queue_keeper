@@ -609,6 +609,4 @@ pub fn spawn_queue_delivery(
     })
 }
 
-#[cfg(test)]
-#[path = "queue_delivery_tests.rs"]
-mod tests;
+

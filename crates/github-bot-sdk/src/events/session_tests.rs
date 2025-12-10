@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::client::Repository;
+use crate::events::{EntityType, EventEnvelope, EventPayload};
 use chrono::Utc;
 use serde_json::json;
 

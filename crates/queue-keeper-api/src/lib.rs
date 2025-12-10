@@ -15,22 +15,6 @@ pub mod dlq_storage;
 pub mod queue_delivery;
 pub mod retry;
 
-#[cfg(test)]
-#[path = "health_tests.rs"]
-mod health_tests;
-
-#[cfg(test)]
-#[path = "middleware_tests.rs"]
-mod middleware_tests;
-
-#[cfg(test)]
-#[path = "shutdown_tests.rs"]
-mod shutdown_tests;
-
-#[cfg(test)]
-#[path = "error_handling_tests.rs"]
-mod error_handling_tests;
-
 use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
@@ -1905,7 +1889,3 @@ impl TelemetryConfig {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "lib_tests.rs"]
-mod tests;

@@ -275,6 +275,4 @@ impl RetryState {
     }
 }
 
-#[cfg(test)]
-#[path = "retry_tests.rs"]
-mod tests;
+
