@@ -5,9 +5,7 @@ mod common;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use common::{create_test_app_state, MockHealthChecker};
-use queue_keeper_api::{
-    create_router, AppState, HealthChecker, ServiceConfig, ServiceMetrics, TelemetryConfig,
-};
+use queue_keeper_api::create_router;
 use std::sync::Arc;
 use tower::ServiceExt;
 

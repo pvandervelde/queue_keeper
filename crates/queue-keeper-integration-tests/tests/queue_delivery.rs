@@ -8,31 +8,41 @@
 
 mod common;
 
-use common::{create_test_app_state, MockWebhookProcessor};
-use queue_keeper_api::queue_delivery::{
-    deliver_event_to_queues, QueueDeliveryConfig, QueueDeliveryOutcome,
+use queue_keeper_api::queue_delivery::QueueDeliveryConfig;
+use queue_keeper_core::webhook::{EventEntity, EventEnvelope};
+use queue_keeper_core::{
+    CorrelationId, EventId, Repository, RepositoryId, SessionId, Timestamp, User, UserId, UserType,
 };
-use queue_keeper_core::webhook::EventEnvelope;
-use queue_keeper_core::{EventId, Repository, SessionId, Timestamp};
-use std::sync::Arc;
 use std::time::Duration;
 
 /// Helper to create a test event envelope
 fn create_test_event() -> EventEnvelope {
+    let repository = Repository::new(
+        RepositoryId::new(12345),
+        "test-repo".to_string(),
+        "test-owner/test-repo".to_string(),
+        User {
+            id: UserId::new(1),
+            login: "test-owner".to_string(),
+            user_type: UserType::User,
+        },
+        false,
+    );
+
     EventEnvelope {
         event_id: EventId::new(),
         event_type: "pull_request".to_string(),
         action: Some("opened".to_string()),
-        repository: Repository {
-            id: 12345,
-            name: "test-repo".to_string(),
-            owner: "test-owner".to_string(),
-            full_name: "test-owner/test-repo".to_string(),
-        },
+        repository,
+        entity: EventEntity::PullRequest { number: 123 },
         session_id: SessionId::from_parts("owner", "repo", "pull_request", "123"),
+        correlation_id: CorrelationId::new(),
         occurred_at: Timestamp::now(),
-        correlation_id: uuid::Uuid::new_v4(),
-        payload_reference: None,
+        processed_at: Timestamp::now(),
+        payload: serde_json::json!({
+            "action": "opened",
+            "number": 123
+        }),
     }
 }
 
@@ -42,8 +52,8 @@ fn create_test_event() -> EventEnvelope {
 #[tokio::test]
 async fn test_successful_delivery_to_all_queues() {
     // Arrange: Create mock components
-    let event = create_test_event();
-    let config = QueueDeliveryConfig::default();
+    let _event = create_test_event();
+    let _config = QueueDeliveryConfig::default();
 
     // TODO: This test requires EventRouter and QueueClient integration
     // Implement once task 14.1 is complete
@@ -66,13 +76,15 @@ async fn test_successful_delivery_to_all_queues() {
 #[tokio::test]
 async fn test_retry_on_transient_failure() {
     // Arrange: Create mock that fails first 2 attempts
-    let event = create_test_event();
-    let config = QueueDeliveryConfig {
+    let _event = create_test_event();
+    let _config = QueueDeliveryConfig {
         retry_policy: queue_keeper_api::retry::RetryPolicy {
             max_attempts: 3,
             initial_delay: Duration::from_millis(10),
             max_delay: Duration::from_millis(100),
-            jitter_factor: 0.0, // Disable jitter for predictable test
+            backoff_multiplier: 2.0,
+            use_jitter: false,
+            jitter_percent: 0.0, // Disable jitter for predictable test
         },
         ..Default::default()
     };
@@ -82,7 +94,7 @@ async fn test_retry_on_transient_failure() {
     // Act: Attempt delivery with retry
     let start = std::time::Instant::now();
     // let outcome = deliver_event_to_queues(...).await;
-    let elapsed = start.elapsed();
+    let _elapsed = start.elapsed();
 
     // Assert: Retry delays were applied (should take ~30ms for 2 retries)
     // assert!(elapsed >= Duration::from_millis(20));
@@ -95,15 +107,15 @@ async fn test_retry_on_transient_failure() {
 #[tokio::test]
 async fn test_no_retry_on_permanent_failure() {
     // Arrange: Create mock that returns permanent error
-    let event = create_test_event();
-    let config = QueueDeliveryConfig::default();
+    let _event = create_test_event();
+    let _config = QueueDeliveryConfig::default();
 
     // TODO: Implement mock that returns permanent error
 
     // Act: Attempt delivery
     let start = std::time::Instant::now();
     // let outcome = deliver_event_to_queues(...).await;
-    let elapsed = start.elapsed();
+    let _elapsed = start.elapsed();
 
     // Assert: No retries attempted (should complete quickly)
     // assert!(elapsed < Duration::from_millis(100));
@@ -116,8 +128,8 @@ async fn test_no_retry_on_permanent_failure() {
 #[tokio::test]
 async fn test_partial_delivery_failure_tracking() {
     // Arrange: Create mocks where 1 of 3 queues fails
-    let event = create_test_event();
-    let config = QueueDeliveryConfig::default();
+    let _event = create_test_event();
+    let _config = QueueDeliveryConfig::default();
 
     // TODO: Implement mocks where queue_2 fails but queue_1 and queue_3 succeed
 
@@ -140,8 +152,8 @@ async fn test_partial_delivery_failure_tracking() {
 #[tokio::test]
 async fn test_no_matching_queues() {
     // Arrange: Create event that doesn't match any bot subscriptions
-    let event = create_test_event();
-    let config = QueueDeliveryConfig::default();
+    let _event = create_test_event();
+    let _config = QueueDeliveryConfig::default();
 
     // TODO: Configure routing with no matching subscriptions
 
@@ -159,8 +171,8 @@ async fn test_no_matching_queues() {
 #[ignore = "Requires task 14.5 (DLQ infrastructure)"]
 async fn test_dlq_after_max_retries() {
     // Arrange: Create mock that always fails
-    let event = create_test_event();
-    let config = QueueDeliveryConfig {
+    let _event = create_test_event();
+    let _config = QueueDeliveryConfig {
         retry_policy: queue_keeper_api::retry::RetryPolicy {
             max_attempts: 3,
             ..Default::default()
@@ -191,7 +203,9 @@ async fn test_exponential_backoff_with_jitter() {
         max_attempts: 5,
         initial_delay: Duration::from_millis(100),
         max_delay: Duration::from_secs(1),
-        jitter_factor: 0.2, // 20% jitter
+        backoff_multiplier: 2.0,
+        use_jitter: true,
+        jitter_percent: 0.2, // 20% jitter
     };
 
     let mut state = RetryState::new();
@@ -227,7 +241,7 @@ async fn test_exponential_backoff_with_jitter() {
 #[ignore = "Requires session-aware queue client integration"]
 async fn test_session_ordering_preserved() {
     // Arrange: Create multiple events with same session ID
-    let session_id = SessionId::from_parts("owner", "repo", "pull_request", "123");
+    let _session_id = SessionId::from_parts("owner", "repo", "pull_request", "123");
 
     // TODO: Create events and verify they are delivered in order
     // This requires session-aware queue client integration

@@ -10,7 +10,6 @@ use bytes::Bytes;
 use common::{
     create_test_app_state_with_processor, create_valid_webhook_headers, MockWebhookProcessor,
 };
-use queue_keeper_core::webhook::WebhookError;
 use std::sync::Arc;
 use std::time::Duration;
 

@@ -9,9 +9,10 @@
 
 mod common;
 
-use common::create_test_app_state;
-use queue_keeper_core::blob_storage::{BlobStorage, WebhookPayload};
+use bytes::Bytes;
+use queue_keeper_core::blob_storage::{BlobStorage, PayloadMetadata, WebhookPayload};
 use queue_keeper_core::{EventId, Timestamp};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Verify that webhook payloads are persisted to storage
@@ -23,33 +24,40 @@ async fn test_webhook_payload_persistence() {
     let storage = queue_keeper_core::adapters::filesystem_storage::FilesystemBlobStorage::new(
         std::env::temp_dir().join("test-storage-persistence"),
     )
+    .await
     .expect("Failed to create storage");
 
     let event_id = EventId::new();
+    let mut headers = HashMap::new();
+    headers.insert("x-github-event".to_string(), "pull_request".to_string());
+    headers.insert(
+        "x-github-delivery".to_string(),
+        uuid::Uuid::new_v4().to_string(),
+    );
+
     let payload = WebhookPayload {
-        event_id,
-        event_type: "pull_request".to_string(),
-        occurred_at: Timestamp::now(),
-        body: b"{\"action\":\"opened\"}".to_vec(),
-        headers: vec![
-            ("x-github-event".to_string(), "pull_request".to_string()),
-            (
-                "x-github-delivery".to_string(),
-                uuid::Uuid::new_v4().to_string(),
-            ),
-        ],
+        body: Bytes::from("{\"action\":\"opened\"}"),
+        headers,
+        metadata: PayloadMetadata {
+            event_id: event_id.clone(),
+            event_type: "pull_request".to_string(),
+            repository: None,
+            signature_valid: true,
+            received_at: Timestamp::now(),
+            delivery_id: Some(uuid::Uuid::new_v4().to_string()),
+        },
     };
 
     // Act: Store payload
-    let result = storage.store(&payload).await;
+    let result = storage.store_payload(&event_id, &payload).await;
 
     // Assert: Storage succeeds
     assert!(result.is_ok(), "Storage should succeed: {:?}", result.err());
 
     let metadata = result.unwrap();
     assert_eq!(metadata.event_id, event_id);
-    assert!(metadata.size > 0);
-    assert!(!metadata.checksum.is_empty());
+    assert!(metadata.size_bytes > 0);
+    assert!(!metadata.checksum_sha256.is_empty());
 
     // Cleanup
     let _ = std::fs::remove_dir_all(std::env::temp_dir().join("test-storage-persistence"));
@@ -64,23 +72,32 @@ async fn test_payload_retrieval() {
     let storage = queue_keeper_core::adapters::filesystem_storage::FilesystemBlobStorage::new(
         std::env::temp_dir().join("test-storage-retrieval"),
     )
+    .await
     .expect("Failed to create storage");
 
     let event_id = EventId::new();
-    let original_body = b"{\"action\":\"opened\",\"number\":123}".to_vec();
+    let original_body = Bytes::from("{\"action\":\"opened\",\"number\":123}");
+    let mut headers = HashMap::new();
+    headers.insert("x-github-event".to_string(), "pull_request".to_string());
+
     let payload = WebhookPayload {
-        event_id,
-        event_type: "pull_request".to_string(),
-        occurred_at: Timestamp::now(),
         body: original_body.clone(),
-        headers: vec![("x-github-event".to_string(), "pull_request".to_string())],
+        headers,
+        metadata: PayloadMetadata {
+            event_id: event_id.clone(),
+            event_type: "pull_request".to_string(),
+            repository: None,
+            signature_valid: true,
+            received_at: Timestamp::now(),
+            delivery_id: None,
+        },
     };
 
     // Act: Store and retrieve
-    let store_result = storage.store(&payload).await;
+    let store_result = storage.store_payload(&event_id, &payload).await;
     assert!(store_result.is_ok());
 
-    let retrieve_result = storage.retrieve(&event_id).await;
+    let retrieve_result = storage.get_payload(&event_id).await;
 
     // Assert: Retrieved payload matches original
     assert!(
@@ -89,10 +106,10 @@ async fn test_payload_retrieval() {
         retrieve_result.err()
     );
 
-    let stored = retrieve_result.unwrap();
+    let stored = retrieve_result.unwrap().expect("Payload should exist");
     assert_eq!(stored.metadata.event_id, event_id);
     assert_eq!(stored.payload.body, original_body);
-    assert_eq!(stored.payload.event_type, "pull_request");
+    assert_eq!(stored.payload.metadata.event_type, "pull_request");
 
     // Cleanup
     let _ = std::fs::remove_dir_all(std::env::temp_dir().join("test-storage-retrieval"));
@@ -108,19 +125,25 @@ async fn test_checksum_tamper_detection() {
     let storage = queue_keeper_core::adapters::filesystem_storage::FilesystemBlobStorage::new(
         storage_path.clone(),
     )
+    .await
     .expect("Failed to create storage");
 
     let event_id = EventId::new();
     let payload = WebhookPayload {
-        event_id,
-        event_type: "pull_request".to_string(),
-        occurred_at: Timestamp::now(),
-        body: b"{\"action\":\"opened\"}".to_vec(),
-        headers: vec![],
+        body: Bytes::from("{\"action\":\"opened\"}"),
+        headers: HashMap::new(),
+        metadata: PayloadMetadata {
+            event_id: event_id.clone(),
+            event_type: "pull_request".to_string(),
+            repository: None,
+            signature_valid: true,
+            received_at: Timestamp::now(),
+            delivery_id: None,
+        },
     };
 
     // Act: Store payload
-    let store_result = storage.store(&payload).await;
+    let store_result = storage.store_payload(&event_id, &payload).await;
     assert!(store_result.is_ok());
 
     // Tamper with stored file (modify the body)
@@ -143,31 +166,38 @@ async fn test_large_payload_storage() {
     let storage = queue_keeper_core::adapters::filesystem_storage::FilesystemBlobStorage::new(
         std::env::temp_dir().join("test-storage-large"),
     )
+    .await
     .expect("Failed to create storage");
 
     let event_id = EventId::new();
-    let large_body = vec![b'A'; 1024 * 1024]; // 1MB of 'A'
+    let large_body = Bytes::from(vec![b'A'; 1024 * 1024]); // 1MB of 'A'
     let payload = WebhookPayload {
-        event_id,
-        event_type: "pull_request".to_string(),
-        occurred_at: Timestamp::now(),
         body: large_body.clone(),
-        headers: vec![],
+        headers: HashMap::new(),
+        metadata: PayloadMetadata {
+            event_id: event_id.clone(),
+            event_type: "pull_request".to_string(),
+            repository: None,
+            signature_valid: true,
+            received_at: Timestamp::now(),
+            delivery_id: None,
+        },
     };
 
     // Act: Store large payload
-    let store_result = storage.store(&payload).await;
+    let store_result = storage.store_payload(&event_id, &payload).await;
 
     // Assert: Storage succeeds
     assert!(store_result.is_ok(), "Large payload storage should succeed");
 
     let metadata = store_result.unwrap();
-    assert_eq!(metadata.size, 1024 * 1024);
+    assert_eq!(metadata.size_bytes, 1024 * 1024);
 
     // Verify retrieval works
-    let retrieve_result = storage.retrieve(&event_id).await;
+    let retrieve_result = storage.get_payload(&event_id).await;
     assert!(retrieve_result.is_ok());
-    assert_eq!(retrieve_result.unwrap().payload.body, large_body);
+    let stored = retrieve_result.unwrap().expect("Payload should exist");
+    assert_eq!(stored.payload.body, large_body);
 
     // Cleanup
     let _ = std::fs::remove_dir_all(std::env::temp_dir().join("test-storage-large"));
@@ -182,12 +212,13 @@ async fn test_retrieve_nonexistent_event() {
     let storage = queue_keeper_core::adapters::filesystem_storage::FilesystemBlobStorage::new(
         std::env::temp_dir().join("test-storage-nonexistent"),
     )
+    .await
     .expect("Failed to create storage");
 
     let nonexistent_id = EventId::new();
 
     // Act: Attempt to retrieve non-existent event
-    let result = storage.retrieve(&nonexistent_id).await;
+    let result = storage.get_payload(&nonexistent_id).await;
 
     // Assert: Returns NotFound error
     assert!(result.is_err());
@@ -207,6 +238,7 @@ async fn test_concurrent_storage_writes() {
         queue_keeper_core::adapters::filesystem_storage::FilesystemBlobStorage::new(
             std::env::temp_dir().join("test-storage-concurrent"),
         )
+        .await
         .expect("Failed to create storage"),
     );
 
@@ -217,13 +249,18 @@ async fn test_concurrent_storage_writes() {
         let handle = tokio::spawn(async move {
             let event_id = EventId::new();
             let payload = WebhookPayload {
-                event_id,
-                event_type: format!("test_{}", i),
-                occurred_at: Timestamp::now(),
-                body: format!("{{\"test\":{}}}", i).into_bytes(),
-                headers: vec![],
+                body: Bytes::from(format!("{{\"test\":{}}}", i)),
+                headers: HashMap::new(),
+                metadata: PayloadMetadata {
+                    event_id: event_id.clone(),
+                    event_type: format!("test_{}", i),
+                    repository: None,
+                    signature_valid: true,
+                    received_at: Timestamp::now(),
+                    delivery_id: None,
+                },
             };
-            storage_clone.store(&payload).await
+            storage_clone.store_payload(&event_id, &payload).await
         });
         handles.push(handle);
     }
@@ -247,15 +284,17 @@ async fn test_storage_health_check() {
     let storage = queue_keeper_core::adapters::filesystem_storage::FilesystemBlobStorage::new(
         std::env::temp_dir().join("test-storage-health"),
     )
+    .await
     .expect("Failed to create storage");
 
     // Act: Perform health check
-    let health = storage.health().await;
+    let health = storage.health_check().await;
 
     // Assert: Storage is healthy
     assert!(health.is_ok());
     let health_info = health.unwrap();
-    assert!(health_info.is_healthy);
+    assert!(health_info.healthy);
+    assert!(health_info.connected);
 
     // Cleanup
     let _ = std::fs::remove_dir_all(std::env::temp_dir().join("test-storage-health"));
@@ -271,18 +310,28 @@ async fn test_list_stored_events() {
     let storage = queue_keeper_core::adapters::filesystem_storage::FilesystemBlobStorage::new(
         std::env::temp_dir().join("test-storage-list"),
     )
+    .await
     .expect("Failed to create storage");
 
     // Store 5 events
     for i in 0..5 {
+        let event_id = EventId::new();
         let payload = WebhookPayload {
-            event_id: EventId::new(),
-            event_type: format!("event_{}", i),
-            occurred_at: Timestamp::now(),
-            body: vec![],
-            headers: vec![],
+            body: Bytes::from(""),
+            headers: HashMap::new(),
+            metadata: PayloadMetadata {
+                event_id: event_id.clone(),
+                event_type: format!("event_{}", i),
+                repository: None,
+                signature_valid: true,
+                received_at: Timestamp::now(),
+                delivery_id: None,
+            },
         };
-        storage.store(&payload).await.expect("Store should succeed");
+        storage
+            .store_payload(&event_id, &payload)
+            .await
+            .expect("Store should succeed");
     }
 
     // Act: List events
