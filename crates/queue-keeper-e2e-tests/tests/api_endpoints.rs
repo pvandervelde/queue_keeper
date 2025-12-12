@@ -232,9 +232,9 @@ async fn test_api_error_format() {
     let server = TestContainer::start().await;
     let client = http_client();
 
-    // Act - Request non-existent event
+    // Act - Request non-existent route (not an unimplemented handler)
     let response = client
-        .get(server.url("/api/events/nonexistent"))
+        .get(server.url("/api/nonexistent-route"))
         .send()
         .await
         .expect("Failed to send request");
