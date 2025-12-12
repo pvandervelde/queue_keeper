@@ -26,6 +26,7 @@ use tokio::time::{sleep, Duration};
 
 /// Mock webhook processor for testing immediate response behavior
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct MockWebhookProcessor {
     process_calls: Arc<Mutex<Vec<WebhookRequest>>>,
     process_result_factory:
@@ -34,6 +35,7 @@ pub struct MockWebhookProcessor {
 }
 
 impl MockWebhookProcessor {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         let default_envelope = create_default_event_envelope();
 
@@ -46,24 +48,29 @@ impl MockWebhookProcessor {
         }
     }
 
+    #[allow(dead_code)]
     pub fn set_result(&self, result: EventEnvelope) {
         let r = result.clone();
         *self.process_result_factory.lock().unwrap() = Box::new(move || Ok(r.clone()));
     }
 
+    #[allow(dead_code)]
     pub fn set_error(&self, error_msg: String) {
         *self.process_result_factory.lock().unwrap() =
             Box::new(move || Err(WebhookError::InvalidSignature(error_msg.clone())));
     }
 
+    #[allow(dead_code)]
     pub fn set_delay(&self, delay: Duration) {
         *self.process_delay.lock().unwrap() = Some(delay);
     }
 
+    #[allow(dead_code)]
     pub fn get_calls(&self) -> Vec<WebhookRequest> {
         self.process_calls.lock().unwrap().clone()
     }
 
+    #[allow(dead_code)]
     pub fn call_count(&self) -> usize {
         self.process_calls.lock().unwrap().len()
     }
@@ -126,17 +133,20 @@ impl WebhookProcessor for MockWebhookProcessor {
 // ============================================================================
 
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct MockHealthChecker {
     healthy: Arc<Mutex<bool>>,
 }
 
 impl MockHealthChecker {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self {
             healthy: Arc::new(Mutex::new(true)),
         }
     }
 
+    #[allow(dead_code)]
     pub fn set_healthy(&self, healthy: bool) {
         *self.healthy.lock().unwrap() = healthy;
     }
@@ -175,21 +185,25 @@ impl HealthChecker for MockHealthChecker {
 // ============================================================================
 
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct MockEventStore {
     events: Arc<Mutex<Vec<EventEnvelope>>>,
 }
 
 impl MockEventStore {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self {
             events: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
+    #[allow(dead_code)]
     pub fn add_event(&self, event: EventEnvelope) {
         self.events.lock().unwrap().push(event);
     }
 
+    #[allow(dead_code)]
     pub fn event_count(&self) -> usize {
         self.events.lock().unwrap().len()
     }
@@ -276,11 +290,13 @@ impl EventStore for MockEventStore {
 // ============================================================================
 
 /// Create a test AppState with mock implementations
+#[allow(dead_code)]
 pub fn create_test_app_state() -> AppState {
     create_test_app_state_with_processor(Arc::new(MockWebhookProcessor::new()))
 }
 
 /// Create a test AppState with a specific webhook processor
+#[allow(dead_code)]
 pub fn create_test_app_state_with_processor(processor: Arc<dyn WebhookProcessor>) -> AppState {
     let config = ServiceConfig::default();
     let health_checker = Arc::new(MockHealthChecker::new());
@@ -299,6 +315,7 @@ pub fn create_test_app_state_with_processor(processor: Arc<dyn WebhookProcessor>
 }
 
 /// Create valid GitHub webhook headers for testing
+#[allow(dead_code)]
 pub fn create_valid_webhook_headers() -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert("x-github-event", HeaderValue::from_static("pull_request"));
@@ -315,6 +332,7 @@ pub fn create_valid_webhook_headers() -> HeaderMap {
 }
 
 /// Create a default EventEnvelope for testing
+#[allow(dead_code)]
 pub fn create_default_event_envelope() -> EventEnvelope {
     EventEnvelope {
         event_id: EventId::new(),
