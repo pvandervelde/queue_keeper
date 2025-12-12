@@ -191,7 +191,11 @@ async fn test_large_payload_storage() {
     assert!(store_result.is_ok(), "Large payload storage should succeed");
 
     let metadata = store_result.unwrap();
-    assert_eq!(metadata.size_bytes, 1024 * 1024);
+    // Size should be at least the payload size (1MB), plus overhead for JSON structure
+    assert!(
+        metadata.size_bytes >= 1024 * 1024,
+        "Stored size should be at least payload size"
+    );
 
     // Verify retrieval works
     let retrieve_result = storage.get_payload(&event_id).await;
@@ -220,9 +224,9 @@ async fn test_retrieve_nonexistent_event() {
     // Act: Attempt to retrieve non-existent event
     let result = storage.get_payload(&nonexistent_id).await;
 
-    // Assert: Returns NotFound error
-    assert!(result.is_err());
-    // TODO: Verify specific error type once BlobStorageError is defined
+    // Assert: Returns Ok(None) for nonexistent event
+    assert!(result.is_ok());
+    assert!(result.unwrap().is_none());
 
     // Cleanup
     let _ = std::fs::remove_dir_all(std::env::temp_dir().join("test-storage-nonexistent"));
