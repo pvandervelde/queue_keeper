@@ -5,12 +5,12 @@
 # - Multi-stage build for minimal final image size
 # - Non-root user for security
 # - Health check integration
-# - Debian bullseye-slim base for compatibility
+# - Debian bookworm-slim base for GLIBC 2.36+ compatibility
 
 # ============================================================================
 # Stage 1: Builder
 # ============================================================================
-FROM rust:1.90-slim AS builder
+FROM rust:1.90-slim-bookworm AS builder
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
@@ -67,7 +67,7 @@ RUN strip /app/target/release/queue-keeper-service
 # ============================================================================
 # Stage 2: Runtime
 # ============================================================================
-FROM debian:bullseye-slim
+FROM debian:bookworm-slim
 
 # Install runtime dependencies (minimal set)
 RUN apt-get update && apt-get install -y \
