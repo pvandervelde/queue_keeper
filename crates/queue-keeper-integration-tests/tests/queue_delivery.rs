@@ -231,11 +231,17 @@ async fn test_exponential_backoff_with_jitter() {
     }
 
     // After 4 attempts (0-3), we've reached attempt 4 which is still < max_attempts (5)
-    assert!(state.can_retry(&policy), "Should still be able to retry at attempt 4");
-    
+    assert!(
+        state.can_retry(&policy),
+        "Should still be able to retry at attempt 4"
+    );
+
     // One more attempt reaches the limit
     state.next_attempt();
-    assert!(!state.can_retry(&policy), "Should not be able to retry at attempt 5");
+    assert!(
+        !state.can_retry(&policy),
+        "Should not be able to retry at attempt 5"
+    );
 }
 
 /// Verify that queue delivery preserves session ordering

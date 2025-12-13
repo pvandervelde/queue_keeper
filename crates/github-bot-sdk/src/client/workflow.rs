@@ -107,7 +107,11 @@ impl InstallationClient {
     /// List workflows in a repository.
     ///
     /// See github-bot-sdk-specs/interfaces/additional-operations.md
-    pub async fn list_workflows(&self, _owner: &str, _repo: &str) -> Result<Vec<Workflow>, ApiError> {
+    pub async fn list_workflows(
+        &self,
+        _owner: &str,
+        _repo: &str,
+    ) -> Result<Vec<Workflow>, ApiError> {
         unimplemented!("See github-bot-sdk-specs/interfaces/additional-operations.md")
     }
 
