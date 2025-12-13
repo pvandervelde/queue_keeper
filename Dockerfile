@@ -10,7 +10,7 @@
 # ============================================================================
 # Stage 1: Builder
 # ============================================================================
-FROM rust:1.90-slim-bookworm AS builder
+FROM rust:1.90-slim-bookworm@sha256:64232e656c058f4468e8d024e990acff04f0fd5a5c0a88a574dc37773d7325c9 AS builder
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
@@ -67,7 +67,7 @@ RUN strip /app/target/release/queue-keeper-service
 # ============================================================================
 # Stage 2: Runtime
 # ============================================================================
-FROM debian:bookworm-slim
+FROM debian:bookworm-slim@sha256:e899040a73d36e2b36fa33216943539d9957cba8172b858097c2cabcdb20a3e2
 
 # Install runtime dependencies (minimal set)
 RUN apt-get update && apt-get install -y \

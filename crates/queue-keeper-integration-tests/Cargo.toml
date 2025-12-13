@@ -14,10 +14,10 @@ queue-runtime = { path = "../queue-runtime", version = "0.1.0" }
 
 # Testing framework
 tokio = { workspace = true, features = ["full", "test-util"] }
-tokio-test = "0.4"
+tokio-test = "=0.4.4"
 
 # HTTP testing
-axum = "0.8"
+axum = "=0.8.7"
 tower = { workspace = true }
 bytes = { workspace = true }
 
