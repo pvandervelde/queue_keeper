@@ -1,7 +1,19 @@
-use queue_keeper_core::webhook::DefaultWebhookProcessor;
-use queue_keeper_service::{
+//! # Queue-Keeper Service
+//!
+//! Binary entry point for the Queue-Keeper HTTP service.
+//!
+//! This executable:
+//! - Loads configuration from environment and files
+//! - Initializes observability (logging, metrics, tracing)
+//! - Creates webhook processor and dependencies
+//! - Starts the HTTP server from queue-keeper-api
+//!
+//! See specs/interfaces/http-service.md for complete specification.
+
+use queue_keeper_api::{
     start_server, DefaultEventStore, DefaultHealthChecker, ServiceConfig, ServiceError,
 };
+use queue_keeper_core::webhook::DefaultWebhookProcessor;
 use std::sync::Arc;
 use tracing::{error, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -11,8 +23,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logging
     tracing_subscriber::registry()
         .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "queue_keeper_service=info,tower_http=debug".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                "queue_keeper_service=info,queue_keeper_api=info,tower_http=debug".into()
+            }),
         )
         .with(tracing_subscriber::fmt::layer())
         .init();

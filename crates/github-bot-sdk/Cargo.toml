@@ -3,7 +3,7 @@ name = "github-bot-sdk"
 version = "0.1.0"
 edition = "2021"
 description = "GitHub Bot SDK for Queue-Keeper"
-license = "MIT"
+license = "Apache-2.0"
 repository = "https://github.com/pvandervelde/queue_keeper"
 
 [dependencies]

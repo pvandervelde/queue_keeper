@@ -1,0 +1,24 @@
+[package]
+authors.workspace = true
+description = "End-to-end tests for Queue-Keeper service"
+edition.workspace = true
+license.workspace = true
+name = "queue-keeper-e2e-tests"
+publish = false
+version.workspace = true
+
+[dependencies]
+# HTTP client for testing
+reqwest = { workspace = true, features = ["json"] }
+tokio = { workspace = true, features = ["full"] }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Test utilities
+uuid = { workspace = true }
+anyhow = { workspace = true }
+
+# Container interaction (if needed)
+# bollard = "0.17"  # Docker API client

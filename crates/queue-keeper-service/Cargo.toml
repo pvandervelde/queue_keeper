@@ -1,12 +1,21 @@
+[[bin]]
+name = "queue-keeper-service"
+path = "src/main.rs"
+
 [package]
 name = "queue-keeper-service"
-version = "0.1.0"
-edition = "2021"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
 description = "HTTP service for receiving GitHub webhooks"
-license = "MIT"
-repository = "https://github.com/pvandervelde/queue_keeper"
+
 
 [dependencies]
+# HTTP API library
+queue-keeper-api = { path = "../queue-keeper-api", version = "0.1.0" }
+
 # Core dependencies
 queue-keeper-core = { path = "../queue-keeper-core", version = "0.1.0" }
 queue-runtime = { path = "../queue-runtime", version = "0.1.0" }
@@ -14,48 +23,8 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
-uuid = { workspace = true }
-
-# HTTP server
-axum = { version = "0.8", features = ["macros", "tracing"] }
-tower = { workspace = true }
-tower-http = { workspace = true }
-hyper = { workspace = true }
-bytes = { workspace = true }
-
-# Configuration and environment
 config = { workspace = true }
 toml = { workspace = true }
 
 # Error handling
 anyhow = { workspace = true }
-thiserror = { workspace = true }
-
-# Security
-hmac = { workspace = true }
-sha2 = { workspace = true }
-hex = { workspace = true }
-
-# Date/time
-chrono = { workspace = true }
-
-# Async traits
-async-trait = { workspace = true }
-
-# HTTP client
-reqwest = { workspace = true }
-
-# Observability
-prometheus = { version = "0.14", features = ["process"] }
-opentelemetry = { workspace = true }
-opentelemetry-otlp = { workspace = true }
-
-# Retry logic
-rand = "0.8.5"
-
-[dev-dependencies]
-tempfile = "=3.23.0"
-tokio-test = "=0.4.4"
-wiremock = "=0.6.5"
-axum-test = "=18.3.0"

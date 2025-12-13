@@ -1,10 +1,10 @@
 [package]
-name = "queue-keeper-cli"
-version = "0.1.0"
-edition = "2021"
+authors.workspace = true
 description = "Command-line interface for Queue-Keeper"
-license = "MIT"
-repository = "https://github.com/pvandervelde/queue_keeper"
+edition.workspace = true
+license.workspace = true
+name = "queue-keeper-cli"
+version.workspace = true
 
 [dependencies]
 # Core dependencies

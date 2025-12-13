@@ -5,7 +5,6 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::client::issue::{IssueUser, Label, Milestone};
-use crate::client::repository::Commit;
 use crate::client::InstallationClient;
 use crate::error::ApiError;
 

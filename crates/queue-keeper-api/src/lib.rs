@@ -15,22 +15,6 @@ pub mod dlq_storage;
 pub mod queue_delivery;
 pub mod retry;
 
-#[cfg(test)]
-#[path = "health_tests.rs"]
-mod health_tests;
-
-#[cfg(test)]
-#[path = "middleware_tests.rs"]
-mod middleware_tests;
-
-#[cfg(test)]
-#[path = "shutdown_tests.rs"]
-mod shutdown_tests;
-
-#[cfg(test)]
-#[path = "error_handling_tests.rs"]
-mod error_handling_tests;
-
 use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
@@ -413,7 +397,7 @@ pub async fn start_server(
 /// This ensures GitHub receives a response within the timeout while allowing
 /// queue delivery to proceed in the background with proper retry logic.
 #[instrument(skip(state, headers, body))]
-async fn handle_webhook(
+pub async fn handle_webhook(
     State(state): State<AppState>,
     headers: HeaderMap,
     body: Bytes,
@@ -1905,7 +1889,3 @@ impl TelemetryConfig {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "lib_tests.rs"]
-mod tests;

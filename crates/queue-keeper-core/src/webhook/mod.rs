@@ -12,7 +12,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tracing::{error, info};
+use tracing::info;
 
 // ============================================================================
 // Core Types
