@@ -746,6 +746,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "azure_security_keyvault"
+version = "0.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bd94f507b75349a0e381c0a23bd77cc654fb509f0e6797ce4f99dd959d9e2d68"
+dependencies = [
+ "async-trait",
+ "azure_core 0.21.0",
+ "futures",
+ "serde",
+ "serde_json",
+ "time",
+]
+
+[[package]]
 name = "base16ct"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3072,6 +3086,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "azure_core 0.30.1",
+ "azure_identity",
+ "azure_security_keyvault",
  "bytes",
  "chrono",
  "github-bot-sdk",
