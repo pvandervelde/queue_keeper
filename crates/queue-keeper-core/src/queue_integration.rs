@@ -254,7 +254,7 @@ impl EventRouter for DefaultEventRouter {
         config: &BotConfiguration,
         queue_client: &dyn QueueClient,
     ) -> Result<DeliveryResult, QueueDeliveryError> {
-        let mut result = DeliveryResult::new(event.event_id.clone());
+        let mut result = DeliveryResult::new(event.event_id);
 
         // Get target bots from configuration
         let target_bots = config.get_target_bots(event);
