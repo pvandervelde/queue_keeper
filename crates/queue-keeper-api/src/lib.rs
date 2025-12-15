@@ -87,7 +87,7 @@ impl AppState {
 // ============================================================================
 
 /// Service configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ServiceConfig {
     /// HTTP server settings
     pub server: ServerConfig,
@@ -100,17 +100,6 @@ pub struct ServiceConfig {
 
     /// Logging configuration
     pub logging: LoggingConfig,
-}
-
-impl Default for ServiceConfig {
-    fn default() -> Self {
-        Self {
-            server: ServerConfig::default(),
-            webhooks: WebhookConfig::default(),
-            security: SecurityConfig::default(),
-            logging: LoggingConfig::default(),
-        }
-    }
 }
 
 /// HTTP server configuration
@@ -607,9 +596,7 @@ async fn handle_readiness_check(
 
 /// Liveness check endpoint (for Kubernetes)
 #[instrument(skip(_state))]
-async fn handle_liveness_check(
-    State(_state): State<AppState>,
-) -> Json<HealthResponse> {
+async fn handle_liveness_check(State(_state): State<AppState>) -> Json<HealthResponse> {
     // Liveness check is simpler than readiness - just verify the process is alive
     // If we can respond, we're alive (unlike readiness which checks dependencies)
     Json(HealthResponse {
@@ -655,9 +642,7 @@ async fn get_event(
     };
 
     match state.event_store.get_event(&event_id).await {
-        Ok(envelope) => Ok(Json(EventDetailResponse {
-            event: envelope,
-        })),
+        Ok(envelope) => Ok(Json(EventDetailResponse { event: envelope })),
         Err(e) => {
             error!(error = %e, event_id = %event_id, "Failed to get event");
             Err(StatusCode::NOT_FOUND)
@@ -696,9 +681,7 @@ async fn get_session(
     };
 
     match state.event_store.get_session(&session_id).await {
-        Ok(details) => Ok(Json(SessionDetailResponse {
-            session: details,
-        })),
+        Ok(details) => Ok(Json(SessionDetailResponse { session: details })),
         Err(e) => {
             error!(error = %e, session_id = %session_id, "Failed to get session");
             Err(StatusCode::NOT_FOUND)
@@ -914,7 +897,7 @@ async fn request_logging_middleware(
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
     // Record correlation ID in span
-    tracing::Span::current().record("correlation_id", &correlation_id.as_str());
+    tracing::Span::current().record("correlation_id", correlation_id.as_str());
 
     // Add correlation ID to request extensions for downstream handlers
     request.extensions_mut().insert(correlation_id.clone());
@@ -993,7 +976,7 @@ async fn metrics_middleware(
     // Normalize path for metrics (remove IDs, keep structure)
     // This prevents cardinality explosion in metrics
     let normalized_path = normalize_path_for_metrics(&uri);
-    tracing::Span::current().record("path", &normalized_path.as_str());
+    tracing::Span::current().record("path", normalized_path.as_str());
 
     // Get request size
     let request_size = request
@@ -1072,12 +1055,10 @@ fn normalize_path_for_metrics(path: &str) -> String {
             if segment.is_empty() {
                 segment.to_string()
             }
-            // Check if segment looks like a numeric ID
-            else if !segment.is_empty() && segment.chars().all(|c| c.is_ascii_digit()) {
-                ":id".to_string()
-            }
-            // Check if segment looks like a UUID (8-4-4-4-12 pattern)
-            else if is_uuid_like(segment) {
+            // Check if segment looks like a numeric ID or UUID (8-4-4-4-12 pattern)
+            else if (!segment.is_empty() && segment.chars().all(|c| c.is_ascii_digit()))
+                || is_uuid_like(segment)
+            {
                 ":id".to_string()
             } else {
                 segment.to_string()
