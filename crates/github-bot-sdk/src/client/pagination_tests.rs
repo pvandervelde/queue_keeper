@@ -1,5 +1,7 @@
 //! Tests for pagination support.
 
+#![allow(clippy::field_reassign_with_default)]
+
 use super::*;
 
 mod construction {
@@ -267,7 +269,6 @@ mod serialization {
 }
 
 mod extract_page_number {
-    use super::*;
 
     #[test]
     fn test_extract_page_number_with_page_param() {

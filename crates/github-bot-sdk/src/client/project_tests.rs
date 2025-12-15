@@ -1,9 +1,6 @@
 //! Tests for project operations.
 
-use super::*;
-
 mod construction {
-    use super::*;
 
     #[test]
     #[ignore = "TODO: Verify AddProjectV2ItemRequest with node ID"]
@@ -13,7 +10,6 @@ mod construction {
 }
 
 mod project_operations {
-    use super::*;
 
     #[tokio::test]
     #[ignore = "TODO: Mock: GET /orgs/:org/projects"]
@@ -71,7 +67,6 @@ mod project_operations {
 }
 
 mod serialization {
-    use super::*;
 
     #[test]
     #[ignore = "TODO: Verify ProjectV2 can be deserialized from GitHub API response"]
@@ -99,7 +94,6 @@ mod serialization {
 }
 
 mod error_handling {
-    use super::*;
 
     #[tokio::test]
     #[ignore = "TODO: Mock: 404 response returns ApiError::NotFound"]

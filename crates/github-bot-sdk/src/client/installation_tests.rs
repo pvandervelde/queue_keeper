@@ -5,7 +5,7 @@
 use super::*;
 use crate::auth::{
     AuthenticationProvider, InstallationId, InstallationPermissions, InstallationToken,
-    JsonWebToken, RepositoryId,
+    JsonWebToken,
 };
 use crate::client::ClientConfig;
 use crate::error::{ApiError, AuthError};

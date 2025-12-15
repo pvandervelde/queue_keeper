@@ -169,7 +169,7 @@ impl InstallationClient {
         }
 
         // Parse successful response
-        response.json().await.map_err(|e| ApiError::from(e))
+        response.json().await.map_err(ApiError::from)
     }
 
     /// List all branches in a repository.
@@ -225,7 +225,7 @@ impl InstallationClient {
             });
         }
 
-        response.json().await.map_err(|e| ApiError::from(e))
+        response.json().await.map_err(ApiError::from)
     }
 
     /// Get a specific branch by name.
@@ -286,7 +286,7 @@ impl InstallationClient {
             });
         }
 
-        response.json().await.map_err(|e| ApiError::from(e))
+        response.json().await.map_err(ApiError::from)
     }
 
     /// Get a Git reference (branch or tag).
@@ -345,7 +345,7 @@ impl InstallationClient {
             });
         }
 
-        response.json().await.map_err(|e| ApiError::from(e))
+        response.json().await.map_err(ApiError::from)
     }
 
     /// Create a new Git reference (branch or tag).
@@ -422,7 +422,7 @@ impl InstallationClient {
             });
         }
 
-        response.json().await.map_err(|e| ApiError::from(e))
+        response.json().await.map_err(ApiError::from)
     }
 
     /// Update an existing Git reference.
@@ -504,7 +504,7 @@ impl InstallationClient {
             });
         }
 
-        response.json().await.map_err(|e| ApiError::from(e))
+        response.json().await.map_err(ApiError::from)
     }
 
     /// Delete a Git reference.
@@ -615,7 +615,7 @@ impl InstallationClient {
             });
         }
 
-        response.json().await.map_err(|e| ApiError::from(e))
+        response.json().await.map_err(ApiError::from)
     }
 
     /// Create a new branch (convenience wrapper around create_git_ref).

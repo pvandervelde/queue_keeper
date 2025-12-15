@@ -355,7 +355,7 @@ impl InstallationClient {
             .unwrap_or_default();
 
         // Parse response body
-        let items: Vec<Issue> = response.json().await.map_err(|e| ApiError::from(e))?;
+        let items: Vec<Issue> = response.json().await.map_err(ApiError::from)?;
 
         Ok(crate::client::PagedResponse {
             items,
@@ -392,7 +392,7 @@ impl InstallationClient {
                 }
             });
         }
-        response.json().await.map_err(|e| ApiError::from(e))
+        response.json().await.map_err(ApiError::from)
     }
 
     /// Create a new issue.
@@ -430,7 +430,7 @@ impl InstallationClient {
                 }
             });
         }
-        response.json().await.map_err(|e| ApiError::from(e))
+        response.json().await.map_err(ApiError::from)
     }
 
     /// Update an existing issue.
@@ -469,7 +469,7 @@ impl InstallationClient {
                 }
             });
         }
-        response.json().await.map_err(|e| ApiError::from(e))
+        response.json().await.map_err(ApiError::from)
     }
 
     /// Set the milestone on an issue.
@@ -516,7 +516,7 @@ impl InstallationClient {
                 }
             });
         }
-        response.json().await.map_err(|e| ApiError::from(e))
+        response.json().await.map_err(ApiError::from)
     }
 
     /// Get a specific label by name.
@@ -544,7 +544,7 @@ impl InstallationClient {
                 }
             });
         }
-        response.json().await.map_err(|e| ApiError::from(e))
+        response.json().await.map_err(ApiError::from)
     }
 
     /// Create a new label.
@@ -584,7 +584,7 @@ impl InstallationClient {
                 }
             });
         }
-        response.json().await.map_err(|e| ApiError::from(e))
+        response.json().await.map_err(ApiError::from)
     }
 
     /// Update an existing label.
@@ -625,7 +625,7 @@ impl InstallationClient {
                 }
             });
         }
-        response.json().await.map_err(|e| ApiError::from(e))
+        response.json().await.map_err(ApiError::from)
     }
 
     /// Delete a label.
@@ -694,7 +694,7 @@ impl InstallationClient {
                 }
             });
         }
-        response.json().await.map_err(|e| ApiError::from(e))
+        response.json().await.map_err(ApiError::from)
     }
 
     /// Remove a label from an issue.
@@ -731,7 +731,7 @@ impl InstallationClient {
                 }
             });
         }
-        response.json().await.map_err(|e| ApiError::from(e))
+        response.json().await.map_err(ApiError::from)
     }
 
     // ========================================================================
@@ -768,7 +768,7 @@ impl InstallationClient {
                 }
             });
         }
-        response.json().await.map_err(|e| ApiError::from(e))
+        response.json().await.map_err(ApiError::from)
     }
 
     /// Get a specific comment by ID.
@@ -801,7 +801,7 @@ impl InstallationClient {
                 }
             });
         }
-        response.json().await.map_err(|e| ApiError::from(e))
+        response.json().await.map_err(ApiError::from)
     }
 
     /// Create a comment on an issue.
@@ -842,7 +842,7 @@ impl InstallationClient {
                 }
             });
         }
-        response.json().await.map_err(|e| ApiError::from(e))
+        response.json().await.map_err(ApiError::from)
     }
 
     /// Update an existing comment.
@@ -883,7 +883,7 @@ impl InstallationClient {
                 }
             });
         }
-        response.json().await.map_err(|e| ApiError::from(e))
+        response.json().await.map_err(ApiError::from)
     }
 
     /// Delete a comment.

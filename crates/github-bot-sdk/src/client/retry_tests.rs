@@ -3,7 +3,6 @@
 use super::*;
 
 mod rate_limit_info {
-    use super::*;
 
     #[test]
     #[ignore = "TODO: Verify RateLimitInfo::from_headers with valid headers"]
@@ -262,7 +261,6 @@ mod retry_policy {
 }
 
 mod serialization {
-    use super::*;
 
     #[test]
     #[ignore = "TODO: Verify RateLimitInfo can be serialized"]
@@ -316,11 +314,7 @@ mod retry_after_parsing {
 
         let delay_secs = delay.unwrap().as_secs();
         // Should be approximately 60 seconds (allow 1 second variance for test execution)
-        assert!(
-            delay_secs >= 59 && delay_secs <= 61,
-            "Delay was {}s",
-            delay_secs
-        );
+        assert!((59..=61).contains(&delay_secs), "Delay was {}s", delay_secs);
     }
 
     /// Verify that parse_retry_after returns None for invalid formats.
@@ -381,7 +375,7 @@ mod rate_limit_delay_calculation {
         // Should be approximately 120 seconds
         let delay_secs = delay.as_secs();
         assert!(
-            delay_secs >= 119 && delay_secs <= 121,
+            (119..=121).contains(&delay_secs),
             "Delay was {}s",
             delay_secs
         );
@@ -403,11 +397,7 @@ mod rate_limit_delay_calculation {
 
         // Should fall back to reset time (90s)
         let delay_secs = delay.as_secs();
-        assert!(
-            delay_secs >= 89 && delay_secs <= 91,
-            "Delay was {}s",
-            delay_secs
-        );
+        assert!((89..=91).contains(&delay_secs), "Delay was {}s", delay_secs);
     }
 
     /// Verify that invalid reset time falls back to default.
@@ -449,7 +439,7 @@ mod rate_limit_delay_calculation {
         // Should be approximately 180 seconds
         let delay_secs = delay.as_secs();
         assert!(
-            delay_secs >= 179 && delay_secs <= 181,
+            (179..=181).contains(&delay_secs),
             "Delay was {}s",
             delay_secs
         );

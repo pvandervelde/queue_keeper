@@ -253,7 +253,6 @@ fn test_jwt_token_time_until_expiry() {
 }
 
 /// Verify InstallationToken expiry detection and soon-to-expire warnings.
-
 /// Verify TargetType enum variants and serialization.
 ///
 /// Tests that TargetType variants (Organization, User) are correctly
