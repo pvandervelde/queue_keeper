@@ -3,8 +3,8 @@
 use super::*;
 use queue_keeper_core::{
     blob_storage::{
-        BlobMetadata, BlobStorage, BlobStorageError, PayloadFilter, PayloadMetadata,
-        StorageHealthStatus, StoredWebhook, WebhookPayload,
+        BlobMetadata, BlobStorage, BlobStorageError, PayloadFilter, StorageHealthStatus,
+        StoredWebhook, WebhookPayload,
     },
     webhook::EventEnvelope,
     BotName, CorrelationId, EventEntity, EventId, QueueName, Repository, RepositoryId, SessionId,
