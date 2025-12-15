@@ -64,10 +64,11 @@ impl AzureKeyVaultProvider {
         let credential = Arc::new(DefaultAzureCredential::default());
 
         // Create Key Vault client
-        let client = SecretClient::new(&config.vault_url, credential)
-            .map_err(|e| KeyVaultError::Configuration {
+        let client = SecretClient::new(&config.vault_url, credential).map_err(|e| {
+            KeyVaultError::Configuration {
                 message: format!("Failed to create Key Vault client: {}", e),
-            })?;
+            }
+        })?;
 
         Ok(Self {
             client,
@@ -91,10 +92,11 @@ impl AzureKeyVaultProvider {
             });
         }
 
-        let client = SecretClient::new(&config.vault_url, credential)
-            .map_err(|e| KeyVaultError::Configuration {
+        let client = SecretClient::new(&config.vault_url, credential).map_err(|e| {
+            KeyVaultError::Configuration {
                 message: format!("Failed to create Key Vault client: {}", e),
-            })?;
+            }
+        })?;
 
         Ok(Self {
             client,
@@ -112,11 +114,9 @@ impl AzureKeyVaultProvider {
 
         match result {
             Ok(secret) => {
-                let value = secret
-                    .value()
-                    .ok_or_else(|| KeyVaultError::Internal {
-                        message: "Secret has no value".to_string(),
-                    })?;
+                let value = secret.value().ok_or_else(|| KeyVaultError::Internal {
+                    message: "Secret has no value".to_string(),
+                })?;
 
                 info!(secret_name = %name, "Successfully retrieved secret from Key Vault");
                 Ok(SecretValue::from_string(value.to_string()))
@@ -178,11 +178,9 @@ impl AzureKeyVaultProvider {
 
         match result {
             Ok(secret) => {
-                let value = secret
-                    .value()
-                    .ok_or_else(|| KeyVaultError::Internal {
-                        message: "Secret has no value".to_string(),
-                    })?;
+                let value = secret.value().ok_or_else(|| KeyVaultError::Internal {
+                    message: "Secret has no value".to_string(),
+                })?;
 
                 let version = secret
                     .properties()
