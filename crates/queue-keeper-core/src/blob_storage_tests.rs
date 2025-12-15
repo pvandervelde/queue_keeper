@@ -30,14 +30,14 @@ fn test_webhook_payload_creation() {
 fn test_blob_metadata_creation() {
     let event_id = EventId::new();
     let metadata = BlobMetadata {
-        event_id: event_id.clone(),
+        event_id,
         blob_path: "test/path.json".to_string(),
         size_bytes: 1024,
         content_type: "application/json".to_string(),
         created_at: Timestamp::now(),
         checksum_sha256: "test-checksum".to_string(),
         metadata: PayloadMetadata {
-            event_id: event_id.clone(),
+            event_id,
             event_type: "issues".to_string(),
             repository: None,
             signature_valid: true,
@@ -57,7 +57,7 @@ fn test_stored_webhook_structure() {
         body: Bytes::from("{}"),
         headers: HashMap::new(),
         metadata: PayloadMetadata {
-            event_id: event_id.clone(),
+            event_id,
             event_type: "push".to_string(),
             repository: None,
             signature_valid: true,
@@ -68,7 +68,7 @@ fn test_stored_webhook_structure() {
 
     let stored = StoredWebhook {
         metadata: BlobMetadata {
-            event_id: event_id.clone(),
+            event_id,
             blob_path: "test/path.json".to_string(),
             size_bytes: 2,
             content_type: "application/json".to_string(),
@@ -339,14 +339,14 @@ fn test_webhook_payload_serialization() {
 fn test_blob_metadata_serialization() {
     let event_id = EventId::new();
     let metadata = BlobMetadata {
-        event_id: event_id.clone(),
+        event_id,
         blob_path: "test/path.json".to_string(),
         size_bytes: 2048,
         content_type: "application/json".to_string(),
         created_at: Timestamp::now(),
         checksum_sha256: "test-checksum".to_string(),
         metadata: PayloadMetadata {
-            event_id: event_id.clone(),
+            event_id,
             event_type: "pull_request".to_string(),
             repository: None,
             signature_valid: true,
@@ -371,7 +371,7 @@ fn test_stored_webhook_serialization() {
         body: Bytes::from("{}"),
         headers: HashMap::new(),
         metadata: PayloadMetadata {
-            event_id: event_id.clone(),
+            event_id,
             event_type: "issues".to_string(),
             repository: None,
             signature_valid: false,
@@ -382,7 +382,7 @@ fn test_stored_webhook_serialization() {
 
     let stored = StoredWebhook {
         metadata: BlobMetadata {
-            event_id: event_id.clone(),
+            event_id,
             blob_path: "path/to/blob.json".to_string(),
             size_bytes: 2,
             content_type: "application/json".to_string(),
