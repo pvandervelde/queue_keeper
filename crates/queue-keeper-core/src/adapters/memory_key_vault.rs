@@ -345,7 +345,12 @@ impl KeyVaultProvider for InMemoryKeyVaultProvider {
         // Update cache
         let ttl = Duration::from_secs(self.config.cache_ttl_seconds);
         self.cache
-            .put_with_version(name.clone(), value_clone.clone(), version_clone.clone(), ttl)
+            .put_with_version(
+                name.clone(),
+                value_clone.clone(),
+                version_clone.clone(),
+                ttl,
+            )
             .await?;
 
         Ok((value_clone, version_clone))
