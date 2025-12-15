@@ -278,7 +278,7 @@ impl ReplayType {
 }
 
 /// Filter criteria for event selection
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct EventFilter {
     /// Event types to include
     pub event_types: Option<Vec<String>>,
@@ -294,18 +294,6 @@ pub struct EventFilter {
 
     /// Bot routing results
     pub routing_results: Option<RoutingResultFilter>,
-}
-
-impl Default for EventFilter {
-    fn default() -> Self {
-        Self {
-            event_types: None,
-            repositories: None,
-            session_ids: None,
-            processing_status: None,
-            routing_results: None,
-        }
-    }
 }
 
 impl EventFilter {
