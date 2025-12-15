@@ -143,6 +143,7 @@ impl AuditEvent {
     }
 
     /// Calculate content hash for integrity verification
+    #[allow(clippy::too_many_arguments)]
     fn calculate_content_hash(
         audit_id: &AuditLogId,
         occurred_at: &Timestamp,
@@ -617,7 +618,7 @@ impl AuditResult {
 }
 
 /// Additional context for audit events
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct AuditContext {
     /// Session or correlation identifier
     pub correlation_id: Option<String>,
@@ -648,23 +649,6 @@ pub struct AuditContext {
 
     /// Additional structured data
     pub additional_data: HashMap<String, String>,
-}
-
-impl Default for AuditContext {
-    fn default() -> Self {
-        Self {
-            correlation_id: None,
-            request_id: None,
-            source_ip: None,
-            user_agent: None,
-            http_context: None,
-            geo_context: None,
-            performance: None,
-            security: None,
-            business: None,
-            additional_data: HashMap::new(),
-        }
-    }
 }
 
 /// HTTP request context
