@@ -1942,7 +1942,7 @@ mod concurrency {
 
         // Wait for all sends
         for handle in handles {
-            handle.await.unwrap();
+            let _ = handle.await.unwrap();
         }
 
         // Receive from both queues concurrently
