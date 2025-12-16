@@ -37,11 +37,11 @@ bytes = { workspace = true }
 sha2 = "0.10"
 hex = "0.4"
 
-# Azure SDK (with futures for streaming)
+# Azure SDK dependencies
 futures = { version = "0.3", optional = true }
 azure_security_keyvault = { version = "0.21", optional = true }
-azure_identity = { version = "0.30", optional = true }
-azure_core = { version = "0.30", optional = true }
+azure_identity = { version = "0.21", optional = true }
+azure_core = { version = "0.21", optional = true }
 
 # Dependencies on library crates
 github-bot-sdk = { path = "../github-bot-sdk", version = "0.1.0" }

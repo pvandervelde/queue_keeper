@@ -11,13 +11,13 @@ use crate::key_vault::{
 #[cfg(feature = "azure")]
 use async_trait::async_trait;
 #[cfg(feature = "azure")]
-use azure_core::credentials::TokenCredential;
+use azure_core::auth::TokenCredential;
 #[cfg(feature = "azure")]
 use azure_identity::DefaultAzureCredential;
 #[cfg(feature = "azure")]
-use azure_security_keyvault::SecretClient;
+use azure_security_keyvault::prelude::*;
 #[cfg(feature = "azure")]
-use futures::StreamExt;
+use futures::stream::StreamExt;
 #[cfg(feature = "azure")]
 use std::sync::Arc;
 #[cfg(feature = "azure")]
@@ -61,7 +61,11 @@ impl AzureKeyVaultProvider {
         info!(vault_url = %config.vault_url, "Initializing Azure Key Vault provider");
 
         // Create credential using DefaultAzureCredential
-        let credential = Arc::new(DefaultAzureCredential::default());
+        let credential = Arc::new(DefaultAzureCredential::create(Default::default()).map_err(
+            |e| KeyVaultError::Configuration {
+                message: format!("Failed to create Azure credential: {}", e),
+            },
+        )?);
 
         // Create Key Vault client
         let client = SecretClient::new(&config.vault_url, credential).map_err(|e| {
@@ -114,12 +118,14 @@ impl AzureKeyVaultProvider {
 
         match result {
             Ok(secret) => {
-                let value = secret.value().ok_or_else(|| KeyVaultError::Internal {
-                    message: "Secret has no value".to_string(),
-                })?;
+                if secret.value.is_empty() {
+                    return Err(KeyVaultError::Internal {
+                        message: "Secret has no value".to_string(),
+                    });
+                }
 
                 info!(secret_name = %name, "Successfully retrieved secret from Key Vault");
-                Ok(SecretValue::from_string(value.to_string()))
+                Ok(SecretValue::from_string(secret.value))
             }
             Err(e) => {
                 let error_string = e.to_string();
@@ -178,31 +184,33 @@ impl AzureKeyVaultProvider {
 
         match result {
             Ok(secret) => {
-                let value = secret.value().ok_or_else(|| KeyVaultError::Internal {
-                    message: "Secret has no value".to_string(),
-                })?;
+                if secret.value.is_empty() {
+                    return Err(KeyVaultError::Internal {
+                        message: "Secret has no value".to_string(),
+                    });
+                }
 
                 let version = secret
-                    .properties()
-                    .version()
+                    .id
+                    .split('/')
+                    .next_back()
                     .unwrap_or("unknown")
                     .to_string();
 
                 info!(secret_name = %name, version = %version, "Successfully retrieved secret with version");
 
-                Ok((SecretValue::from_string(value.to_string()), version))
+                Ok((SecretValue::from_string(secret.value), version))
             }
             Err(e) => {
                 error!(secret_name = %name, error = %e, "Failed to retrieve secret with version");
-                Err(self.map_azure_error(name, e))
+                let error_string = e.to_string();
+                Err(self.map_azure_error_string(name, &error_string))
             }
         }
     }
 
-    /// Map Azure SDK error to KeyVaultError
-    fn map_azure_error(&self, name: &SecretName, error: azure_core::Error) -> KeyVaultError {
-        let error_string = error.to_string();
-
+    /// Map Azure SDK error string to KeyVaultError
+    fn map_azure_error_string(&self, name: &SecretName, error_string: &str) -> KeyVaultError {
         if error_string.contains("404") || error_string.contains("NotFound") {
             KeyVaultError::SecretNotFound { name: name.clone() }
         } else if error_string.contains("403")
@@ -211,7 +219,7 @@ impl AzureKeyVaultProvider {
         {
             KeyVaultError::AccessDenied {
                 name: name.clone(),
-                reason: error_string,
+                reason: error_string.to_string(),
             }
         } else if error_string.contains("timeout")
             || error_string.contains("Timeout")
@@ -232,11 +240,11 @@ impl AzureKeyVaultProvider {
             || error_string.contains("unavailable")
         {
             KeyVaultError::ServiceUnavailable {
-                message: error_string,
+                message: error_string.to_string(),
             }
         } else {
             KeyVaultError::Internal {
-                message: error_string,
+                message: error_string.to_string(),
             }
         }
     }
@@ -326,7 +334,7 @@ impl KeyVaultProvider for AzureKeyVaultProvider {
                 if error_string.contains("404") || error_string.contains("NotFound") {
                     Ok(false)
                 } else {
-                    Err(self.map_azure_error(name, e))
+                    Err(self.map_azure_error_string(name, &error_string))
                 }
             }
         }
@@ -338,14 +346,20 @@ impl KeyVaultProvider for AzureKeyVaultProvider {
 
         let mut names = Vec::new();
 
-        // Azure SDK uses streams for listing
-        let mut stream = self.client.list_secrets();
+        // Azure SDK v0.21 uses streaming API with into_stream()
+        let mut stream = self.client.list_secrets().into_stream();
 
         while let Some(result) = stream.next().await {
             match result {
-                Ok(properties) => {
-                    if let Ok(name) = SecretName::new(properties.name()) {
-                        names.push(name);
+                Ok(response) => {
+                    // Each response contains a batch of secret items
+                    for secret_item in response.value {
+                        // Extract the secret name from the ID (last segment of the URL)
+                        if let Some(name) = secret_item.id.split('/').next_back() {
+                            if let Ok(secret_name) = SecretName::new(name) {
+                                names.push(secret_name);
+                            }
+                        }
                     }
                 }
                 Err(e) => {
