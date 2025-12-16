@@ -37,7 +37,8 @@ bytes = { workspace = true }
 sha2 = "0.10"
 hex = "0.4"
 
-# Azure SDK
+# Azure SDK (with futures for streaming)
+futures = { version = "0.3", optional = true }
 azure_security_keyvault = { version = "0.21", optional = true }
 azure_identity = { version = "0.30", optional = true }
 azure_core = { version = "0.30", optional = true }
@@ -53,4 +54,4 @@ tempfile = "3.14"
 
 [features]
 default = []
-azure = ["azure_security_keyvault", "azure_identity", "azure_core"]
+azure = ["futures", "azure_security_keyvault", "azure_identity", "azure_core"]

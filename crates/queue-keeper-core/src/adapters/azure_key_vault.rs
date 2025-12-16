@@ -11,7 +11,7 @@ use crate::key_vault::{
 #[cfg(feature = "azure")]
 use async_trait::async_trait;
 #[cfg(feature = "azure")]
-use azure_core::auth::TokenCredential;
+use azure_core::credentials::TokenCredential;
 #[cfg(feature = "azure")]
 use azure_identity::DefaultAzureCredential;
 #[cfg(feature = "azure")]
