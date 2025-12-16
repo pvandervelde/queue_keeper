@@ -385,7 +385,7 @@ impl InstallationClient {
             .unwrap_or_default();
 
         // Parse response body
-        let items: Vec<PullRequest> = response.json().await.map_err(|e| ApiError::from(e))?;
+        let items: Vec<PullRequest> = response.json().await.map_err(ApiError::from)?;
 
         Ok(crate::client::PagedResponse {
             items,
@@ -424,7 +424,7 @@ impl InstallationClient {
                 }
             });
         }
-        response.json().await.map_err(|e| ApiError::from(e))
+        response.json().await.map_err(ApiError::from)
     }
 
     /// Create a new pull request.
@@ -464,7 +464,7 @@ impl InstallationClient {
                 }
             });
         }
-        response.json().await.map_err(|e| ApiError::from(e))
+        response.json().await.map_err(ApiError::from)
     }
 
     /// Update an existing pull request.
@@ -505,7 +505,7 @@ impl InstallationClient {
                 }
             });
         }
-        response.json().await.map_err(|e| ApiError::from(e))
+        response.json().await.map_err(ApiError::from)
     }
 
     /// Merge a pull request.
@@ -559,7 +559,7 @@ impl InstallationClient {
                 }
             });
         }
-        response.json().await.map_err(|e| ApiError::from(e))
+        response.json().await.map_err(ApiError::from)
     }
 
     /// Set the milestone on a pull request.
@@ -614,7 +614,7 @@ impl InstallationClient {
                 }
             });
         }
-        response.json().await.map_err(|e| ApiError::from(e))
+        response.json().await.map_err(ApiError::from)
     }
 
     /// Get a specific review by ID.
@@ -651,7 +651,7 @@ impl InstallationClient {
                 }
             });
         }
-        response.json().await.map_err(|e| ApiError::from(e))
+        response.json().await.map_err(ApiError::from)
     }
 
     /// Create a review on a pull request.
@@ -692,7 +692,7 @@ impl InstallationClient {
                 }
             });
         }
-        response.json().await.map_err(|e| ApiError::from(e))
+        response.json().await.map_err(ApiError::from)
     }
 
     /// Update a pending review.
@@ -737,7 +737,7 @@ impl InstallationClient {
                 }
             });
         }
-        response.json().await.map_err(|e| ApiError::from(e))
+        response.json().await.map_err(ApiError::from)
     }
 
     /// Dismiss a review.
@@ -782,7 +782,7 @@ impl InstallationClient {
                 }
             });
         }
-        response.json().await.map_err(|e| ApiError::from(e))
+        response.json().await.map_err(ApiError::from)
     }
 
     // ========================================================================
@@ -819,7 +819,7 @@ impl InstallationClient {
                 }
             });
         }
-        response.json().await.map_err(|e| ApiError::from(e))
+        response.json().await.map_err(ApiError::from)
     }
 
     /// Create a comment on a pull request.
@@ -860,7 +860,7 @@ impl InstallationClient {
                 }
             });
         }
-        response.json().await.map_err(|e| ApiError::from(e))
+        response.json().await.map_err(ApiError::from)
     }
 
     // ========================================================================
@@ -906,7 +906,7 @@ impl InstallationClient {
                 }
             });
         }
-        response.json().await.map_err(|e| ApiError::from(e))
+        response.json().await.map_err(ApiError::from)
     }
 
     /// Remove a label from a pull request.

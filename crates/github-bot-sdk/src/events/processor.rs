@@ -154,9 +154,11 @@ impl EventProcessor {
         };
 
         // Create metadata
-        let mut metadata = EventMetadata::default();
-        metadata.delivery_id = delivery_id.map(|s| s.to_string());
-        metadata.signature_valid = !self.config.enable_signature_validation; // Default if not validated
+        let metadata = EventMetadata {
+            delivery_id: delivery_id.map(|s| s.to_string()),
+            signature_valid: !self.config.enable_signature_validation, // Default if not validated
+            ..Default::default()
+        };
 
         // Create envelope
         let mut envelope = EventEnvelope {

@@ -78,11 +78,11 @@ impl BlobStorage for FilesystemBlobStorage {
         // Create temporary metadata for initial serialization
         let created_at = Timestamp::now();
         let temp_metadata = BlobMetadata {
-            event_id: event_id.clone(),
+            event_id: *event_id,
             blob_path: event_id.to_blob_path(),
             size_bytes: 0, // Will be updated after writing
             content_type: "application/json".to_string(),
-            created_at: created_at.clone(),
+            created_at,
             checksum_sha256: String::new(), // Temporary placeholder
             metadata: payload.metadata.clone(),
         };
@@ -150,7 +150,7 @@ impl BlobStorage for FilesystemBlobStorage {
                 })?;
 
         Ok(BlobMetadata {
-            event_id: event_id.clone(),
+            event_id: *event_id,
             blob_path: event_id.to_blob_path(),
             size_bytes: file_metadata.len(),
             content_type: "application/json".to_string(),
@@ -295,7 +295,7 @@ impl BlobStorage for FilesystemBlobStorage {
 
         if !blob_path.exists() {
             return Err(BlobStorageError::BlobNotFound {
-                event_id: event_id.clone(),
+                event_id: *event_id,
             });
         }
 

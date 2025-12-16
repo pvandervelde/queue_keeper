@@ -8,7 +8,6 @@ use crate::auth::{
 use crate::client::{ClientConfig, GitHubClient};
 use crate::error::{ApiError, AuthError};
 use chrono::{Duration, Utc};
-use std::sync::Arc;
 use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -1451,7 +1450,7 @@ mod serialization {
             Some("Something isn't working".to_string())
         );
         assert_eq!(label.color, "d73a4a");
-        assert_eq!(label.default, true);
+        assert!(label.default);
     }
 
     /// Verify Comment can be deserialized from GitHub API response.
@@ -1564,8 +1563,6 @@ mod serialization {
 }
 
 mod error_handling {
-    use super::*;
-
     #[tokio::test]
     #[ignore = "TODO: Mock: 404 response returns ApiError::NotFound"]
     async fn test_issue_not_found() {

@@ -249,6 +249,7 @@ async fn test_queue_client_supports_sessions<C: QueueClient>(client: &C) {
 // ============================================================================
 
 /// Test session client receive
+#[allow(dead_code)]
 async fn test_session_client_receive<S: SessionClient>(session: &S) {
     // Act
     let result = session.receive_message(Duration::seconds(5)).await;
@@ -261,6 +262,7 @@ async fn test_session_client_receive<S: SessionClient>(session: &S) {
 }
 
 /// Test session client complete
+#[allow(dead_code)]
 async fn test_session_client_complete<S: SessionClient>(session: &S, receipt: ReceiptHandle) {
     // Act
     let result = session.complete_message(receipt).await;
@@ -270,6 +272,7 @@ async fn test_session_client_complete<S: SessionClient>(session: &S, receipt: Re
 }
 
 /// Test session lock renewal
+#[allow(dead_code)]
 async fn test_session_client_renew_lock<S: SessionClient>(session: &S) {
     // Act
     let result = session.renew_session_lock().await;
@@ -279,6 +282,7 @@ async fn test_session_client_renew_lock<S: SessionClient>(session: &S) {
 }
 
 /// Test session close
+#[allow(dead_code)]
 async fn test_session_client_close<S: SessionClient>(session: &mut S) {
     // Act
     let result = session.close_session().await;
@@ -288,6 +292,7 @@ async fn test_session_client_close<S: SessionClient>(session: &mut S) {
 }
 
 /// Test session ID query
+#[allow(dead_code)]
 async fn test_session_client_session_id<S: SessionClient>(session: &S) {
     // Act
     let session_id = session.session_id();

@@ -1,9 +1,6 @@
 //! Tests for release operations.
 
-use super::*;
-
 mod construction {
-    use super::*;
 
     #[test]
     #[ignore = "TODO: Verify CreateReleaseRequest with only tag_name"]
@@ -25,7 +22,6 @@ mod construction {
 }
 
 mod release_operations {
-    use super::*;
 
     #[tokio::test]
     #[ignore = "TODO: Mock: GET /repos/:owner/:repo/releases"]
@@ -89,7 +85,6 @@ mod release_operations {
 }
 
 mod serialization {
-    use super::*;
 
     #[test]
     #[ignore = "TODO: Verify Release can be deserialized from GitHub API response"]
@@ -117,7 +112,6 @@ mod serialization {
 }
 
 mod error_handling {
-    use super::*;
 
     #[tokio::test]
     #[ignore = "TODO: Mock: 404 response returns ApiError::NotFound"]

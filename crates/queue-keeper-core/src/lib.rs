@@ -815,6 +815,9 @@ pub enum QueueKeeperError {
 
     #[error("Internal error: {message}")]
     Internal { message: String },
+
+    #[error("Resource not found: {resource} with id {id}")]
+    NotFound { resource: String, id: String },
 }
 
 impl QueueKeeperError {
@@ -826,6 +829,7 @@ impl QueueKeeperError {
             Self::Validation(_) => false,
             Self::Parse(_) => false,
             Self::Configuration { .. } => false,
+            Self::NotFound { .. } => false,
         }
     }
 
@@ -837,6 +841,7 @@ impl QueueKeeperError {
             Self::Configuration { .. } => ErrorCategory::Configuration,
             Self::ExternalService { .. } => ErrorCategory::Transient,
             Self::Internal { .. } => ErrorCategory::Transient,
+            Self::NotFound { .. } => ErrorCategory::Permanent,
         }
     }
 }

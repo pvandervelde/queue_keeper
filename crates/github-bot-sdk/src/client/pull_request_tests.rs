@@ -8,7 +8,6 @@ use crate::auth::{
 use crate::client::{ClientConfig, GitHubClient};
 use crate::error::{ApiError, AuthError};
 use chrono::{Duration, Utc};
-use std::sync::Arc;
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 

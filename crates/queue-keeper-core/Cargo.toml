@@ -37,6 +37,12 @@ bytes = { workspace = true }
 sha2 = "0.10"
 hex = "0.4"
 
+# Azure SDK dependencies
+futures = { version = "0.3", optional = true }
+azure_security_keyvault = { version = "0.21", optional = true }
+azure_identity = { version = "0.21", optional = true }
+azure_core = { version = "0.21", optional = true }
+
 # Dependencies on library crates
 github-bot-sdk = { path = "../github-bot-sdk", version = "0.1.0" }
 queue-runtime = { path = "../queue-runtime", version = "0.1.0" }
@@ -45,3 +51,7 @@ queue-runtime = { path = "../queue-runtime", version = "0.1.0" }
 mockall = { workspace = true }
 tokio-test = "=0.4.4"
 tempfile = "3.14"
+
+[features]
+default = []
+azure = ["futures", "azure_security_keyvault", "azure_identity", "azure_core"]

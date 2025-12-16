@@ -87,7 +87,7 @@ impl AppState {
 // ============================================================================
 
 /// Service configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ServiceConfig {
     /// HTTP server settings
     pub server: ServerConfig,
@@ -100,17 +100,6 @@ pub struct ServiceConfig {
 
     /// Logging configuration
     pub logging: LoggingConfig,
-}
-
-impl Default for ServiceConfig {
-    fn default() -> Self {
-        Self {
-            server: ServerConfig::default(),
-            webhooks: WebhookConfig::default(),
-            security: SecurityConfig::default(),
-            logging: LoggingConfig::default(),
-        }
-    }
 }
 
 /// HTTP server configuration
@@ -254,6 +243,7 @@ pub fn create_router(state: AppState) -> Router {
     let health_routes = Router::new()
         .route("/health", get(handle_health_check))
         .route("/health/deep", get(handle_deep_health_check))
+        .route("/health/live", get(handle_liveness_check))
         .route("/ready", get(handle_readiness_check));
 
     let api_routes = Router::new()
@@ -604,57 +594,113 @@ async fn handle_readiness_check(
     }
 }
 
+/// Liveness check endpoint (for Kubernetes)
+#[instrument(skip(_state))]
+async fn handle_liveness_check(State(_state): State<AppState>) -> Json<HealthResponse> {
+    // Liveness check is simpler than readiness - just verify the process is alive
+    // If we can respond, we're alive (unlike readiness which checks dependencies)
+    Json(HealthResponse {
+        status: "alive".to_string(),
+        timestamp: Timestamp::now(),
+        checks: HashMap::new(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
+    })
+}
+
 // ============================================================================
 // API Handlers (Stubs)
 // ============================================================================
 
 /// List recent events
+#[instrument(skip(state))]
 async fn list_events(
-    State(_state): State<AppState>,
-    Query(_params): Query<EventListParams>,
+    State(state): State<AppState>,
+    Query(params): Query<EventListParams>,
 ) -> Result<Json<EventListResponse>, StatusCode> {
-    // TODO: Implement event listing
-    // See specs/interfaces/http-service.md
-    unimplemented!("Event listing not yet implemented")
+    match state.event_store.list_events(params).await {
+        Ok(response) => Ok(Json(response)),
+        Err(e) => {
+            error!(error = %e, "Failed to list events");
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
 }
 
 /// Get specific event details
+#[instrument(skip(state))]
 async fn get_event(
-    State(_state): State<AppState>,
-    Path(_event_id): Path<String>,
+    State(state): State<AppState>,
+    Path(event_id_str): Path<String>,
 ) -> Result<Json<EventDetailResponse>, StatusCode> {
-    // TODO: Implement event details
-    // See specs/interfaces/http-service.md
-    unimplemented!("Event details not yet implemented")
+    // Parse event ID from ULID string
+    let event_id: EventId = match event_id_str.parse() {
+        Ok(id) => id,
+        Err(e) => {
+            warn!(error = %e, "Invalid event ID format");
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    };
+
+    match state.event_store.get_event(&event_id).await {
+        Ok(envelope) => Ok(Json(EventDetailResponse { event: envelope })),
+        Err(e) => {
+            error!(error = %e, event_id = %event_id, "Failed to get event");
+            Err(StatusCode::NOT_FOUND)
+        }
+    }
 }
 
 /// List active sessions
+#[instrument(skip(state))]
 async fn list_sessions(
-    State(_state): State<AppState>,
-    Query(_params): Query<SessionListParams>,
+    State(state): State<AppState>,
+    Query(params): Query<SessionListParams>,
 ) -> Result<Json<SessionListResponse>, StatusCode> {
-    // TODO: Implement session listing
-    // See specs/interfaces/http-service.md
-    unimplemented!("Session listing not yet implemented")
+    match state.event_store.list_sessions(params).await {
+        Ok(response) => Ok(Json(response)),
+        Err(e) => {
+            error!(error = %e, "Failed to list sessions");
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
 }
 
 /// Get specific session details
+#[instrument(skip(state))]
 async fn get_session(
-    State(_state): State<AppState>,
-    Path(_session_id): Path<String>,
+    State(state): State<AppState>,
+    Path(session_id_str): Path<String>,
 ) -> Result<Json<SessionDetailResponse>, StatusCode> {
-    // TODO: Implement session details
-    // See specs/interfaces/http-service.md
-    unimplemented!("Session details not yet implemented")
+    // Parse session ID - it's a string in owner/repo/type/id format
+    let session_id = match SessionId::new(session_id_str.clone()) {
+        Ok(id) => id,
+        Err(e) => {
+            warn!(error = %e, "Invalid session ID format");
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    };
+
+    match state.event_store.get_session(&session_id).await {
+        Ok(details) => Ok(Json(SessionDetailResponse { session: details })),
+        Err(e) => {
+            error!(error = %e, session_id = %session_id, "Failed to get session");
+            Err(StatusCode::NOT_FOUND)
+        }
+    }
 }
 
 /// Get system statistics
+#[instrument(skip(state))]
 async fn get_statistics(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
 ) -> Result<Json<StatisticsResponse>, StatusCode> {
-    // TODO: Implement statistics
-    // See specs/interfaces/http-service.md
-    unimplemented!("Statistics not yet implemented")
+    match state.event_store.get_statistics().await {
+        Ok(response) => Ok(Json(response)),
+        Err(e) => {
+            error!(error = %e, "Failed to get statistics");
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
 }
 
 // ============================================================================
@@ -851,7 +897,7 @@ async fn request_logging_middleware(
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
     // Record correlation ID in span
-    tracing::Span::current().record("correlation_id", &correlation_id.as_str());
+    tracing::Span::current().record("correlation_id", correlation_id.as_str());
 
     // Add correlation ID to request extensions for downstream handlers
     request.extensions_mut().insert(correlation_id.clone());
@@ -930,7 +976,7 @@ async fn metrics_middleware(
     // Normalize path for metrics (remove IDs, keep structure)
     // This prevents cardinality explosion in metrics
     let normalized_path = normalize_path_for_metrics(&uri);
-    tracing::Span::current().record("path", &normalized_path.as_str());
+    tracing::Span::current().record("path", normalized_path.as_str());
 
     // Get request size
     let request_size = request
@@ -1009,12 +1055,10 @@ fn normalize_path_for_metrics(path: &str) -> String {
             if segment.is_empty() {
                 segment.to_string()
             }
-            // Check if segment looks like a numeric ID
-            else if !segment.is_empty() && segment.chars().all(|c| c.is_ascii_digit()) {
-                ":id".to_string()
-            }
-            // Check if segment looks like a UUID (8-4-4-4-12 pattern)
-            else if is_uuid_like(segment) {
+            // Check if segment looks like a numeric ID or UUID (8-4-4-4-12 pattern)
+            else if (!segment.is_empty() && segment.chars().all(|c| c.is_ascii_digit()))
+                || is_uuid_like(segment)
+            {
                 ":id".to_string()
             } else {
                 segment.to_string()
@@ -1545,41 +1589,57 @@ pub struct DefaultEventStore;
 impl EventStore for DefaultEventStore {
     async fn list_events(
         &self,
-        _params: EventListParams,
+        params: EventListParams,
     ) -> Result<EventListResponse, QueueKeeperError> {
-        // TODO: Implement event listing
-        // See specs/interfaces/http-service.md
-        unimplemented!("Event listing not yet implemented")
+        // For now, return empty list - implementation will come with storage integration
+        Ok(EventListResponse {
+            events: vec![],
+            total: 0,
+            page: params.page.unwrap_or(1),
+            per_page: params.per_page.unwrap_or(50),
+        })
     }
 
-    async fn get_event(&self, _event_id: &EventId) -> Result<EventEnvelope, QueueKeeperError> {
-        // TODO: Implement event retrieval
-        // See specs/interfaces/http-service.md
-        unimplemented!("Event retrieval not yet implemented")
+    async fn get_event(&self, event_id: &EventId) -> Result<EventEnvelope, QueueKeeperError> {
+        // For now, return not found - implementation will come with storage integration
+        Err(QueueKeeperError::NotFound {
+            resource: "event".to_string(),
+            id: event_id.to_string(),
+        })
     }
 
     async fn list_sessions(
         &self,
-        _params: SessionListParams,
+        params: SessionListParams,
     ) -> Result<SessionListResponse, QueueKeeperError> {
-        // TODO: Implement session listing
-        // See specs/interfaces/http-service.md
-        unimplemented!("Session listing not yet implemented")
+        // For now, return empty list - implementation will come with storage integration
+        let _ = params; // Silence unused warning
+        Ok(SessionListResponse {
+            sessions: vec![],
+            total: 0,
+        })
     }
 
     async fn get_session(
         &self,
-        _session_id: &SessionId,
+        session_id: &SessionId,
     ) -> Result<SessionDetails, QueueKeeperError> {
-        // TODO: Implement session retrieval
-        // See specs/interfaces/http-service.md
-        unimplemented!("Session retrieval not yet implemented")
+        // For now, return not found - implementation will come with storage integration
+        Err(QueueKeeperError::NotFound {
+            resource: "session".to_string(),
+            id: session_id.to_string(),
+        })
     }
 
     async fn get_statistics(&self) -> Result<StatisticsResponse, QueueKeeperError> {
-        // TODO: Implement statistics
-        // See specs/interfaces/http-service.md
-        unimplemented!("Statistics not yet implemented")
+        // For now, return zero statistics - implementation will come with storage integration
+        Ok(StatisticsResponse {
+            total_events: 0,
+            events_per_hour: 0.0,
+            active_sessions: 0,
+            error_rate: 0.0,
+            uptime_seconds: 0,
+        })
     }
 }
 

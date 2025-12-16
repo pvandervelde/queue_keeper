@@ -1,5 +1,7 @@
 //! Tests for event envelope and core types.
 
+#![allow(clippy::field_reassign_with_default)]
+
 use super::*;
 use serde_json::json;
 
@@ -434,8 +436,6 @@ fn test_trace_context_serde() {
     assert_eq!(deserialized.span_id, context.span_id);
     assert_eq!(deserialized.parent_span_id, context.parent_span_id);
 }
-
-use super::*;
 
 #[test]
 fn test_module_exports() {

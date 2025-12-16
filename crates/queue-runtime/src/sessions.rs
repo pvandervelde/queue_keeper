@@ -1540,7 +1540,7 @@ impl SessionLifecycleManager {
             return Err(QueueError::ValidationError(
                 ValidationError::InvalidFormat {
                     field: "session_id".to_string(),
-                    message: format!("Session {} is already active", session_id.to_string()),
+                    message: format!("Session {} is already active", session_id),
                 },
             ));
         }

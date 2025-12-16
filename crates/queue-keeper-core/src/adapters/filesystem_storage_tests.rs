@@ -71,7 +71,7 @@ async fn test_filesystem_store_creates_directory_structure() {
         body: Bytes::from("test payload"),
         headers: HashMap::new(),
         metadata: PayloadMetadata {
-            event_id: event_id.clone(),
+            event_id,
             event_type: "push".to_string(),
             repository: None,
             signature_valid: true,
@@ -111,7 +111,7 @@ async fn test_filesystem_store_writes_json() {
             h
         },
         metadata: PayloadMetadata {
-            event_id: event_id.clone(),
+            event_id,
             event_type: "pull_request".to_string(),
             repository: None,
             signature_valid: true,
@@ -159,7 +159,7 @@ async fn test_filesystem_get_reads_stored_payload() {
             h
         },
         metadata: PayloadMetadata {
-            event_id: event_id.clone(),
+            event_id,
             event_type: "push".to_string(),
             repository: Some(test_repository("owner", "repo")),
             signature_valid: true,
@@ -238,11 +238,11 @@ async fn test_filesystem_list_filters_by_date() {
         body: Bytes::from("test"),
         headers: HashMap::new(),
         metadata: PayloadMetadata {
-            event_id: event_id.clone(),
+            event_id,
             event_type: "push".to_string(),
             repository: Some(test_repository("owner", "repo")),
             signature_valid: true,
-            received_at: now.clone(),
+            received_at: now,
             delivery_id: None,
         },
     };
@@ -252,7 +252,7 @@ async fn test_filesystem_list_filters_by_date() {
     // Use a range that includes 'now' (start <= now < end)
     let filter = PayloadFilter {
         date_range: Some(DateRange {
-            start: now.clone(),
+            start: now,
             end: Timestamp::now(), // Slightly later
         }),
         ..Default::default()
@@ -281,7 +281,7 @@ async fn test_filesystem_list_filters_by_repository() {
         body: Bytes::from("test1"),
         headers: HashMap::new(),
         metadata: PayloadMetadata {
-            event_id: event_id1.clone(),
+            event_id: event_id1,
             event_type: "push".to_string(),
             repository: Some(test_repository("owner", "repo1")),
             signature_valid: true,
@@ -296,7 +296,7 @@ async fn test_filesystem_list_filters_by_repository() {
         body: Bytes::from("test2"),
         headers: HashMap::new(),
         metadata: PayloadMetadata {
-            event_id: event_id2.clone(),
+            event_id: event_id2,
             event_type: "push".to_string(),
             repository: Some(test_repository("owner", "repo2")),
             signature_valid: true,
@@ -340,7 +340,7 @@ async fn test_filesystem_list_filters_by_event_type() {
         body: Bytes::from("push event"),
         headers: HashMap::new(),
         metadata: PayloadMetadata {
-            event_id: event_id1.clone(),
+            event_id: event_id1,
             event_type: "push".to_string(),
             repository: None,
             signature_valid: true,
@@ -355,7 +355,7 @@ async fn test_filesystem_list_filters_by_event_type() {
         body: Bytes::from("pr event"),
         headers: HashMap::new(),
         metadata: PayloadMetadata {
-            event_id: event_id2.clone(),
+            event_id: event_id2,
             event_type: "pull_request".to_string(),
             repository: None,
             signature_valid: true,
@@ -397,7 +397,7 @@ async fn test_filesystem_delete_removes_file() {
         body: Bytes::from("to be deleted"),
         headers: HashMap::new(),
         metadata: PayloadMetadata {
-            event_id: event_id.clone(),
+            event_id,
             event_type: "push".to_string(),
             repository: None,
             signature_valid: true,

@@ -5,7 +5,7 @@ use super::*;
 #[test]
 fn test_cli_parsing() {
     // Test basic command parsing
-    let cli = Cli::try_parse_from(&["queue-keeper", "status", "--verbose"]);
+    let cli = Cli::try_parse_from(["queue-keeper", "status", "--verbose"]);
     assert!(cli.is_ok());
 
     let cli = cli.unwrap();

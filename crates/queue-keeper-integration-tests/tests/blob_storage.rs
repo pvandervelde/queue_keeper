@@ -39,7 +39,7 @@ async fn test_webhook_payload_persistence() {
         body: Bytes::from("{\"action\":\"opened\"}"),
         headers,
         metadata: PayloadMetadata {
-            event_id: event_id.clone(),
+            event_id,
             event_type: "pull_request".to_string(),
             repository: None,
             signature_valid: true,
@@ -84,7 +84,7 @@ async fn test_payload_retrieval() {
         body: original_body.clone(),
         headers,
         metadata: PayloadMetadata {
-            event_id: event_id.clone(),
+            event_id,
             event_type: "pull_request".to_string(),
             repository: None,
             signature_valid: true,
@@ -133,7 +133,7 @@ async fn test_checksum_tamper_detection() {
         body: Bytes::from("{\"action\":\"opened\"}"),
         headers: HashMap::new(),
         metadata: PayloadMetadata {
-            event_id: event_id.clone(),
+            event_id,
             event_type: "pull_request".to_string(),
             repository: None,
             signature_valid: true,
@@ -175,7 +175,7 @@ async fn test_large_payload_storage() {
         body: large_body.clone(),
         headers: HashMap::new(),
         metadata: PayloadMetadata {
-            event_id: event_id.clone(),
+            event_id,
             event_type: "pull_request".to_string(),
             repository: None,
             signature_valid: true,
@@ -256,7 +256,7 @@ async fn test_concurrent_storage_writes() {
                 body: Bytes::from(format!("{{\"test\":{}}}", i)),
                 headers: HashMap::new(),
                 metadata: PayloadMetadata {
-                    event_id: event_id.clone(),
+                    event_id,
                     event_type: format!("test_{}", i),
                     repository: None,
                     signature_valid: true,
@@ -324,7 +324,7 @@ async fn test_list_stored_events() {
             body: Bytes::from(""),
             headers: HashMap::new(),
             metadata: PayloadMetadata {
-                event_id: event_id.clone(),
+                event_id,
                 event_type: format!("event_{}", i),
                 repository: None,
                 signature_valid: true,

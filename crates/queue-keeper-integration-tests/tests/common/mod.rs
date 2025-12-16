@@ -27,6 +27,7 @@ use tokio::time::{sleep, Duration};
 /// Mock webhook processor for testing immediate response behavior
 #[derive(Clone)]
 #[allow(dead_code)]
+#[allow(clippy::type_complexity)]
 pub struct MockWebhookProcessor {
     process_calls: Arc<Mutex<Vec<WebhookRequest>>>,
     process_result_factory:
@@ -236,11 +237,11 @@ impl EventStore for MockEventStore {
             .skip(offset)
             .take(per_page)
             .map(|e| queue_keeper_api::EventSummary {
-                event_id: e.event_id.clone(),
+                event_id: e.event_id,
                 event_type: e.event_type.clone(),
                 repository: e.repository.full_name.clone(),
                 session_id: e.session_id.clone(),
-                occurred_at: e.occurred_at.clone(),
+                occurred_at: e.occurred_at,
                 status: "processed".to_string(),
             })
             .collect();

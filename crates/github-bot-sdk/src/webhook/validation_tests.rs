@@ -1,7 +1,7 @@
 //! Tests for webhook signature validation.
 
 use super::*;
-use crate::auth::{GitHubAppId, KeyAlgorithm, PrivateKey, SecretProvider};
+use crate::auth::{GitHubAppId, PrivateKey, SecretProvider};
 use crate::error::SecretError;
 use async_trait::async_trait;
 use chrono::Duration;
@@ -460,7 +460,7 @@ async fn test_uses_constant_time_comparison() {
     mac.update(payload);
     let result = mac.finalize();
     let result_bytes = result.into_bytes();
-    let valid_sig = format!("sha256={}", hex::encode(&result_bytes));
+    let valid_sig = format!("sha256={}", hex::encode(result_bytes));
 
     // Create invalid signature (completely different)
     let invalid_sig = "sha256=0000000000000000000000000000000000000000000000000000000000000000";
@@ -469,8 +469,8 @@ async fn test_uses_constant_time_comparison() {
     let valid_result = validator.validate(payload, &valid_sig).await;
     let invalid_result = validator.validate(payload, invalid_sig).await;
 
-    assert!(valid_result.is_ok() && valid_result.unwrap() == true);
-    assert!(invalid_result.is_ok() && invalid_result.unwrap() == false);
+    assert!(valid_result.is_ok() && valid_result.unwrap());
+    assert!(invalid_result.is_ok() && !invalid_result.unwrap());
 
     // The key security property is that we use subtle::ConstantTimeEq
     // in the constant_time_compare method, which provides timing attack

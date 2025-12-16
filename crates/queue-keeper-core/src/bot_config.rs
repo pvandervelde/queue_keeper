@@ -271,8 +271,7 @@ impl EventTypePattern {
                 if wildcard.ends_with('*') {
                     let prefix = &wildcard[..wildcard.len() - 1];
                     event_type.starts_with(prefix)
-                } else if wildcard.starts_with('*') {
-                    let suffix = &wildcard[1..];
+                } else if let Some(suffix) = wildcard.strip_prefix('*') {
                     event_type.ends_with(suffix)
                 } else {
                     false
