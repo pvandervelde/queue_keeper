@@ -41,7 +41,10 @@ pub use provider::{
     AwsSqsConfig, AzureServiceBusConfig, InMemoryConfig, ProviderConfig, ProviderType, QueueConfig,
     SessionSupport,
 };
-pub use providers::{InMemoryProvider, InMemorySessionProvider};
+pub use providers::{
+    AzureAuthMethod, AzureServiceBusProvider, AzureSessionProvider, InMemoryProvider,
+    InMemorySessionProvider,
+};
 pub use sessions::{
     CompositeKeyStrategy, FallbackStrategy, NoOrderingStrategy, SessionAffinity,
     SessionAffinityTracker, SessionInfo, SessionKeyExtractor, SessionKeyGenerator,

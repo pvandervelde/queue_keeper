@@ -84,10 +84,16 @@ pub enum ProviderConfig {
 /// Azure Service Bus configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AzureServiceBusConfig {
-    pub connection_string: String,
-    pub namespace: String,
+    pub connection_string: Option<String>,
+    pub namespace: Option<String>,
+    #[serde(skip, default = "default_auth_method")]
+    pub auth_method: crate::providers::AzureAuthMethod,
     pub use_sessions: bool,
     pub session_timeout: Duration,
+}
+
+fn default_auth_method() -> crate::providers::AzureAuthMethod {
+    crate::providers::AzureAuthMethod::DefaultCredential
 }
 
 /// AWS SQS configuration

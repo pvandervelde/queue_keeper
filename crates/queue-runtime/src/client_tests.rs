@@ -382,8 +382,9 @@ async fn test_factory_create_from_azure_config() {
     // Arrange
     let config = QueueConfig {
         provider: ProviderConfig::AzureServiceBus(crate::provider::AzureServiceBusConfig {
-            connection_string: "Endpoint=sb://test.servicebus.windows.net/;SharedAccessKeyName=test;SharedAccessKey=test".to_string(),
-            namespace: "test".to_string(),
+            connection_string: Some("Endpoint=sb://test.servicebus.windows.net/;SharedAccessKeyName=test;SharedAccessKey=test".to_string()),
+            namespace: Some("test".to_string()),
+            auth_method: crate::providers::AzureAuthMethod::ConnectionString,
             use_sessions: true,
             session_timeout: Duration::minutes(5),
         }),
