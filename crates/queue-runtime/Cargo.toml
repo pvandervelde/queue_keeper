@@ -24,6 +24,9 @@ anyhow = { workspace = true }
 # Async traits
 async-trait = { workspace = true }
 
+# HTTP client
+reqwest = { workspace = true }
+
 # Azure Service Bus
 azure_messaging_servicebus = { workspace = true }
 azure_core = { workspace = true }
@@ -40,6 +43,9 @@ config = { workspace = true }
 url = { workspace = true }
 bytes = { workspace = true }
 base64 = "0.22"
+urlencoding = "2.1"
+hmac = { workspace = true }
+sha2 = { workspace = true }
 
 [dev-dependencies]
 tempfile = "=3.23.0"

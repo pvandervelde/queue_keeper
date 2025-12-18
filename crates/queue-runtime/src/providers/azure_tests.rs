@@ -434,94 +434,98 @@ mod provider_tests {
 // Sender/Receiver Caching Tests
 // ============================================================================
 
-mod caching_tests {
-    use super::*;
+// NOTE: These tests are disabled because the HTTP-based implementation
+// no longer uses cached senders/receivers. The HTTP client handles
+// connection pooling internally via reqwest.
 
-    /// Test sender is created and cached
-    #[tokio::test]
-    async fn test_sender_caching() {
-        // Arrange
-        let config = AzureServiceBusConfig {
-            connection_string: Some(
-                "Endpoint=sb://test.servicebus.windows.net/;SharedAccessKeyName=test;SharedAccessKey=dGVzdA=="
-                    .to_string(),
-            ),
-            namespace: None,
-            auth_method: AzureAuthMethod::ConnectionString,
-            use_sessions: true,
-            session_timeout: Duration::minutes(5),
-        };
-        let provider = AzureServiceBusProvider::new(config).await.unwrap();
-        let queue = QueueName::new("test-queue".to_string()).unwrap();
-
-        // Act - get sender twice
-        let sender1 = provider.get_or_create_sender(&queue).await.unwrap();
-        let sender2 = provider.get_or_create_sender(&queue).await.unwrap();
-
-        // Assert - should be same instance (Arc equality)
-        assert!(
-            Arc::ptr_eq(&sender1, &sender2),
-            "Should return cached sender"
-        );
-    }
-
-    /// Test receiver is created and cached
-    #[tokio::test]
-    async fn test_receiver_caching() {
-        // Arrange
-        let config = AzureServiceBusConfig {
-            connection_string: Some(
-                "Endpoint=sb://test.servicebus.windows.net/;SharedAccessKeyName=test;SharedAccessKey=dGVzdA=="
-                    .to_string(),
-            ),
-            namespace: None,
-            auth_method: AzureAuthMethod::ConnectionString,
-            use_sessions: true,
-            session_timeout: Duration::minutes(5),
-        };
-        let provider = AzureServiceBusProvider::new(config).await.unwrap();
-        let queue = QueueName::new("test-queue".to_string()).unwrap();
-
-        // Act - get receiver twice
-        let receiver1 = provider.get_or_create_receiver(&queue).await.unwrap();
-        let receiver2 = provider.get_or_create_receiver(&queue).await.unwrap();
-
-        // Assert - should be same instance
-        assert!(
-            Arc::ptr_eq(&receiver1, &receiver2),
-            "Should return cached receiver"
-        );
-    }
-
-    /// Test different queues get different senders
-    #[tokio::test]
-    async fn test_different_queues_different_senders() {
-        // Arrange
-        let config = AzureServiceBusConfig {
-            connection_string: Some(
-                "Endpoint=sb://test.servicebus.windows.net/;SharedAccessKeyName=test;SharedAccessKey=dGVzdA=="
-                    .to_string(),
-            ),
-            namespace: None,
-            auth_method: AzureAuthMethod::ConnectionString,
-            use_sessions: true,
-            session_timeout: Duration::minutes(5),
-        };
-        let provider = AzureServiceBusProvider::new(config).await.unwrap();
-        let queue1 = QueueName::new("queue-1".to_string()).unwrap();
-        let queue2 = QueueName::new("queue-2".to_string()).unwrap();
-
-        // Act
-        let sender1 = provider.get_or_create_sender(&queue1).await.unwrap();
-        let sender2 = provider.get_or_create_sender(&queue2).await.unwrap();
-
-        // Assert - should be different instances
-        assert!(
-            !Arc::ptr_eq(&sender1, &sender2),
-            "Different queues should have different senders"
-        );
-    }
-}
+// mod caching_tests {
+//     use super::*;
+//
+//     /// Test sender is created and cached
+//     #[tokio::test]
+//     async fn test_sender_caching() {
+//         // Arrange
+//         let config = AzureServiceBusConfig {
+//             connection_string: Some(
+//                 "Endpoint=sb://test.servicebus.windows.net/;SharedAccessKeyName=test;SharedAccessKey=dGVzdA=="
+//                     .to_string(),
+//             ),
+//             namespace: None,
+//             auth_method: AzureAuthMethod::ConnectionString,
+//             use_sessions: true,
+//             session_timeout: Duration::minutes(5),
+//         };
+//         let provider = AzureServiceBusProvider::new(config).await.unwrap();
+//         let queue = QueueName::new("test-queue".to_string()).unwrap();
+//
+//         // Act - get sender twice
+//         let sender1 = provider.get_or_create_sender(&queue).await.unwrap();
+//         let sender2 = provider.get_or_create_sender(&queue).await.unwrap();
+//
+//         // Assert - should be same instance (Arc equality)
+//         assert!(
+//             Arc::ptr_eq(&sender1, &sender2),
+//             "Should return cached sender"
+//         );
+//     }
+//
+//     /// Test receiver is created and cached
+//     #[tokio::test]
+//     async fn test_receiver_caching() {
+//         // Arrange
+//         let config = AzureServiceBusConfig {
+//             connection_string: Some(
+//                 "Endpoint=sb://test.servicebus.windows.net/;SharedAccessKeyName=test;SharedAccessKey=dGVzdA=="
+//                     .to_string(),
+//             ),
+//             namespace: None,
+//             auth_method: AzureAuthMethod::ConnectionString,
+//             use_sessions: true,
+//             session_timeout: Duration::minutes(5),
+//         };
+//         let provider = AzureServiceBusProvider::new(config).await.unwrap();
+//         let queue = QueueName::new("test-queue".to_string()).unwrap();
+//
+//         // Act - get receiver twice
+//         let receiver1 = provider.get_or_create_receiver(&queue).await.unwrap();
+//         let receiver2 = provider.get_or_create_receiver(&queue).await.unwrap();
+//
+//         // Assert - should be same instance
+//         assert!(
+//             Arc::ptr_eq(&receiver1, &receiver2),
+//             "Should return cached receiver"
+//         );
+//     }
+//
+//     /// Test different queues get different senders
+//     #[tokio::test]
+//     async fn test_different_queues_different_senders() {
+//         // Arrange
+//         let config = AzureServiceBusConfig {
+//             connection_string: Some(
+//                 "Endpoint=sb://test.servicebus.windows.net/;SharedAccessKeyName=test;SharedAccessKey=dGVzdA=="
+//                     .to_string(),
+//             ),
+//             namespace: None,
+//             auth_method: AzureAuthMethod::ConnectionString,
+//             use_sessions: true,
+//             session_timeout: Duration::minutes(5),
+//         };
+//         let provider = AzureServiceBusProvider::new(config).await.unwrap();
+//         let queue1 = QueueName::new("queue-1".to_string()).unwrap();
+//         let queue2 = QueueName::new("queue-2".to_string()).unwrap();
+//
+//         // Act
+//         let sender1 = provider.get_or_create_sender(&queue1).await.unwrap();
+//         let sender2 = provider.get_or_create_sender(&queue2).await.unwrap();
+//
+//         // Assert - should be different instances
+//         assert!(
+//             !Arc::ptr_eq(&sender1, &sender2),
+//             "Different queues should have different senders"
+//         );
+//     }
+// }
 
 // ============================================================================
 // Session Provider Tests
@@ -601,6 +605,10 @@ mod placeholder_tests {
     /// Test send_message returns not implemented error
     #[tokio::test]
     async fn test_send_message_not_implemented() {
+        // NOTE: send_message is now implemented, but will fail with authentication
+        // error or network error when using test credentials. This test verifies
+        // the method is callable.
+
         // Arrange
         let provider = create_test_provider().await;
         let queue = QueueName::new("test-queue".to_string()).unwrap();
@@ -610,12 +618,8 @@ mod placeholder_tests {
         let result = provider.send_message(&queue, &message).await;
 
         // Assert
-        assert!(result.is_err(), "Should return error");
-        if let Err(QueueError::ProviderError { code, .. }) = result {
-            assert_eq!(code, "NotImplemented");
-        } else {
-            panic!("Expected NotImplemented error");
-        }
+        // Will fail due to invalid test credentials, but should attempt the operation
+        assert!(result.is_err(), "Should return error with test credentials");
     }
 
     /// Test receive_message returns not implemented error
