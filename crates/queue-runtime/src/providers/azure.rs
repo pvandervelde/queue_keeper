@@ -584,22 +584,126 @@ impl QueueProvider for AzureServiceBusProvider {
 
     async fn receive_message(
         &self,
-        _queue: &QueueName,
-        _timeout: Duration,
+        queue: &QueueName,
+        timeout: Duration,
     ) -> Result<Option<ReceivedMessage>, QueueError> {
-        // TODO: Implement actual Azure Service Bus receive operation
-        Err(QueueError::ProviderError {
-            provider: "AzureServiceBus".to_string(),
-            code: "NotImplemented".to_string(),
-            message: "Azure Service Bus receive not yet implemented".to_string(),
-        })
+        // Azure Service Bus receive uses HTTP DELETE with peek-lock
+        // URL: {namespace}/{queue}/messages/head?timeout={seconds}
+        let url = format!(
+            "{}/{}/messages/head?timeout={}",
+            self.namespace_url,
+            queue.as_str(),
+            timeout.num_seconds()
+        );
+
+        // Get auth token
+        let auth_token = self.get_auth_token().await.map_err(|e| e.to_queue_error())?;
+
+        // Send HTTP DELETE request (peek-lock mode)
+        let response = self
+            .http_client
+            .delete(&url)
+            .header(header::AUTHORIZATION, auth_token)
+            .send()
+            .await
+            .map_err(|e| {
+                AzureError::NetworkError(format!("HTTP request failed: {}", e)).to_queue_error()
+            })?;
+
+        // Check response status
+        match response.status() {
+            StatusCode::OK | StatusCode::CREATED => {
+                // Parse BrokerProperties from response header
+                let broker_props = response
+                    .headers()
+                    .get("BrokerProperties")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| serde_json::from_str::<ReceivedBrokerProperties>(s).ok())
+                    .ok_or_else(|| QueueError::ProviderError {
+                        provider: "AzureServiceBus".to_string(),
+                        code: "InvalidResponse".to_string(),
+                        message: "Missing or invalid BrokerProperties header".to_string(),
+                    })?;
+
+                // Get message body (base64 encoded)
+                let body_base64 = response.text().await.map_err(|e| {
+                    AzureError::NetworkError(format!("Failed to read response body: {}", e))
+                        .to_queue_error()
+                })?;
+
+                // Decode base64 body
+                use base64::{engine::general_purpose::STANDARD, Engine};
+                let body = STANDARD.decode(&body_base64).map_err(|e| {
+                    QueueError::ProviderError {
+                        provider: "AzureServiceBus".to_string(),
+                        code: "DecodingError".to_string(),
+                        message: format!("Failed to decode message body: {}", e),
+                    }
+                })?;
+
+                // Parse enqueued time
+                let first_delivered_at = chrono::DateTime::parse_from_rfc3339(&broker_props.enqueued_time_utc)
+                    .map(|dt| Timestamp::from_datetime(dt.with_timezone(&chrono::Utc)))
+                    .unwrap_or_else(|_| Timestamp::now());
+
+                // Create receipt handle combining lock token and queue name
+                // Lock expires in 30 seconds by default (Azure Service Bus default)
+                let expires_at = Timestamp::from_datetime(Utc::now() + Duration::seconds(30));
+                let receipt_str = format!(
+                    "{}::{}",
+                    broker_props.lock_token,
+                    queue.as_str()
+                );
+                let receipt = ReceiptHandle::new(
+                    receipt_str.clone(),
+                    expires_at,
+                    ProviderType::AzureServiceBus,
+                );
+
+                // Store lock token for later acknowledgment
+                self.lock_tokens
+                    .write()
+                    .await
+                    .insert(
+                        receipt_str,
+                        (broker_props.lock_token.clone(), queue.as_str().to_string()),
+                    );
+
+                // Create received message
+                let received_message = ReceivedMessage {
+                    message_id: MessageId::new(),
+                    body: bytes::Bytes::from(body),
+                    attributes: HashMap::new(),
+                    session_id: broker_props.session_id.map(SessionId::new).transpose()?,
+                    correlation_id: None,
+                    receipt_handle: receipt,
+                    delivery_count: broker_props.delivery_count,
+                    first_delivered_at,
+                    delivered_at: Timestamp::now(),
+                };
+
+                Ok(Some(received_message))
+            }
+            StatusCode::NO_CONTENT => {
+                // No messages available
+                Ok(None)
+            }
+            status => {
+                let error_body = response.text().await.unwrap_or_default();
+                Err(QueueError::ProviderError {
+                    provider: "AzureServiceBus".to_string(),
+                    code: status.as_str().to_string(),
+                    message: format!("Receive failed: {}", error_body),
+                })
+            }
+        }
     }
 
     async fn receive_messages(
         &self,
-        _queue: &QueueName,
+        queue: &QueueName,
         max_messages: u32,
-        _timeout: Duration,
+        timeout: Duration,
     ) -> Result<Vec<ReceivedMessage>, QueueError> {
         // Azure Service Bus max batch receive is 32 messages
         if max_messages > 32 {
@@ -609,12 +713,55 @@ impl QueueProvider for AzureServiceBusProvider {
             });
         }
 
-        // TODO: Implement batch receive
-        Err(QueueError::ProviderError {
-            provider: "AzureServiceBus".to_string(),
-            code: "NotImplemented".to_string(),
-            message: "Azure Service Bus batch receive not yet implemented".to_string(),
-        })
+        // Azure Service Bus batch receive uses HTTP DELETE to {namespace}/{queue}/messages/head
+        // with maxMessageCount query parameter
+        let url = format!(
+            "{}/{}/messages/head?maxMessageCount={}&timeout={}",
+            self.namespace_url,
+            queue.as_str(),
+            max_messages,
+            timeout.num_seconds()
+        );
+
+        // Get auth token
+        let auth_token = self.get_auth_token().await.map_err(|e| e.to_queue_error())?;
+
+        // Send HTTP DELETE request
+        let response = self
+            .http_client
+            .delete(&url)
+            .header(header::AUTHORIZATION, auth_token)
+            .send()
+            .await
+            .map_err(|e| {
+                AzureError::NetworkError(format!("HTTP request failed: {}", e)).to_queue_error()
+            })?;
+
+        // Check response status
+        match response.status() {
+            StatusCode::OK | StatusCode::CREATED => {
+                // Batch responses need special handling - Azure returns multiple messages
+                // For now, implement single message and TODO batch parsing
+                let error_body = response.text().await.unwrap_or_default();
+                Err(QueueError::ProviderError {
+                    provider: "AzureServiceBus".to_string(),
+                    code: "NotImplemented".to_string(),
+                    message: format!("Batch receive parsing not yet implemented: {}", error_body),
+                })
+            }
+            StatusCode::NO_CONTENT => {
+                // No messages available
+                Ok(Vec::new())
+            }
+            status => {
+                let error_body = response.text().await.unwrap_or_default();
+                Err(QueueError::ProviderError {
+                    provider: "AzureServiceBus".to_string(),
+                    code: status.as_str().to_string(),
+                    message: format!("Batch receive failed: {}", error_body),
+                })
+            }
+        }
     }
 
     async fn complete_message(&self, _receipt: &ReceiptHandle) -> Result<(), QueueError> {
