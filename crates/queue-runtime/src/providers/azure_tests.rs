@@ -238,10 +238,7 @@ mod error_tests {
         let error = AzureError::MessageLockLost("Lock expired".to_string());
 
         // Act & Assert
-        assert!(
-            !error.is_transient(),
-            "Lock lost should not be transient"
-        );
+        assert!(!error.is_transient(), "Lock lost should not be transient");
     }
 
     /// Test session lock lost is not transient
@@ -529,15 +526,13 @@ mod placeholder_tests {
     #[tokio::test]
     async fn test_receive_message_not_implemented() {
         // NOTE: receive_message will attempt HTTP operation and fail with test credentials
-        
+
         // Arrange
         let provider = create_test_provider().await;
         let queue = QueueName::new("test-queue".to_string()).unwrap();
 
         // Act
-        let result = provider
-            .receive_message(&queue, Duration::seconds(1))
-            .await;
+        let result = provider.receive_message(&queue, Duration::seconds(1)).await;
 
         // Assert
         // Should fail due to authentication or network error with test credentials
@@ -600,7 +595,9 @@ mod receive_tests {
         let queue = QueueName::new("test-queue".to_string()).unwrap();
 
         // Act - will fail but should accept valid batch size
-        let result = provider.receive_messages(&queue, 10, Duration::seconds(5)).await;
+        let result = provider
+            .receive_messages(&queue, 10, Duration::seconds(5))
+            .await;
 
         // Assert - should attempt operation with valid batch size
         assert!(result.is_err(), "Should fail with test credentials");
@@ -624,7 +621,9 @@ mod receive_tests {
         let queue = QueueName::new("test-queue".to_string()).unwrap();
 
         // Act - Azure Service Bus max is 32 messages per receive
-        let result = provider.receive_messages(&queue, 50, Duration::seconds(5)).await;
+        let result = provider
+            .receive_messages(&queue, 50, Duration::seconds(5))
+            .await;
 
         // Assert - should reject batch size over 32
         assert!(result.is_err());
