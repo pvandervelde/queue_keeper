@@ -32,6 +32,19 @@ use std::time::Duration;
 pub use ulid::Ulid;
 pub use uuid::Uuid;
 
+// Module declarations
+pub mod adapters;
+pub mod blob_storage;
+pub mod bot_config;
+pub mod circuit_breaker;
+pub mod key_vault;
+pub mod queue_integration;
+pub mod webhook;
+
+// Re-export audit_logging and event_replay modules
+pub mod audit_logging;
+pub mod event_replay;
+
 /// Standard result type for queue-keeper operations
 pub type QueueKeeperResult<T> = Result<T, QueueKeeperError>;
 
@@ -845,34 +858,6 @@ impl QueueKeeperError {
         }
     }
 }
-
-// ============================================================================
-// Module declarations
-// ============================================================================
-
-/// Webhook processing module for GitHub webhooks
-pub mod webhook;
-
-/// Bot configuration module for event routing
-pub mod bot_config;
-
-/// Key Vault module for secure secret management
-pub mod key_vault;
-
-/// Event replay module for administrative reprocessing
-pub mod event_replay;
-
-/// Audit logging module for compliance and security
-pub mod audit_logging;
-
-/// Queue integration module for event routing
-pub mod queue_integration;
-
-/// Blob storage module for webhook payload persistence
-pub mod blob_storage;
-
-/// Storage adapters module for infrastructure implementations
-pub mod adapters;
 
 // Re-export key types for convenience
 pub use adapters::FilesystemBlobStorage;
