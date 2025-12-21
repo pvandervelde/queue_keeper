@@ -224,14 +224,11 @@ impl QueueClientFactory {
             ProviderConfig::InMemory(in_memory_config) => {
                 Box::new(InMemoryProvider::new(in_memory_config))
             }
-            ProviderConfig::AzureServiceBus(_azure_config) => {
-                // TODO: Implement Azure Service Bus provider in task 18.0
-                return Err(QueueError::ConfigurationError(
-                    crate::error::ConfigurationError::UnsupportedProvider {
-                        provider: "AzureServiceBus".to_string(),
-                        message: "Azure Service Bus provider not yet implemented".to_string(),
-                    },
-                ));
+            ProviderConfig::AzureServiceBus(azure_config) => {
+                let azure_provider = crate::providers::AzureServiceBusProvider::new(azure_config)
+                    .await
+                    .map_err(|e| e.to_queue_error())?;
+                Box::new(azure_provider)
             }
             ProviderConfig::AwsSqs(_aws_config) => {
                 // TODO: Implement AWS SQS provider in future task
