@@ -181,13 +181,24 @@ mod authentication_tests {
         let debug_output = format!("{:?}", auth);
 
         // Assert
-        // Should show structure but not secret values
+        // Should show structure and non-secret fields but redact client_secret
         assert!(debug_output.contains("ClientSecret"));
         assert!(
             debug_output.contains("tenant_id"),
-            "Should show field names"
+            "Should show tenant_id field"
         );
-        // Note: Derive(Debug) will show values, this is testing current behavior
+        assert!(
+            debug_output.contains("client_id"),
+            "Should show client_id field"
+        );
+        assert!(
+            debug_output.contains("REDACTED"),
+            "Should redact client_secret"
+        );
+        assert!(
+            !debug_output.contains("super-secret"),
+            "Should not expose secret value"
+        );
     }
 }
 
