@@ -318,7 +318,10 @@ where
     }
 
     fn metrics(&self) -> CircuitMetrics {
-        let state = self.state.read().unwrap();
+        let state = self
+            .state
+            .read()
+            .expect("Circuit breaker state lock poisoned during metrics read");
 
         CircuitMetrics {
             state: state.current_state,
@@ -335,7 +338,10 @@ where
     }
 
     fn reset(&self) {
-        let mut state = self.state.write().unwrap();
+        let mut state = self
+            .state
+            .write()
+            .expect("Circuit breaker state lock poisoned during reset");
         self.close_circuit(&mut state);
         state.total_requests = 0;
         state.successful_requests = 0;

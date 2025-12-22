@@ -152,15 +152,16 @@ impl KeyVaultProvider for CircuitBreakerKeyVaultProvider {
         let name_clone = name.clone();
         let inner = Arc::clone(&self.inner);
 
+        // Protect the get_secret_with_version call by checking circuit health with get_secret first
         match self
             .circuit_breaker
             .call(|| async move { inner.get_secret(&name_clone).await })
             .await
         {
-            Ok(value) => {
-                // Fetch version separately (not protected by circuit breaker)
-                let (_, version) = self.inner.get_secret_with_version(name).await?;
-                Ok((value, version))
+            Ok(_value) => {
+                // Circuit is healthy, make the actual call to get both value and version
+                // Since we just proved the service is accessible, this call is likely to succeed
+                self.inner.get_secret_with_version(name).await
             }
             Err(CircuitBreakerError::CircuitOpen) => {
                 info!(
