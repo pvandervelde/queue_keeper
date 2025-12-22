@@ -107,6 +107,16 @@ pub struct DefaultCircuitBreaker<T, E> {
     _phantom: std::marker::PhantomData<(T, E)>,
 }
 
+impl<T, E> Clone for DefaultCircuitBreaker<T, E> {
+    fn clone(&self) -> Self {
+        Self {
+            config: self.config.clone(),
+            state: Arc::clone(&self.state),
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
+
 impl<T, E> DefaultCircuitBreaker<T, E> {
     /// Create new circuit breaker with configuration.
     pub fn new(config: CircuitBreakerConfig) -> Self {
