@@ -5,8 +5,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use chrono::Duration;
 use queue_keeper_core::circuit_breaker::{
-    service_bus_circuit_breaker_config, CircuitBreaker, CircuitBreakerError,
-    CircuitBreakerFactory, DefaultCircuitBreaker, DefaultCircuitBreakerFactory,
+    service_bus_circuit_breaker_config, CircuitBreaker, CircuitBreakerError, CircuitBreakerFactory,
+    DefaultCircuitBreaker, DefaultCircuitBreakerFactory,
 };
 use queue_runtime::{
     Message, MessageId, ProviderType, QueueError, QueueName, QueueProvider, ReceiptHandle,

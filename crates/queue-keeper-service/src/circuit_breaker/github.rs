@@ -81,7 +81,9 @@ impl CircuitBreakerGitHubClient {
     }
 
     /// Get app information with circuit breaker protection.
-    pub async fn get_app(&self) -> Result<github_bot_sdk::client::App, CircuitBreakerError<ApiError>> {
+    pub async fn get_app(
+        &self,
+    ) -> Result<github_bot_sdk::client::App, CircuitBreakerError<ApiError>> {
         let inner = Arc::clone(&self.inner);
         self.circuit_breaker
             .call(|| async move {
