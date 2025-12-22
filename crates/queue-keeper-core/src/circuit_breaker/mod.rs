@@ -423,6 +423,25 @@ pub fn key_vault_circuit_breaker_config() -> CircuitBreakerConfig {
     }
 }
 
+/// Circuit breaker configuration for GitHub API.
+///
+/// Tuned for GitHub API operation patterns:
+/// - 5 consecutive failures to trip
+/// - 60 second recovery timeout (respect GitHub rate limits)
+/// - 3 successes to close
+/// - 10 second operation timeout (network + processing)
+pub fn github_api_circuit_breaker_config() -> CircuitBreakerConfig {
+    CircuitBreakerConfig {
+        service_name: "github-api".to_string(),
+        failure_threshold: 5,          // REQ-009: 5 consecutive failures
+        failure_window_seconds: 120,   // 2 minute window (GitHub rate limits)
+        recovery_timeout_seconds: 60,  // 60 second cooldown to respect rate limits
+        success_threshold: 3,          // 3 successes to close
+        operation_timeout_seconds: 10, // 10 second timeout for API operations
+        half_open_max_requests: 3,     // Conservative testing
+    }
+}
+
 #[cfg(test)]
 #[path = "mod_tests.rs"]
 mod tests;

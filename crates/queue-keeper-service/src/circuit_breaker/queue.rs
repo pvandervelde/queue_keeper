@@ -5,8 +5,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use chrono::Duration;
 use queue_keeper_core::circuit_breaker::{
-    service_bus_circuit_breaker_config, CircuitBreaker, CircuitBreakerError, DefaultCircuitBreaker,
-    DefaultCircuitBreakerFactory,
+    service_bus_circuit_breaker_config, CircuitBreaker, CircuitBreakerError,
+    CircuitBreakerFactory, DefaultCircuitBreaker, DefaultCircuitBreakerFactory,
 };
 use queue_runtime::{
     Message, MessageId, ProviderType, QueueError, QueueName, QueueProvider, ReceiptHandle,
@@ -142,39 +142,9 @@ impl QueueProvider for CircuitBreakerQueueProvider {
         queue: &QueueName,
         timeout: Duration,
     ) -> Result<Option<ReceivedMessage>, QueueError> {
-        let inner = Arc::clone(&self.inner);
-        let queue = queue.clone();
-
-        self.circuit_breaker_receive
-            .call(|| async move {
-                let msg = inner.receive_message(&queue, timeout).await?;
-                Ok(msg.into_iter().collect())
-            })
-            .await
-            .map(|msgs: Vec<Option<ReceivedMessage>>| msgs.into_iter().next().flatten())
-            .map_err(|e| match e {
-                CircuitBreakerError::CircuitOpen => QueueError::ProviderError {
-                    provider: "CircuitBreaker".to_string(),
-                    code: "CircuitOpen".to_string(),
-                    message: "Queue receive circuit breaker is open".to_string(),
-                },
-                CircuitBreakerError::Timeout { timeout_ms } => QueueError::ProviderError {
-                    provider: "CircuitBreaker".to_string(),
-                    code: "Timeout".to_string(),
-                    message: format!("Queue receive operation timed out after {}ms", timeout_ms),
-                },
-                CircuitBreakerError::OperationFailed(e) => e,
-                CircuitBreakerError::TooManyConcurrentRequests => QueueError::ProviderError {
-                    provider: "CircuitBreaker".to_string(),
-                    code: "TooManyConcurrentRequests".to_string(),
-                    message: "Too many concurrent queue receive requests".to_string(),
-                },
-                CircuitBreakerError::InternalError { message } => QueueError::ProviderError {
-                    provider: "CircuitBreaker".to_string(),
-                    code: "InternalError".to_string(),
-                    message,
-                },
-            })
+        // Don't circuit break receive_message since None is a valid result
+        // Circuit breaking is better suited for send/receive_messages which always expect results
+        self.inner.receive_message(queue, timeout).await
     }
 
     async fn receive_messages(

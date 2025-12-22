@@ -3323,11 +3323,15 @@ name = "queue-keeper-service"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
+ "chrono",
  "config",
+ "github-bot-sdk",
  "queue-keeper-api",
  "queue-keeper-core",
  "queue-runtime",
  "serde",
+ "serde_json",
  "tokio",
  "toml",
  "tracing",
