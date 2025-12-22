@@ -110,6 +110,49 @@ Update this when creating new shared abstractions.
 - **Variants**: Validation, Signature, Storage, Normalization errors
 - **Error Classification**: Transient vs permanent for retry decisions
 
+### CircuitState
+
+- **Purpose**: Current state of circuit breaker (Closed/Open/HalfOpen)
+- **Location**: `crates/queue-keeper-core/src/circuit_breaker/mod.rs`
+- **Spec**: `specs/interfaces/circuit-breaker.md`
+- **Variants**: Closed (normal), Open (failing fast), HalfOpen (testing recovery)
+- **Usage**: Circuit breaker state machine transitions and request filtering
+
+### CircuitBreakerConfig
+
+- **Purpose**: Configuration for circuit breaker behavior per service
+- **Location**: `crates/queue-keeper-core/src/circuit_breaker/mod.rs`
+- **Spec**: `specs/interfaces/circuit-breaker.md`
+- **Fields**: service_name, failure_threshold, recovery_timeout, timeout_ms
+- **Presets**: Service Bus (5/30s), Key Vault (3/60s), Blob Storage (5/30s)
+- **Usage**: Service-specific circuit breaker tuning
+
+### CircuitMetrics
+
+- **Purpose**: Metrics for monitoring circuit breaker health
+- **Location**: `crates/queue-keeper-core/src/circuit_breaker/mod.rs`
+- **Spec**: `specs/interfaces/circuit-breaker.md`
+- **Fields**: total_requests, successful/failed/rejected, consecutive failures, response times
+- **Usage**: Observability, alerting, and debugging circuit breaker behavior
+
+### CircuitBreaker<T, E>
+
+- **Purpose**: Trait for circuit breaker protection of operations
+- **Location**: `crates/queue-keeper-core/src/circuit_breaker/mod.rs`
+- **Spec**: `specs/interfaces/circuit-breaker.md`
+- **Operations**: call (protected execution), state, metrics, reset, is_healthy
+- **Implementation**: DefaultCircuitBreaker with Arc<RwLock<>> for thread safety
+- **Usage**: Wrap external service calls to prevent cascading failures
+
+### CircuitBreakerError<E>
+
+- **Purpose**: Error type for circuit breaker operations
+- **Location**: `crates/queue-keeper-core/src/circuit_breaker/mod.rs`
+- **Spec**: `specs/interfaces/circuit-breaker.md`
+- **Variants**: CircuitOpen, Timeout, OperationFailed(E), TooManyConcurrentRequests
+- **Classification**: counts_as_failure(), is_circuit_protection()
+- **Usage**: Distinguish circuit protection from actual operation failures
+
 ## GitHub Bot SDK Types
 
 ### GitHubAppId
