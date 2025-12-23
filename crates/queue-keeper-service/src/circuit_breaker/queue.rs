@@ -230,3 +230,7 @@ impl QueueProvider for CircuitBreakerQueueProvider {
         self.inner.max_batch_size()
     }
 }
+
+#[cfg(test)]
+#[path = "queue_tests.rs"]
+mod tests;

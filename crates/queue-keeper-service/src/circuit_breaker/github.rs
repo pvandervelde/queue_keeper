@@ -107,7 +107,7 @@ impl CircuitBreakerGitHubClient {
             .call(|| async move {
                 // Getting the client itself is lightweight (no network call),
                 // but we protect it in case future changes add validation
-                let client = inner.installation_by_id(installation_id).await?;
+                let _client = inner.installation_by_id(installation_id).await?;
                 Ok(serde_json::to_value(true).unwrap()) // Dummy value
             })
             .await?;
@@ -120,3 +120,7 @@ impl CircuitBreakerGitHubClient {
             .unwrap())
     }
 }
+
+#[cfg(test)]
+#[path = "github_tests.rs"]
+mod tests;
