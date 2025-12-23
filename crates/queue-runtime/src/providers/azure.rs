@@ -60,6 +60,7 @@ use reqwest::{header, Client as HttpClient, StatusCode};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
+use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -72,7 +73,7 @@ mod tests;
 // ============================================================================
 
 /// Authentication method for Azure Service Bus
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub enum AzureAuthMethod {
     /// Connection string with embedded credentials
     ConnectionString,
@@ -86,6 +87,26 @@ pub enum AzureAuthMethod {
     },
     /// Default Azure credential chain (for development)
     DefaultCredential,
+}
+
+impl fmt::Debug for AzureAuthMethod {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ConnectionString => f.debug_struct("ConnectionString").finish(),
+            Self::ManagedIdentity => f.debug_struct("ManagedIdentity").finish(),
+            Self::ClientSecret {
+                tenant_id,
+                client_id,
+                ..
+            } => f
+                .debug_struct("ClientSecret")
+                .field("tenant_id", tenant_id)
+                .field("client_id", client_id)
+                .field("client_secret", &"<REDACTED>")
+                .finish(),
+            Self::DefaultCredential => f.debug_struct("DefaultCredential").finish(),
+        }
+    }
 }
 
 impl fmt::Display for AzureAuthMethod {
@@ -788,9 +809,13 @@ impl QueueProvider for AzureServiceBusProvider {
                     (broker_props.lock_token.clone(), queue.as_str().to_string()),
                 );
 
+                // Parse Azure message ID
+                let message_id = MessageId::from_str(&broker_props.message_id)
+                    .unwrap_or_else(|_| MessageId::new());
+
                 // Create received message
                 let received_message = ReceivedMessage {
-                    message_id: MessageId::new(),
+                    message_id,
                     body: bytes::Bytes::from(body),
                     attributes: HashMap::new(),
                     session_id: broker_props.session_id.map(SessionId::new).transpose()?,
@@ -921,9 +946,13 @@ impl QueueProvider for AzureServiceBusProvider {
                         (broker_props.lock_token.clone(), queue.as_str().to_string()),
                     );
 
+                    // Parse Azure message ID
+                    let message_id = MessageId::from_str(&broker_props.message_id)
+                        .unwrap_or_else(|_| MessageId::new());
+
                     // Create received message
                     let received_message = ReceivedMessage {
-                        message_id: MessageId::new(),
+                        message_id,
                         body: bytes::Bytes::from(body),
                         attributes: HashMap::new(),
                         session_id: broker_props.session_id.map(SessionId::new).transpose()?,
@@ -1289,7 +1318,7 @@ impl SessionProvider for AzureSessionProvider {
     }
 
     fn session_expires_at(&self) -> Timestamp {
-        self.session_expires_at.clone()
+        self.session_expires_at
     }
 }
 

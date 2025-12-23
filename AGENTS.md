@@ -2,6 +2,25 @@
 
 This document provides guidelines and conventions for AI agents working on this codebase.
 
+## Production Software Standards
+
+**This is production-grade software.** All code must meet production quality standards:
+
+- **Complete Implementation**: No TODOs, placeholders, or "demonstration" code. Every feature must be fully implemented.
+- **Comprehensive Error Handling**: All error paths must be handled properly, with clear error messages and proper error propagation.
+- **Full Test Coverage**: All functionality must have comprehensive tests covering happy paths, error cases, and edge conditions.
+- **Production-Ready Documentation**: All public APIs must have complete rustdoc with examples, error conditions, and behavioral specifications.
+- **Security First**: All security-sensitive operations must be implemented with production-grade security measures.
+- **Performance Conscious**: Code must be optimized for production workloads, not just correctness.
+- **Observability**: All operations must have appropriate logging, metrics, and tracing for production debugging.
+
+When implementing features:
+
+- Write production code from the start - no prototypes or demos
+- Think about failure scenarios and edge cases
+- Consider operational concerns (monitoring, debugging, maintenance)
+- Implement complete functionality, not partial demonstrations
+
 ## Pre-Implementation Checklist
 
 Before implementing features, verify:

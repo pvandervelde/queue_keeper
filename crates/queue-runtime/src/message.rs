@@ -177,7 +177,7 @@ impl FromStr for SessionId {
 }
 
 /// Timestamp wrapper for consistent time handling
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Timestamp(DateTime<Utc>);
 
 impl Timestamp {

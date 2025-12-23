@@ -10,6 +10,8 @@
 //!
 //! See specs/interfaces/http-service.md for complete specification.
 
+mod circuit_breaker;
+
 use queue_keeper_api::{
     start_server, DefaultEventStore, DefaultHealthChecker, ServiceConfig, ServiceError,
 };
