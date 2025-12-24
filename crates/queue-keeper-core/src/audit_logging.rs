@@ -1672,6 +1672,249 @@ impl AuditRetention for DefaultAuditRetention {
     }
 }
 
+// ============================================================================
+// Backend Implementations (Stubs for Task 20.2)
+// ============================================================================
+
+/// Filesystem-based audit logger for local development and testing
+pub struct FilesystemAuditLogger;
+
+impl FilesystemAuditLogger {
+    pub fn new(_log_path: std::path::PathBuf) -> Result<Self, AuditError> {
+        unimplemented!("FilesystemAuditLogger not yet implemented - Task 20.2")
+    }
+}
+
+#[async_trait]
+impl AuditLogger for FilesystemAuditLogger {
+    async fn log_event(&self, _event: AuditEvent) -> Result<AuditLogId, AuditError> {
+        unimplemented!("FilesystemAuditLogger not yet implemented - Task 20.2")
+    }
+
+    async fn log_webhook_processing(
+        &self,
+        _event_id: EventId,
+        _session_id: SessionId,
+        _repository: Repository,
+        _action: WebhookProcessingAction,
+        _result: AuditResult,
+        _context: AuditContext,
+    ) -> Result<AuditLogId, AuditError> {
+        unimplemented!("FilesystemAuditLogger not yet implemented - Task 20.2")
+    }
+
+    async fn log_admin_action(
+        &self,
+        _actor: AuditActor,
+        _resource: AuditResource,
+        _action: AuditAction,
+        _result: AuditResult,
+        _context: AuditContext,
+    ) -> Result<AuditLogId, AuditError> {
+        unimplemented!("FilesystemAuditLogger not yet implemented - Task 20.2")
+    }
+
+    async fn log_security_event(
+        &self,
+        _security_event: SecurityAuditEvent,
+        _context: AuditContext,
+    ) -> Result<AuditLogId, AuditError> {
+        unimplemented!("FilesystemAuditLogger not yet implemented - Task 20.2")
+    }
+
+    async fn log_events_batch(
+        &self,
+        _events: Vec<AuditEvent>,
+    ) -> Result<Vec<AuditLogId>, AuditError> {
+        unimplemented!("FilesystemAuditLogger not yet implemented - Task 20.2")
+    }
+
+    async fn flush(&self) -> Result<(), AuditError> {
+        unimplemented!("FilesystemAuditLogger not yet implemented - Task 20.2")
+    }
+}
+
+/// Blob storage-based audit logger for production cloud deployment
+pub struct BlobStorageAuditLogger;
+
+impl BlobStorageAuditLogger {
+    pub fn new<B: crate::blob_storage::BlobStorage + 'static>(
+        _storage: std::sync::Arc<B>,
+        _prefix: String,
+    ) -> Self {
+        unimplemented!("BlobStorageAuditLogger not yet implemented - Task 20.2")
+    }
+}
+
+#[async_trait]
+impl AuditLogger for BlobStorageAuditLogger {
+    async fn log_event(&self, _event: AuditEvent) -> Result<AuditLogId, AuditError> {
+        unimplemented!("BlobStorageAuditLogger not yet implemented - Task 20.2")
+    }
+
+    async fn log_webhook_processing(
+        &self,
+        _event_id: EventId,
+        _session_id: SessionId,
+        _repository: Repository,
+        _action: WebhookProcessingAction,
+        _result: AuditResult,
+        _context: AuditContext,
+    ) -> Result<AuditLogId, AuditError> {
+        unimplemented!("BlobStorageAuditLogger not yet implemented - Task 20.2")
+    }
+
+    async fn log_admin_action(
+        &self,
+        _actor: AuditActor,
+        _resource: AuditResource,
+        _action: AuditAction,
+        _result: AuditResult,
+        _context: AuditContext,
+    ) -> Result<AuditLogId, AuditError> {
+        unimplemented!("BlobStorageAuditLogger not yet implemented - Task 20.2")
+    }
+
+    async fn log_security_event(
+        &self,
+        _security_event: SecurityAuditEvent,
+        _context: AuditContext,
+    ) -> Result<AuditLogId, AuditError> {
+        unimplemented!("BlobStorageAuditLogger not yet implemented - Task 20.2")
+    }
+
+    async fn log_events_batch(
+        &self,
+        _events: Vec<AuditEvent>,
+    ) -> Result<Vec<AuditLogId>, AuditError> {
+        unimplemented!("BlobStorageAuditLogger not yet implemented - Task 20.2")
+    }
+
+    async fn flush(&self) -> Result<(), AuditError> {
+        unimplemented!("BlobStorageAuditLogger not yet implemented - Task 20.2")
+    }
+}
+
+/// Stdout-based audit logger for container observability
+pub struct StdoutAuditLogger;
+
+impl StdoutAuditLogger {
+    pub fn new() -> Self {
+        unimplemented!("StdoutAuditLogger not yet implemented - Task 20.2")
+    }
+}
+
+#[async_trait]
+impl AuditLogger for StdoutAuditLogger {
+    async fn log_event(&self, _event: AuditEvent) -> Result<AuditLogId, AuditError> {
+        unimplemented!("StdoutAuditLogger not yet implemented - Task 20.2")
+    }
+
+    async fn log_webhook_processing(
+        &self,
+        _event_id: EventId,
+        _session_id: SessionId,
+        _repository: Repository,
+        _action: WebhookProcessingAction,
+        _result: AuditResult,
+        _context: AuditContext,
+    ) -> Result<AuditLogId, AuditError> {
+        unimplemented!("StdoutAuditLogger not yet implemented - Task 20.2")
+    }
+
+    async fn log_admin_action(
+        &self,
+        _actor: AuditActor,
+        _resource: AuditResource,
+        _action: AuditAction,
+        _result: AuditResult,
+        _context: AuditContext,
+    ) -> Result<AuditLogId, AuditError> {
+        unimplemented!("StdoutAuditLogger not yet implemented - Task 20.2")
+    }
+
+    async fn log_security_event(
+        &self,
+        _security_event: SecurityAuditEvent,
+        _context: AuditContext,
+    ) -> Result<AuditLogId, AuditError> {
+        unimplemented!("StdoutAuditLogger not yet implemented - Task 20.2")
+    }
+
+    async fn log_events_batch(
+        &self,
+        _events: Vec<AuditEvent>,
+    ) -> Result<Vec<AuditLogId>, AuditError> {
+        unimplemented!("StdoutAuditLogger not yet implemented - Task 20.2")
+    }
+
+    async fn flush(&self) -> Result<(), AuditError> {
+        unimplemented!("StdoutAuditLogger not yet implemented - Task 20.2")
+    }
+}
+
+/// Composite audit logger that writes to multiple backends
+pub struct CompositeAuditLogger;
+
+impl CompositeAuditLogger {
+    pub fn new(_backends: Vec<std::sync::Arc<dyn AuditLogger>>) -> Self {
+        unimplemented!("CompositeAuditLogger not yet implemented - Task 20.2")
+    }
+}
+
+#[async_trait]
+impl AuditLogger for CompositeAuditLogger {
+    async fn log_event(&self, _event: AuditEvent) -> Result<AuditLogId, AuditError> {
+        unimplemented!("CompositeAuditLogger not yet implemented - Task 20.2")
+    }
+
+    async fn log_webhook_processing(
+        &self,
+        _event_id: EventId,
+        _session_id: SessionId,
+        _repository: Repository,
+        _action: WebhookProcessingAction,
+        _result: AuditResult,
+        _context: AuditContext,
+    ) -> Result<AuditLogId, AuditError> {
+        unimplemented!("CompositeAuditLogger not yet implemented - Task 20.2")
+    }
+
+    async fn log_admin_action(
+        &self,
+        _actor: AuditActor,
+        _resource: AuditResource,
+        _action: AuditAction,
+        _result: AuditResult,
+        _context: AuditContext,
+    ) -> Result<AuditLogId, AuditError> {
+        unimplemented!("CompositeAuditLogger not yet implemented - Task 20.2")
+    }
+
+    async fn log_security_event(
+        &self,
+        _security_event: SecurityAuditEvent,
+        _context: AuditContext,
+    ) -> Result<AuditLogId, AuditError> {
+        unimplemented!("CompositeAuditLogger not yet implemented - Task 20.2")
+    }
+
+    async fn log_events_batch(
+        &self,
+        _events: Vec<AuditEvent>,
+    ) -> Result<Vec<AuditLogId>, AuditError> {
+        unimplemented!("CompositeAuditLogger not yet implemented - Task 20.2")
+    }
+
+    async fn flush(&self) -> Result<(), AuditError> {
+        unimplemented!("CompositeAuditLogger not yet implemented - Task 20.2")
+    }
+}
+
 #[cfg(test)]
 #[path = "audit_logging_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "audit_logger_backends_tests.rs"]
+mod backend_tests;
