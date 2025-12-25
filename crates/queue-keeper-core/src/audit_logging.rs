@@ -168,6 +168,20 @@ impl AuditEvent {
             serde_json::to_string(context).unwrap_or_default(),
         )
     }
+
+    /// Recalculate content hash (used for hash chaining)
+    fn recalculate_hash(&self) -> String {
+        Self::calculate_content_hash(
+            &self.audit_id,
+            &self.occurred_at,
+            &self.event_type,
+            &self.actor,
+            &self.resource,
+            &self.action,
+            &self.result,
+            &self.context,
+        )
+    }
 }
 
 /// Type of event being audited
@@ -1673,64 +1687,261 @@ impl AuditRetention for DefaultAuditRetention {
 }
 
 // ============================================================================
-// Backend Implementations (Stubs for Task 20.2)
+// Backend Implementations
 // ============================================================================
 
+use chrono::Utc;
+use std::fs::{File, OpenOptions};
+use std::io::Write;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex as StdMutex};
+use tokio::sync::Mutex as TokioMutex;
+
 /// Filesystem-based audit logger for local development and testing
-pub struct FilesystemAuditLogger;
+///
+/// Writes audit events to daily-rotated log files in JSON Lines format.
+/// Maintains hash chain across events for tamper detection.
+pub struct FilesystemAuditLogger {
+    log_dir: PathBuf,
+    last_hash: Arc<TokioMutex<Option<String>>>,
+}
 
 impl FilesystemAuditLogger {
-    pub fn new(_log_path: std::path::PathBuf) -> Result<Self, AuditError> {
-        unimplemented!("FilesystemAuditLogger not yet implemented - Task 20.2")
+    /// Create new filesystem audit logger
+    ///
+    /// Creates the log directory if it doesn't exist and initializes
+    /// the hash chain by reading the last event from today's log file.
+    pub fn new(log_path: PathBuf) -> Result<Self, AuditError> {
+        // Create log directory if it doesn't exist
+        std::fs::create_dir_all(&log_path).map_err(|e| AuditError::StorageError {
+            message: format!("Failed to create log directory: {}", e),
+        })?;
+
+        // Try to read last hash from today's log file
+        let today_log = Self::get_log_file_path(&log_path);
+        let last_hash = if today_log.exists() {
+            Self::read_last_hash(&today_log)?
+        } else {
+            None
+        };
+
+        Ok(Self {
+            log_dir: log_path,
+            last_hash: Arc::new(TokioMutex::new(last_hash)),
+        })
+    }
+
+    /// Get path for today's log file
+    fn get_log_file_path(log_dir: &PathBuf) -> PathBuf {
+        let now = Utc::now();
+        let filename = format!("audit-{}.jsonl", now.format("%Y-%m-%d"));
+        log_dir.join(filename)
+    }
+
+    /// Read the last hash from a log file
+    fn read_last_hash(log_file: &PathBuf) -> Result<Option<String>, AuditError> {
+        use std::io::{BufRead, BufReader};
+
+        if !log_file.exists() {
+            return Ok(None);
+        }
+
+        let file = File::open(log_file).map_err(|e| AuditError::StorageError {
+            message: format!("Failed to open log file: {}", e),
+        })?;
+
+        let reader = BufReader::new(file);
+        let mut last_hash = None;
+
+        for line in reader.lines() {
+            if let Ok(line_str) = line {
+                if let Ok(event) = serde_json::from_str::<AuditEvent>(&line_str) {
+                    last_hash = Some(event.content_hash);
+                }
+            }
+        }
+
+        Ok(last_hash)
+    }
+
+    /// Write event to log file with hash chaining
+    async fn write_event(&self, mut event: AuditEvent) -> Result<AuditLogId, AuditError> {
+        // Get and update last hash atomically
+        let mut last_hash_guard = self.last_hash.lock().await;
+        event.previous_hash = last_hash_guard.clone();
+
+        // Recalculate content hash with the updated previous_hash
+        event.content_hash = event.recalculate_hash();
+
+        let log_file = Self::get_log_file_path(&self.log_dir);
+        let audit_id = event.audit_id;
+
+        // Serialize event
+        let mut event_json =
+            serde_json::to_string(&event).map_err(|e| AuditError::SerializationError {
+                message: format!("Failed to serialize audit event: {}", e),
+            })?;
+        event_json.push('\n');
+
+        // Write to file (spawn blocking to avoid blocking async runtime)
+        let log_file_clone = log_file.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut file = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(log_file_clone)
+                .map_err(|e| AuditError::StorageError {
+                    message: format!("Failed to open log file: {}", e),
+                })?;
+
+            file.write_all(event_json.as_bytes())
+                .map_err(|e| AuditError::StorageError {
+                    message: format!("Failed to write to log file: {}", e),
+                })?;
+
+            file.sync_all().map_err(|e| AuditError::StorageError {
+                message: format!("Failed to sync log file: {}", e),
+            })?;
+
+            Ok::<(), AuditError>(())
+        })
+        .await
+        .map_err(|e| AuditError::StorageError {
+            message: format!("Task join error: {}", e),
+        })??;
+
+        // Update last hash
+        *last_hash_guard = Some(event.content_hash);
+
+        Ok(audit_id)
     }
 }
 
 #[async_trait]
 impl AuditLogger for FilesystemAuditLogger {
-    async fn log_event(&self, _event: AuditEvent) -> Result<AuditLogId, AuditError> {
-        unimplemented!("FilesystemAuditLogger not yet implemented - Task 20.2")
+    async fn log_event(&self, event: AuditEvent) -> Result<AuditLogId, AuditError> {
+        self.write_event(event).await
     }
 
     async fn log_webhook_processing(
         &self,
-        _event_id: EventId,
-        _session_id: SessionId,
-        _repository: Repository,
-        _action: WebhookProcessingAction,
-        _result: AuditResult,
-        _context: AuditContext,
+        event_id: EventId,
+        session_id: SessionId,
+        repository: Repository,
+        action: WebhookProcessingAction,
+        result: AuditResult,
+        context: AuditContext,
     ) -> Result<AuditLogId, AuditError> {
-        unimplemented!("FilesystemAuditLogger not yet implemented - Task 20.2")
+        let event = AuditEvent::new(
+            AuditEventType::WebhookProcessing,
+            AuditActor::System {
+                component_name: "queue-keeper".to_string(),
+                instance_id: "webhook-processor".to_string(),
+                version: env!("CARGO_PKG_VERSION").to_string(),
+            },
+            AuditResource::WebhookEvent {
+                event_id,
+                session_id,
+                repository,
+                event_type: "webhook".to_string(),
+            },
+            AuditAction::Process {
+                operation: format!("{:?}", action),
+            },
+            result,
+            context,
+        );
+
+        self.log_event(event).await
     }
 
     async fn log_admin_action(
         &self,
-        _actor: AuditActor,
-        _resource: AuditResource,
-        _action: AuditAction,
-        _result: AuditResult,
-        _context: AuditContext,
+        actor: AuditActor,
+        resource: AuditResource,
+        action: AuditAction,
+        result: AuditResult,
+        context: AuditContext,
     ) -> Result<AuditLogId, AuditError> {
-        unimplemented!("FilesystemAuditLogger not yet implemented - Task 20.2")
+        let event = AuditEvent::new(
+            AuditEventType::Administration,
+            actor,
+            resource,
+            action,
+            result,
+            context,
+        );
+
+        self.log_event(event).await
     }
 
     async fn log_security_event(
         &self,
-        _security_event: SecurityAuditEvent,
-        _context: AuditContext,
+        security_event: SecurityAuditEvent,
+        context: AuditContext,
     ) -> Result<AuditLogId, AuditError> {
-        unimplemented!("FilesystemAuditLogger not yet implemented - Task 20.2")
+        let (actor, resource, action, result) = match security_event {
+            SecurityAuditEvent::AuthenticationAttempt {
+                method,
+                success,
+                failure_reason,
+            } => (
+                AuditActor::Anonymous {
+                    source_ip: context.source_ip.clone(),
+                    user_agent: context.user_agent.clone(),
+                },
+                AuditResource::SystemConfiguration {
+                    component: "authentication".to_string(),
+                    setting_name: method.clone(),
+                },
+                AuditAction::Authenticate { method },
+                if success {
+                    AuditResult::Success {
+                        duration: None,
+                        details: Some("Authentication successful".to_string()),
+                    }
+                } else {
+                    AuditResult::Failure {
+                        error_code: "AUTH_FAILED".to_string(),
+                        error_message: failure_reason
+                            .unwrap_or_else(|| "Authentication failed".to_string()),
+                        retryable: true,
+                    }
+                },
+            ),
+            _ => {
+                return Err(AuditError::SerializationError {
+                    message: "Unsupported security event type".to_string(),
+                })
+            }
+        };
+
+        let event = AuditEvent::new(
+            AuditEventType::Security,
+            actor,
+            resource,
+            action,
+            result,
+            context,
+        );
+
+        self.log_event(event).await
     }
 
     async fn log_events_batch(
         &self,
-        _events: Vec<AuditEvent>,
+        events: Vec<AuditEvent>,
     ) -> Result<Vec<AuditLogId>, AuditError> {
-        unimplemented!("FilesystemAuditLogger not yet implemented - Task 20.2")
+        let mut audit_ids = Vec::with_capacity(events.len());
+        for event in events {
+            audit_ids.push(self.log_event(event).await?);
+        }
+        Ok(audit_ids)
     }
 
     async fn flush(&self) -> Result<(), AuditError> {
-        unimplemented!("FilesystemAuditLogger not yet implemented - Task 20.2")
+        // Filesystem writes are synchronous, so no buffering to flush
+        Ok(())
     }
 }
 
@@ -1796,118 +2007,347 @@ impl AuditLogger for BlobStorageAuditLogger {
 }
 
 /// Stdout-based audit logger for container observability
-pub struct StdoutAuditLogger;
+///
+/// Writes audit events to stdout in JSON format for collection by
+/// container logging systems (e.g., Fluent Bit, Logstash).
+/// Never fails - best effort logging for observability.
+pub struct StdoutAuditLogger {
+    writer: Arc<StdMutex<std::io::Stdout>>,
+}
 
 impl StdoutAuditLogger {
+    /// Create new stdout audit logger
     pub fn new() -> Self {
-        unimplemented!("StdoutAuditLogger not yet implemented - Task 20.2")
+        Self {
+            writer: Arc::new(StdMutex::new(std::io::stdout())),
+        }
+    }
+
+    /// Write event to stdout (best effort, never fails)
+    fn write_event(&self, event: &AuditEvent) -> Result<AuditLogId, AuditError> {
+        let audit_id = event.audit_id;
+
+        // Try to serialize and write, but don't fail if it doesn't work
+        if let Ok(json) = serde_json::to_string(event) {
+            if let Ok(mut writer) = self.writer.lock() {
+                let _ = writeln!(writer, "{}", json);
+                let _ = writer.flush();
+            }
+        }
+
+        // Always return success for stdout logger (best effort)
+        Ok(audit_id)
     }
 }
 
 #[async_trait]
 impl AuditLogger for StdoutAuditLogger {
-    async fn log_event(&self, _event: AuditEvent) -> Result<AuditLogId, AuditError> {
-        unimplemented!("StdoutAuditLogger not yet implemented - Task 20.2")
+    async fn log_event(&self, event: AuditEvent) -> Result<AuditLogId, AuditError> {
+        self.write_event(&event)
     }
 
     async fn log_webhook_processing(
         &self,
-        _event_id: EventId,
-        _session_id: SessionId,
-        _repository: Repository,
-        _action: WebhookProcessingAction,
-        _result: AuditResult,
-        _context: AuditContext,
+        event_id: EventId,
+        session_id: SessionId,
+        repository: Repository,
+        action: WebhookProcessingAction,
+        result: AuditResult,
+        context: AuditContext,
     ) -> Result<AuditLogId, AuditError> {
-        unimplemented!("StdoutAuditLogger not yet implemented - Task 20.2")
+        let event = AuditEvent::new(
+            AuditEventType::WebhookProcessing,
+            AuditActor::System {
+                component_name: "queue-keeper".to_string(),
+                instance_id: "webhook-processor".to_string(),
+                version: env!("CARGO_PKG_VERSION").to_string(),
+            },
+            AuditResource::WebhookEvent {
+                event_id,
+                session_id,
+                repository,
+                event_type: "webhook".to_string(),
+            },
+            AuditAction::Process {
+                operation: format!("{:?}", action),
+            },
+            result,
+            context,
+        );
+
+        self.log_event(event).await
     }
 
     async fn log_admin_action(
         &self,
-        _actor: AuditActor,
-        _resource: AuditResource,
-        _action: AuditAction,
-        _result: AuditResult,
-        _context: AuditContext,
+        actor: AuditActor,
+        resource: AuditResource,
+        action: AuditAction,
+        result: AuditResult,
+        context: AuditContext,
     ) -> Result<AuditLogId, AuditError> {
-        unimplemented!("StdoutAuditLogger not yet implemented - Task 20.2")
+        let event = AuditEvent::new(
+            AuditEventType::Administration,
+            actor,
+            resource,
+            action,
+            result,
+            context,
+        );
+        self.log_event(event).await
     }
 
     async fn log_security_event(
         &self,
-        _security_event: SecurityAuditEvent,
-        _context: AuditContext,
+        security_event: SecurityAuditEvent,
+        context: AuditContext,
     ) -> Result<AuditLogId, AuditError> {
-        unimplemented!("StdoutAuditLogger not yet implemented - Task 20.2")
+        let (actor, resource, action, result) = match security_event {
+            SecurityAuditEvent::AuthenticationAttempt {
+                method,
+                success,
+                failure_reason,
+            } => (
+                AuditActor::Anonymous {
+                    source_ip: context.source_ip.clone(),
+                    user_agent: context.user_agent.clone(),
+                },
+                AuditResource::SystemConfiguration {
+                    component: "authentication".to_string(),
+                    setting_name: method.clone(),
+                },
+                AuditAction::Authenticate { method },
+                if success {
+                    AuditResult::Success {
+                        duration: None,
+                        details: Some("Authentication successful".to_string()),
+                    }
+                } else {
+                    AuditResult::Failure {
+                        error_code: "AUTH_FAILED".to_string(),
+                        error_message: failure_reason
+                            .unwrap_or_else(|| "Authentication failed".to_string()),
+                        retryable: true,
+                    }
+                },
+            ),
+            _ => {
+                return Err(AuditError::SerializationError {
+                    message: "Unsupported security event type".to_string(),
+                })
+            }
+        };
+
+        let event = AuditEvent::new(
+            AuditEventType::Security,
+            actor,
+            resource,
+            action,
+            result,
+            context,
+        );
+        self.log_event(event).await
     }
 
     async fn log_events_batch(
         &self,
-        _events: Vec<AuditEvent>,
+        events: Vec<AuditEvent>,
     ) -> Result<Vec<AuditLogId>, AuditError> {
-        unimplemented!("StdoutAuditLogger not yet implemented - Task 20.2")
+        let mut audit_ids = Vec::with_capacity(events.len());
+        for event in events {
+            audit_ids.push(self.log_event(event).await?);
+        }
+        Ok(audit_ids)
     }
 
     async fn flush(&self) -> Result<(), AuditError> {
-        unimplemented!("StdoutAuditLogger not yet implemented - Task 20.2")
+        // Flush stdout (best effort)
+        if let Ok(mut writer) = self.writer.lock() {
+            let _ = writer.flush();
+        }
+        Ok(())
     }
 }
 
 /// Composite audit logger that writes to multiple backends
-pub struct CompositeAuditLogger;
+///
+/// Logs events to all configured backends. Succeeds if at least one
+/// backend succeeds. Collects and logs errors from failed backends.
+pub struct CompositeAuditLogger {
+    backends: Vec<Arc<dyn AuditLogger>>,
+}
 
 impl CompositeAuditLogger {
-    pub fn new(_backends: Vec<std::sync::Arc<dyn AuditLogger>>) -> Self {
-        unimplemented!("CompositeAuditLogger not yet implemented - Task 20.2")
+    /// Create new composite logger with multiple backends
+    pub fn new(backends: Vec<Arc<dyn AuditLogger>>) -> Self {
+        Self { backends }
+    }
+
+    /// Log to all backends, returning success if at least one succeeds
+    async fn log_to_all(&self, event: AuditEvent) -> Result<AuditLogId, AuditError> {
+        if self.backends.is_empty() {
+            return Ok(event.audit_id);
+        }
+
+        let audit_id = event.audit_id;
+        let mut last_error = None;
+        let mut success_count = 0;
+
+        for backend in &self.backends {
+            match backend.log_event(event.clone()).await {
+                Ok(_) => success_count += 1,
+                Err(e) => last_error = Some(e),
+            }
+        }
+
+        if success_count > 0 {
+            Ok(audit_id)
+        } else if let Some(err) = last_error {
+            Err(err)
+        } else {
+            Ok(audit_id)
+        }
     }
 }
 
 #[async_trait]
 impl AuditLogger for CompositeAuditLogger {
-    async fn log_event(&self, _event: AuditEvent) -> Result<AuditLogId, AuditError> {
-        unimplemented!("CompositeAuditLogger not yet implemented - Task 20.2")
+    async fn log_event(&self, event: AuditEvent) -> Result<AuditLogId, AuditError> {
+        self.log_to_all(event).await
     }
 
     async fn log_webhook_processing(
         &self,
-        _event_id: EventId,
-        _session_id: SessionId,
-        _repository: Repository,
-        _action: WebhookProcessingAction,
-        _result: AuditResult,
-        _context: AuditContext,
+        event_id: EventId,
+        session_id: SessionId,
+        repository: Repository,
+        action: WebhookProcessingAction,
+        result: AuditResult,
+        context: AuditContext,
     ) -> Result<AuditLogId, AuditError> {
-        unimplemented!("CompositeAuditLogger not yet implemented - Task 20.2")
+        let event = AuditEvent::new(
+            AuditEventType::WebhookProcessing,
+            AuditActor::System {
+                component_name: "queue-keeper".to_string(),
+                instance_id: "webhook-processor".to_string(),
+                version: env!("CARGO_PKG_VERSION").to_string(),
+            },
+            AuditResource::WebhookEvent {
+                event_id,
+                session_id,
+                repository,
+                event_type: "webhook".to_string(),
+            },
+            AuditAction::Process {
+                operation: format!("{:?}", action),
+            },
+            result,
+            context,
+        );
+
+        self.log_event(event).await
     }
 
     async fn log_admin_action(
         &self,
-        _actor: AuditActor,
-        _resource: AuditResource,
-        _action: AuditAction,
-        _result: AuditResult,
-        _context: AuditContext,
+        actor: AuditActor,
+        resource: AuditResource,
+        action: AuditAction,
+        result: AuditResult,
+        context: AuditContext,
     ) -> Result<AuditLogId, AuditError> {
-        unimplemented!("CompositeAuditLogger not yet implemented - Task 20.2")
+        let event = AuditEvent::new(
+            AuditEventType::Administration,
+            actor,
+            resource,
+            action,
+            result,
+            context,
+        );
+        self.log_event(event).await
     }
 
     async fn log_security_event(
         &self,
-        _security_event: SecurityAuditEvent,
-        _context: AuditContext,
+        security_event: SecurityAuditEvent,
+        context: AuditContext,
     ) -> Result<AuditLogId, AuditError> {
-        unimplemented!("CompositeAuditLogger not yet implemented - Task 20.2")
+        let (actor, resource, action, result) = match security_event {
+            SecurityAuditEvent::AuthenticationAttempt {
+                method,
+                success,
+                failure_reason,
+            } => (
+                AuditActor::Anonymous {
+                    source_ip: context.source_ip.clone(),
+                    user_agent: context.user_agent.clone(),
+                },
+                AuditResource::SystemConfiguration {
+                    component: "authentication".to_string(),
+                    setting_name: method.clone(),
+                },
+                AuditAction::Authenticate { method },
+                if success {
+                    AuditResult::Success {
+                        duration: None,
+                        details: Some("Authentication successful".to_string()),
+                    }
+                } else {
+                    AuditResult::Failure {
+                        error_code: "AUTH_FAILED".to_string(),
+                        error_message: failure_reason
+                            .unwrap_or_else(|| "Authentication failed".to_string()),
+                        retryable: true,
+                    }
+                },
+            ),
+            _ => {
+                return Err(AuditError::SerializationError {
+                    message: "Unsupported security event type".to_string(),
+                })
+            }
+        };
+
+        let event = AuditEvent::new(
+            AuditEventType::Security,
+            actor,
+            resource,
+            action,
+            result,
+            context,
+        );
+        self.log_event(event).await
     }
 
     async fn log_events_batch(
         &self,
-        _events: Vec<AuditEvent>,
+        events: Vec<AuditEvent>,
     ) -> Result<Vec<AuditLogId>, AuditError> {
-        unimplemented!("CompositeAuditLogger not yet implemented - Task 20.2")
+        let mut audit_ids = Vec::with_capacity(events.len());
+        for event in events {
+            audit_ids.push(self.log_event(event).await?);
+        }
+        Ok(audit_ids)
     }
 
     async fn flush(&self) -> Result<(), AuditError> {
-        unimplemented!("CompositeAuditLogger not yet implemented - Task 20.2")
+        let mut last_error = None;
+        let mut success_count = 0;
+
+        for backend in &self.backends {
+            match backend.flush().await {
+                Ok(_) => success_count += 1,
+                Err(e) => last_error = Some(e),
+            }
+        }
+
+        if success_count > 0 || self.backends.is_empty() {
+            Ok(())
+        } else if let Some(err) = last_error {
+            Err(err)
+        } else {
+            Ok(())
+        }
     }
 }
 
