@@ -291,7 +291,7 @@ mod signature_validation_tests {
     #[tokio::test]
     async fn test_valid_signature_succeeds() {
         let validator = Arc::new(MockSignatureValidator { should_fail: false });
-        let processor = WebhookProcessorImpl::new(Some(validator), None);
+        let processor = WebhookProcessorImpl::new(Some(validator), None, None);
 
         let result = processor
             .validate_signature(b"test payload", "sha256=valid", "push")
@@ -303,7 +303,7 @@ mod signature_validation_tests {
     #[tokio::test]
     async fn test_invalid_signature_fails() {
         let validator = Arc::new(MockSignatureValidator { should_fail: true });
-        let processor = WebhookProcessorImpl::new(Some(validator), None);
+        let processor = WebhookProcessorImpl::new(Some(validator), None, None);
 
         let result = processor
             .validate_signature(b"test payload", "sha256=invalid", "push")
@@ -314,7 +314,7 @@ mod signature_validation_tests {
 
     #[tokio::test]
     async fn test_signature_validation_without_validator() {
-        let processor = WebhookProcessorImpl::new(None, None);
+        let processor = WebhookProcessorImpl::new(None, None, None);
 
         let result = processor
             .validate_signature(b"test payload", "sha256=any", "push")
@@ -334,7 +334,7 @@ mod event_normalization_tests {
 
     #[tokio::test]
     async fn test_pull_request_event_normalization() {
-        let processor = WebhookProcessorImpl::new(None, None);
+        let processor = WebhookProcessorImpl::new(None, None, None);
         let mut headers = create_test_headers();
         headers.insert("X-GitHub-Event".to_string(), "pull_request".to_string());
         let webhook_headers = WebhookHeaders::from_http_headers(&headers).unwrap();
@@ -354,7 +354,7 @@ mod event_normalization_tests {
 
     #[tokio::test]
     async fn test_issue_event_normalization() {
-        let processor = WebhookProcessorImpl::new(None, None);
+        let processor = WebhookProcessorImpl::new(None, None, None);
         let mut headers = create_test_headers();
         headers.insert("X-GitHub-Event".to_string(), "issues".to_string());
         let webhook_headers = WebhookHeaders::from_http_headers(&headers).unwrap();
@@ -390,7 +390,7 @@ mod event_normalization_tests {
 
     #[tokio::test]
     async fn test_push_event_normalization() {
-        let processor = WebhookProcessorImpl::new(None, None);
+        let processor = WebhookProcessorImpl::new(None, None, None);
         let headers = WebhookHeaders::from_http_headers(&create_test_headers()).unwrap();
 
         let payload = json!({
@@ -426,7 +426,7 @@ mod event_normalization_tests {
 
     #[tokio::test]
     async fn test_release_event_normalization() {
-        let processor = WebhookProcessorImpl::new(None, None);
+        let processor = WebhookProcessorImpl::new(None, None, None);
         let mut headers = create_test_headers();
         headers.insert("X-GitHub-Event".to_string(), "release".to_string());
         let webhook_headers = WebhookHeaders::from_http_headers(&headers).unwrap();
@@ -466,7 +466,7 @@ mod event_normalization_tests {
 
     #[tokio::test]
     async fn test_repository_event_normalization() {
-        let processor = WebhookProcessorImpl::new(None, None);
+        let processor = WebhookProcessorImpl::new(None, None, None);
         let mut headers = create_test_headers();
         headers.insert("X-GitHub-Event".to_string(), "repository".to_string());
         let webhook_headers = WebhookHeaders::from_http_headers(&headers).unwrap();
@@ -498,7 +498,7 @@ mod event_normalization_tests {
 
     #[tokio::test]
     async fn test_unknown_event_type_normalization() {
-        let processor = WebhookProcessorImpl::new(None, None);
+        let processor = WebhookProcessorImpl::new(None, None, None);
         let mut headers = create_test_headers();
         headers.insert("X-GitHub-Event".to_string(), "unknown_event".to_string());
         let webhook_headers = WebhookHeaders::from_http_headers(&headers).unwrap();
@@ -529,7 +529,7 @@ mod event_normalization_tests {
 
     #[tokio::test]
     async fn test_missing_repository_field() {
-        let processor = WebhookProcessorImpl::new(None, None);
+        let processor = WebhookProcessorImpl::new(None, None, None);
         let headers = WebhookHeaders::from_http_headers(&create_test_headers()).unwrap();
 
         let payload = json!({
@@ -551,7 +551,7 @@ mod event_normalization_tests {
 
     #[tokio::test]
     async fn test_event_with_action_field() {
-        let processor = WebhookProcessorImpl::new(None, None);
+        let processor = WebhookProcessorImpl::new(None, None, None);
         let headers = WebhookHeaders::from_http_headers(&create_test_headers()).unwrap();
         let payload = create_pr_payload();
         let body = Bytes::from(serde_json::to_vec(&payload).unwrap());
@@ -566,7 +566,7 @@ mod event_normalization_tests {
 
     #[tokio::test]
     async fn test_event_without_action_field() {
-        let processor = WebhookProcessorImpl::new(None, None);
+        let processor = WebhookProcessorImpl::new(None, None, None);
         let headers = WebhookHeaders::from_http_headers(&create_test_headers()).unwrap();
 
         let payload = json!({
@@ -596,7 +596,7 @@ mod event_normalization_tests {
 
     #[tokio::test]
     async fn test_timestamp_generation() {
-        let processor = WebhookProcessorImpl::new(None, None);
+        let processor = WebhookProcessorImpl::new(None, None, None);
         let headers = WebhookHeaders::from_http_headers(&create_test_headers()).unwrap();
         let payload = create_pr_payload();
         let body = Bytes::from(serde_json::to_vec(&payload).unwrap());
@@ -612,7 +612,7 @@ mod event_normalization_tests {
 
     #[tokio::test]
     async fn test_event_id_generation() {
-        let processor = WebhookProcessorImpl::new(None, None);
+        let processor = WebhookProcessorImpl::new(None, None, None);
         let headers = WebhookHeaders::from_http_headers(&create_test_headers()).unwrap();
         let payload = create_pr_payload();
         let body = Bytes::from(serde_json::to_vec(&payload).unwrap());
@@ -629,7 +629,7 @@ mod event_normalization_tests {
 
     #[tokio::test]
     async fn test_correlation_id_generation() {
-        let processor = WebhookProcessorImpl::new(None, None);
+        let processor = WebhookProcessorImpl::new(None, None, None);
         let headers = WebhookHeaders::from_http_headers(&create_test_headers()).unwrap();
         let payload = create_pr_payload();
         let body = Bytes::from(serde_json::to_vec(&payload).unwrap());
@@ -826,7 +826,7 @@ mod integration_tests {
     async fn test_complete_webhook_processing_pipeline() {
         let validator = Arc::new(MockSignatureValidator { should_fail: false });
         let storer = Arc::new(MockPayloadStorer { should_fail: false });
-        let processor = WebhookProcessorImpl::new(Some(validator), Some(storer));
+        let processor = WebhookProcessorImpl::new(Some(validator), Some(storer), None);
 
         let mut headers = create_test_headers();
         headers.insert("X-GitHub-Event".to_string(), "pull_request".to_string());
@@ -848,7 +848,7 @@ mod integration_tests {
     async fn test_pipeline_with_signature_failure() {
         let validator = Arc::new(MockSignatureValidator { should_fail: true });
         let storer = Arc::new(MockPayloadStorer { should_fail: false });
-        let processor = WebhookProcessorImpl::new(Some(validator), Some(storer));
+        let processor = WebhookProcessorImpl::new(Some(validator), Some(storer), None);
 
         let headers = WebhookHeaders::from_http_headers(&create_test_headers()).unwrap();
         let payload = create_pr_payload();
@@ -863,7 +863,7 @@ mod integration_tests {
     async fn test_pipeline_with_storage_failure() {
         let validator = Arc::new(MockSignatureValidator { should_fail: false });
         let storer = Arc::new(MockPayloadStorer { should_fail: true });
-        let processor = WebhookProcessorImpl::new(Some(validator), Some(storer));
+        let processor = WebhookProcessorImpl::new(Some(validator), Some(storer), None);
 
         let headers = WebhookHeaders::from_http_headers(&create_test_headers()).unwrap();
         let payload = create_pr_payload();
