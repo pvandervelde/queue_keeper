@@ -10,6 +10,10 @@ use queue_keeper_api::{
     AppState, EventStore, HealthChecker, ServiceConfig, ServiceMetrics, TelemetryConfig,
 };
 use queue_keeper_core::{
+    audit_logging::{
+        AuditAction, AuditActor, AuditContext, AuditError, AuditEvent, AuditLogId, AuditLogger,
+        AuditResource, AuditResult, SecurityAuditEvent, WebhookProcessingAction,
+    },
     webhook::{
         EventEntity, EventEnvelope, NormalizationError, StorageError, StorageReference,
         ValidationStatus, WebhookError, WebhookProcessor, WebhookRequest,
@@ -356,5 +360,96 @@ pub fn create_default_event_envelope() -> EventEnvelope {
         occurred_at: Timestamp::now(),
         processed_at: Timestamp::now(),
         payload: serde_json::json!({"test": "data"}),
+    }
+}
+
+// ============================================================================
+// Mock Audit Logger
+// ============================================================================
+
+/// Mock audit logger for testing audit event recording
+#[derive(Clone)]
+pub struct MockAuditLogger {
+    logged_events: Arc<Mutex<Vec<AuditEvent>>>,
+}
+
+impl MockAuditLogger {
+    pub fn new() -> Self {
+        Self {
+            logged_events: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    /// Get all logged audit events
+    pub fn get_logged_events(&self) -> Vec<AuditEvent> {
+        self.logged_events.lock().unwrap().clone()
+    }
+
+    /// Get count of logged events
+    pub fn event_count(&self) -> usize {
+        self.logged_events.lock().unwrap().len()
+    }
+
+    /// Clear all logged events
+    pub fn clear(&self) {
+        self.logged_events.lock().unwrap().clear();
+    }
+}
+
+#[async_trait::async_trait]
+impl AuditLogger for MockAuditLogger {
+    async fn log_event(&self, event: AuditEvent) -> Result<AuditLogId, AuditError> {
+        self.logged_events.lock().unwrap().push(event.clone());
+        Ok(event.audit_id.clone())
+    }
+
+    async fn log_webhook_processing(
+        &self,
+        _event_id: EventId,
+        _session_id: SessionId,
+        _repository: Repository,
+        _action: WebhookProcessingAction,
+        _result: AuditResult,
+        _context: AuditContext,
+    ) -> Result<AuditLogId, AuditError> {
+        // Create a dummy event for testing
+        let audit_id = AuditLogId::new();
+        Ok(audit_id)
+    }
+
+    async fn log_admin_action(
+        &self,
+        _actor: AuditActor,
+        _resource: AuditResource,
+        _action: AuditAction,
+        _result: AuditResult,
+        _context: AuditContext,
+    ) -> Result<AuditLogId, AuditError> {
+        let audit_id = AuditLogId::new();
+        Ok(audit_id)
+    }
+
+    async fn log_security_event(
+        &self,
+        _security_event: SecurityAuditEvent,
+        _context: AuditContext,
+    ) -> Result<AuditLogId, AuditError> {
+        let audit_id = AuditLogId::new();
+        Ok(audit_id)
+    }
+
+    async fn log_events_batch(
+        &self,
+        events: Vec<AuditEvent>,
+    ) -> Result<Vec<AuditLogId>, AuditError> {
+        let mut ids = Vec::new();
+        for event in events {
+            ids.push(self.log_event(event).await?);
+        }
+        Ok(ids)
+    }
+
+    async fn flush(&self) -> Result<(), AuditError> {
+        Ok(())
     }
 }
