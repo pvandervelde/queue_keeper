@@ -187,8 +187,7 @@ async fn test_query_events_filter_by_event_type() {
 async fn test_query_events_filter_by_time_range() {
     let (logger, _temp_dir) = create_test_logger();
 
-    let now = Timestamp::now();
-    let one_hour_ago = now.subtract_duration(StdDuration::from_secs(3600));
+    let one_hour_ago = Timestamp::now().subtract_duration(StdDuration::from_secs(3600));
 
     // Create events (all will have timestamps close to now, but we'll test the interface)
     let event1 = create_test_event(AuditEventType::WebhookProcessing);
@@ -196,6 +195,9 @@ async fn test_query_events_filter_by_time_range() {
 
     logger.log_event(event1).await.expect("Failed to log event1");
     logger.log_event(event2).await.expect("Failed to log event2");
+
+    // Capture end time after events are created
+    let now = Timestamp::now();
 
     // Query for events in last hour
     let query_spec = AuditQuerySpec {
