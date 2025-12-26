@@ -719,7 +719,7 @@ impl WebhookProcessor for WebhookProcessorImpl {
         request: WebhookRequest,
     ) -> Result<EventEnvelope, WebhookError> {
         let start_time = std::time::Instant::now();
-        let received_at = request.received_at;
+        let _received_at = request.received_at;
         
         info!(
             event_type = %request.event_type(),
