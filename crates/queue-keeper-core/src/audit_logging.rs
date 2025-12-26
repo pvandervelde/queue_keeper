@@ -2351,6 +2351,121 @@ impl AuditLogger for CompositeAuditLogger {
     }
 }
 
+// ============================================================================
+// Query and Retention Implementations
+// ============================================================================
+
+#[async_trait]
+impl AuditQuery for FilesystemAuditLogger {
+    async fn query_events(
+        &self,
+        _query: AuditQuerySpec,
+        _pagination: PaginationOptions,
+    ) -> Result<AuditQueryResult, AuditError> {
+        // TODO: implement query_events
+        todo!("query_events not yet implemented")
+    }
+
+    async fn get_event(&self, _audit_id: AuditLogId) -> Result<Option<AuditEvent>, AuditError> {
+        // TODO: implement get_event
+        todo!("get_event not yet implemented")
+    }
+
+    async fn get_resource_trail(
+        &self,
+        _resource: AuditResource,
+        _time_range: TimeRange,
+    ) -> Result<Vec<AuditEvent>, AuditError> {
+        // TODO: implement get_resource_trail
+        todo!("get_resource_trail not yet implemented")
+    }
+
+    async fn get_session_trail(
+        &self,
+        _session_id: SessionId,
+    ) -> Result<Vec<AuditEvent>, AuditError> {
+        // TODO: implement get_session_trail
+        todo!("get_session_trail not yet implemented")
+    }
+
+    async fn generate_compliance_report(
+        &self,
+        _report_spec: ComplianceReportSpec,
+    ) -> Result<ComplianceReport, AuditError> {
+        // TODO: implement generate_compliance_report
+        todo!("generate_compliance_report not yet implemented")
+    }
+
+    async fn verify_chain_integrity(
+        &self,
+        _start_time: Timestamp,
+        _end_time: Timestamp,
+    ) -> Result<IntegrityVerificationResult, AuditError> {
+        // TODO: implement verify_chain_integrity
+        todo!("verify_chain_integrity not yet implemented")
+    }
+
+    async fn get_statistics(
+        &self,
+        _time_range: TimeRange,
+        _group_by: Option<StatisticsGroupBy>,
+    ) -> Result<AuditStatistics, AuditError> {
+        // TODO: implement get_statistics
+        todo!("get_statistics not yet implemented")
+    }
+}
+
+#[async_trait]
+impl AuditRetention for FilesystemAuditLogger {
+    async fn archive_logs(
+        &self,
+        _before_date: Timestamp,
+        _archive_location: String,
+    ) -> Result<ArchiveResult, AuditError> {
+        // TODO: implement archive_logs
+        todo!("archive_logs not yet implemented")
+    }
+
+    async fn delete_expired_logs(
+        &self,
+        _retention_policy: RetentionPolicy,
+    ) -> Result<DeletionResult, AuditError> {
+        // TODO: implement delete_expired_logs
+        todo!("delete_expired_logs not yet implemented")
+    }
+
+    async fn get_retention_status(&self) -> Result<RetentionStatus, AuditError> {
+        // TODO: implement get_retention_status
+        todo!("get_retention_status not yet implemented")
+    }
+
+    async fn compress_logs(
+        &self,
+        _before_date: Timestamp,
+        _compression_level: CompressionLevel,
+    ) -> Result<CompressionResult, AuditError> {
+        // TODO: implement compress_logs
+        todo!("compress_logs not yet implemented")
+    }
+
+    async fn restore_archived_logs(
+        &self,
+        _archive_location: String,
+        _time_range: TimeRange,
+    ) -> Result<RestoreResult, AuditError> {
+        // TODO: implement restore_archived_logs
+        todo!("restore_archived_logs not yet implemented")
+    }
+
+    async fn validate_compliance(
+        &self,
+        _rules: Vec<ComplianceRule>,
+    ) -> Result<ComplianceValidationResult, AuditError> {
+        // TODO: implement validate_compliance
+        todo!("validate_compliance not yet implemented")
+    }
+}
+
 #[cfg(test)]
 #[path = "audit_logging_tests.rs"]
 mod tests;
@@ -2358,3 +2473,7 @@ mod tests;
 #[cfg(test)]
 #[path = "audit_logger_backends_tests.rs"]
 mod backend_tests;
+
+#[cfg(test)]
+#[path = "audit_query_retention_tests.rs"]
+mod query_retention_tests;
