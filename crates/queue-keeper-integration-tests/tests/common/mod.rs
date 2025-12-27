@@ -369,10 +369,12 @@ pub fn create_default_event_envelope() -> EventEnvelope {
 
 /// Mock audit logger for testing audit event recording
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct MockAuditLogger {
     logged_events: Arc<Mutex<Vec<AuditEvent>>>,
 }
 
+#[allow(dead_code)]
 impl MockAuditLogger {
     pub fn new() -> Self {
         Self {
