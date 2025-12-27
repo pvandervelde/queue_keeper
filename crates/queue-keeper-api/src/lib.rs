@@ -1779,6 +1779,66 @@ impl ServiceMetrics {
     }
 }
 
+// Implement MetricsCollector trait from queue-keeper-core
+impl queue_keeper_core::monitoring::MetricsCollector for ServiceMetrics {
+    fn record_webhook_request(&self, duration: std::time::Duration, success: bool) {
+        self.webhook_requests_total.inc();
+        self.webhook_duration_seconds
+            .observe(duration.as_secs_f64());
+        if !success {
+            self.webhook_validation_failures.inc();
+        }
+    }
+
+    fn record_webhook_validation_failure(&self) {
+        self.webhook_validation_failures.inc();
+    }
+
+    fn record_queue_routing(&self, duration: std::time::Duration, _queue_count: usize) {
+        self.webhook_queue_routing_duration
+            .observe(duration.as_secs_f64());
+    }
+
+    fn record_queue_delivery_attempt(&self, success: bool) {
+        // Track via error_rate_by_category for failed deliveries
+        if !success {
+            self.error_rate_by_category.inc();
+        }
+    }
+
+    fn record_error(&self, _category: &str, _is_transient: bool) {
+        self.error_rate_by_category.inc();
+    }
+
+    fn record_circuit_breaker_state(&self, _service: &str, state: i64) {
+        self.circuit_breaker_state.set(state);
+    }
+
+    fn record_retry_attempt(&self, _service: &str) {
+        self.retry_attempts_total.inc();
+    }
+
+    fn record_blob_storage_failure(&self) {
+        self.blob_storage_failures.inc();
+    }
+
+    fn record_queue_depth(&self, _queue_name: &str, depth: i64) {
+        self.queue_depth_messages.set(depth);
+    }
+
+    fn record_dead_letter_queue_depth(&self, depth: i64) {
+        self.dead_letter_queue_depth.set(depth);
+    }
+
+    fn record_session_ordering_violation(&self) {
+        self.session_ordering_violations.inc();
+    }
+
+    fn record_queue_processing_rate(&self, rate: f64) {
+        self.queue_processing_rate.set(rate);
+    }
+}
+
 impl Default for ServiceMetrics {
     fn default() -> Self {
         // This is a stub implementation for testing
