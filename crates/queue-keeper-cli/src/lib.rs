@@ -13,7 +13,7 @@
 use clap::{Parser, Subcommand};
 use queue_keeper_core::{QueueKeeperError, ValidationError};
 use std::path::PathBuf;
-use tracing::{error, info};
+use tracing::info;
 
 // ============================================================================
 // CLI Structure

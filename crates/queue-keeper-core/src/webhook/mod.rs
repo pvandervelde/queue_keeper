@@ -5,6 +5,7 @@
 //! See specs/interfaces/webhook-processing.md for complete specification.
 
 use crate::{
+    audit_logging::{AuditContext, AuditLogger, AuditResult, WebhookProcessingAction},
     CorrelationId, EventId, Repository, RepositoryId, SessionId, Timestamp, User, UserId, UserType,
     ValidationError,
 };
@@ -583,6 +584,7 @@ pub enum SecretError {
 pub struct WebhookProcessorImpl {
     signature_validator: Option<std::sync::Arc<dyn SignatureValidator>>,
     payload_storer: Option<std::sync::Arc<dyn PayloadStorer>>,
+    audit_logger: Option<std::sync::Arc<dyn AuditLogger>>,
 }
 
 impl WebhookProcessorImpl {
@@ -592,6 +594,7 @@ impl WebhookProcessorImpl {
     ///
     /// * `signature_validator` - Optional signature validator for webhook authentication
     /// * `payload_storer` - Optional payload storer for audit trail
+    /// * `audit_logger` - Optional audit logger for compliance and security monitoring
     ///
     /// # Examples
     ///
@@ -599,19 +602,21 @@ impl WebhookProcessorImpl {
     /// use queue_keeper_core::webhook::WebhookProcessorImpl;
     ///
     /// // Create processor without dependencies (for testing)
-    /// let processor = WebhookProcessorImpl::new(None, None);
+    /// let processor = WebhookProcessorImpl::new(None, None, None);
     ///
     /// // Create processor with signature validation only
     /// // let validator = Arc::new(my_validator);
-    /// // let processor = WebhookProcessorImpl::new(Some(validator), None);
+    /// // let processor = WebhookProcessorImpl::new(Some(validator), None, None);
     /// ```
     pub fn new(
         signature_validator: Option<std::sync::Arc<dyn SignatureValidator>>,
         payload_storer: Option<std::sync::Arc<dyn PayloadStorer>>,
+        audit_logger: Option<std::sync::Arc<dyn AuditLogger>>,
     ) -> Self {
         Self {
             signature_validator,
             payload_storer,
+            audit_logger,
         }
     }
 
@@ -713,6 +718,8 @@ impl WebhookProcessor for WebhookProcessorImpl {
         &self,
         request: WebhookRequest,
     ) -> Result<EventEnvelope, WebhookError> {
+        let start_time = std::time::Instant::now();
+
         info!(
             event_type = %request.event_type(),
             delivery_id = %request.delivery_id(),
@@ -734,6 +741,32 @@ impl WebhookProcessor for WebhookProcessorImpl {
 
         // 4. Normalize to standard event format
         let event_envelope = self.normalize_event(&request).await?;
+
+        // 5. Log successful webhook processing to audit trail
+        if let Some(audit_logger) = &self.audit_logger {
+            let processing_time = start_time.elapsed();
+            let result = AuditResult::Success {
+                duration: Some(processing_time),
+                details: Some(format!("Webhook processed: {}", request.event_type())),
+            };
+            let mut context = AuditContext::default();
+            context.correlation_id = Some(event_envelope.correlation_id.to_string());
+
+            let _ = audit_logger
+                .log_webhook_processing(
+                    event_envelope.event_id,
+                    event_envelope.session_id.clone(),
+                    event_envelope.repository.clone(),
+                    WebhookProcessingAction::ProcessingComplete {
+                        total_duration_ms: processing_time.as_millis() as u64,
+                        success_count: 1,
+                        failure_count: 0,
+                    },
+                    result,
+                    context,
+                )
+                .await;
+        }
 
         info!(
             event_id = %event_envelope.event_id,

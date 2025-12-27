@@ -171,3 +171,71 @@ async fn test_webhook_handles_ping_event_immediately() {
         response_time.as_millis()
     );
 }
+
+// ============================================================================
+// Audit Logging Integration Tests
+// ============================================================================
+
+/// Verify that webhook processing logs audit events at key stages
+///
+/// This test validates that audit logging is integrated into webhook processing
+/// and captures all key events: received, validation, normalization, storage, completion.
+///
+/// TODO: This test currently uses MockWebhookProcessor which bypasses real audit logging.
+/// To properly test audit integration, need to create test with real WebhookProcessorImpl
+/// and MockAuditLogger dependencies.
+#[tokio::test]
+#[ignore = "TODO: Requires test setup with real WebhookProcessorImpl and MockAuditLogger"]
+async fn test_webhook_processing_logs_audit_events() {
+    // Arrange
+    let processor = MockWebhookProcessor::new();
+    let _audit_logger = Arc::new(common::MockAuditLogger::new());
+    let state = create_test_app_state_with_processor(Arc::new(processor.clone()));
+
+    let headers = create_valid_webhook_headers();
+    let body = Bytes::from(r#"{"action":"opened","number":123}"#);
+
+    // Act
+    let result = queue_keeper_api::handle_webhook(State(state), headers, body).await;
+
+    // Assert: Request succeeded
+    assert!(result.is_ok(), "Expected successful response");
+
+    // TODO: Verify audit events once test uses real WebhookProcessorImpl:
+    // - At least one webhook processing event was logged
+    // - Event includes correlation_id for tracing
+    // - Event includes timing information
+}
+
+/// Verify that failed signature validation logs security audit event
+///
+/// This test validates that security-relevant failures (like signature validation)
+/// are captured in audit logs for compliance and security monitoring.
+///
+/// TODO: Similar to above, needs real WebhookProcessorImpl setup to test audit logging.
+#[tokio::test]
+#[ignore = "TODO: Requires test setup with real WebhookProcessorImpl and MockAuditLogger"]
+async fn test_failed_signature_validation_logs_security_event() {
+    // Arrange
+    let processor = MockWebhookProcessor::new();
+    processor.set_error("Invalid signature".to_string());
+    let _audit_logger = Arc::new(common::MockAuditLogger::new());
+    let state = create_test_app_state_with_processor(Arc::new(processor));
+
+    let headers = create_valid_webhook_headers();
+    let body = Bytes::from(r#"{"action":"opened"}"#);
+
+    // Act
+    let result = queue_keeper_api::handle_webhook(State(state), headers, body).await;
+
+    // Assert: Request failed as expected
+    assert!(
+        result.is_err(),
+        "Expected error response for invalid signature"
+    );
+
+    // TODO: Verify security audit event once test uses real WebhookProcessorImpl:
+    // - Security event type was logged
+    // - Event captures the validation failure
+    // - Event includes source IP and other security context
+}

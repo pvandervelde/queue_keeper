@@ -9,6 +9,7 @@
 //! See specs/interfaces/bot-configuration.md for routing configuration.
 
 use crate::{
+    audit_logging::{AuditContext, AuditLogger, AuditResult, WebhookProcessingAction},
     bot_config::{BotConfiguration, BotSubscription},
     webhook::EventEnvelope,
     BotName, EventId,
@@ -174,12 +175,21 @@ pub trait EventRouter: Send + Sync {
 ///
 /// Routes events to all matching bot subscriptions, handling both ordered
 /// and unordered delivery modes.
-pub struct DefaultEventRouter;
+pub struct DefaultEventRouter {
+    audit_logger: Option<std::sync::Arc<dyn AuditLogger>>,
+}
 
 impl DefaultEventRouter {
     /// Create new default event router
     pub fn new() -> Self {
-        Self
+        Self { audit_logger: None }
+    }
+
+    /// Create new default event router with audit logging
+    pub fn with_audit_logger(audit_logger: std::sync::Arc<dyn AuditLogger>) -> Self {
+        Self {
+            audit_logger: Some(audit_logger),
+        }
     }
 
     /// Create queue message from event envelope
@@ -254,6 +264,7 @@ impl EventRouter for DefaultEventRouter {
         config: &BotConfiguration,
         queue_client: &dyn QueueClient,
     ) -> Result<DeliveryResult, QueueDeliveryError> {
+        let start_time = std::time::Instant::now();
         let mut result = DeliveryResult::new(event.event_id);
 
         // Get target bots from configuration
@@ -261,11 +272,36 @@ impl EventRouter for DefaultEventRouter {
 
         // If no bots match, return successful no-op
         if target_bots.is_empty() {
+            // Log no matching bots to audit trail
+            if let Some(audit_logger) = &self.audit_logger {
+                let routing_time = start_time.elapsed();
+                let audit_result = AuditResult::Success {
+                    duration: Some(routing_time),
+                    details: Some("No matching bots for event".to_string()),
+                };
+                let mut context = AuditContext::default();
+                context.correlation_id = Some(event.correlation_id.to_string());
+
+                let _ = audit_logger
+                    .log_webhook_processing(
+                        event.event_id,
+                        event.session_id.clone(),
+                        event.repository.clone(),
+                        WebhookProcessingAction::BotRouting {
+                            matched_bots: vec![],
+                            routing_duration_ms: routing_time.as_millis() as u64,
+                        },
+                        audit_result,
+                        context,
+                    )
+                    .await;
+            }
             return Ok(result);
         }
 
         // Attempt delivery to each target bot queue
-        for bot in target_bots {
+        // Note: We borrow target_bots here so we can reuse the Vec for audit logging below
+        for bot in &target_bots {
             // Convert core QueueName to queue-runtime QueueName
             let queue_name = match QueueName::new(bot.queue.as_str().to_string()) {
                 Ok(qn) => qn,
@@ -313,6 +349,49 @@ impl EventRouter for DefaultEventRouter {
                     });
                 }
             }
+        }
+
+        // Log routing completion to audit trail
+        if let Some(audit_logger) = &self.audit_logger {
+            let routing_time = start_time.elapsed();
+            let matched_bot_names: Vec<String> = target_bots
+                .iter()
+                .map(|b| b.name.as_str().to_string())
+                .collect();
+
+            let audit_result = if result.is_complete_success() {
+                AuditResult::Success {
+                    duration: Some(routing_time),
+                    details: Some(format!("Delivered to {} bot(s)", result.successful.len())),
+                }
+            } else {
+                AuditResult::Failure {
+                    error_code: "PARTIAL_DELIVERY".to_string(),
+                    error_message: format!(
+                        "Delivered to {}/{} queues",
+                        result.successful.len(),
+                        target_bots.len()
+                    ),
+                    retryable: result.failed.iter().any(|f| f.is_transient),
+                }
+            };
+
+            let mut context = AuditContext::default();
+            context.correlation_id = Some(event.correlation_id.to_string());
+
+            let _ = audit_logger
+                .log_webhook_processing(
+                    event.event_id,
+                    event.session_id.clone(),
+                    event.repository.clone(),
+                    WebhookProcessingAction::BotRouting {
+                        matched_bots: matched_bot_names,
+                        routing_duration_ms: routing_time.as_millis() as u64,
+                    },
+                    audit_result,
+                    context,
+                )
+                .await;
         }
 
         // Check results and return appropriate response

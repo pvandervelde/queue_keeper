@@ -5,6 +5,3 @@
 
 pub mod github;
 pub mod queue;
-
-pub use github::CircuitBreakerGitHubClient;
-pub use queue::CircuitBreakerQueueProvider;

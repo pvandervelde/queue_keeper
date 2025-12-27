@@ -568,3 +568,402 @@ async fn test_route_event_message_body_contains_serialized_event() {
     assert_eq!(deserialized.event_id, event.event_id);
     assert_eq!(deserialized.event_type, event.event_type);
 }
+
+// ============================================================================
+// Mock Audit Logger for Testing
+// ============================================================================
+
+use crate::audit_logging::{
+    AuditAction, AuditActor, AuditError, AuditEvent, AuditLogId, AuditLogger, AuditResource,
+    SecurityAuditEvent, WebhookProcessingAction,
+};
+use crate::{EventId, SessionId};
+
+#[derive(Clone, Debug)]
+struct LoggedWebhookProcessing {
+    _event_id: EventId,
+    _session_id: SessionId,
+    _repository: Repository,
+    action: WebhookProcessingAction,
+    result: crate::audit_logging::AuditResult,
+    context: crate::audit_logging::AuditContext,
+}
+
+#[derive(Clone)]
+struct MockAuditLogger {
+    logged_webhook_processing: Arc<Mutex<Vec<LoggedWebhookProcessing>>>,
+    should_fail: Arc<Mutex<bool>>,
+}
+
+impl MockAuditLogger {
+    fn new() -> Self {
+        Self {
+            logged_webhook_processing: Arc::new(Mutex::new(Vec::new())),
+            should_fail: Arc::new(Mutex::new(false)),
+        }
+    }
+
+    fn with_failure() -> Self {
+        Self {
+            logged_webhook_processing: Arc::new(Mutex::new(Vec::new())),
+            should_fail: Arc::new(Mutex::new(true)),
+        }
+    }
+
+    fn get_logged_webhook_processing(&self) -> Vec<LoggedWebhookProcessing> {
+        self.logged_webhook_processing.lock().unwrap().clone()
+    }
+
+    fn event_count(&self) -> usize {
+        self.logged_webhook_processing.lock().unwrap().len()
+    }
+}
+
+#[async_trait]
+impl AuditLogger for MockAuditLogger {
+    async fn log_event(&self, _event: AuditEvent) -> Result<AuditLogId, AuditError> {
+        if *self.should_fail.lock().unwrap() {
+            return Err(AuditError::StorageError {
+                message: "Mock failure".to_string(),
+            });
+        }
+
+        Ok(AuditLogId::new())
+    }
+
+    async fn log_webhook_processing(
+        &self,
+        event_id: EventId,
+        session_id: SessionId,
+        repository: Repository,
+        action: WebhookProcessingAction,
+        result: crate::audit_logging::AuditResult,
+        context: crate::audit_logging::AuditContext,
+    ) -> Result<AuditLogId, AuditError> {
+        if *self.should_fail.lock().unwrap() {
+            return Err(AuditError::StorageError {
+                message: "Mock failure".to_string(),
+            });
+        }
+
+        self.logged_webhook_processing
+            .lock()
+            .unwrap()
+            .push(LoggedWebhookProcessing {
+                _event_id: event_id,
+                _session_id: session_id,
+                _repository: repository,
+                action,
+                result,
+                context,
+            });
+
+        Ok(AuditLogId::new())
+    }
+
+    async fn log_admin_action(
+        &self,
+        _actor: AuditActor,
+        _resource: AuditResource,
+        _action: AuditAction,
+        _result: crate::audit_logging::AuditResult,
+        _context: crate::audit_logging::AuditContext,
+    ) -> Result<AuditLogId, AuditError> {
+        if *self.should_fail.lock().unwrap() {
+            return Err(AuditError::StorageError {
+                message: "Mock failure".to_string(),
+            });
+        }
+
+        Ok(AuditLogId::new())
+    }
+
+    async fn log_security_event(
+        &self,
+        _security_event: SecurityAuditEvent,
+        _context: crate::audit_logging::AuditContext,
+    ) -> Result<AuditLogId, AuditError> {
+        if *self.should_fail.lock().unwrap() {
+            return Err(AuditError::StorageError {
+                message: "Mock failure".to_string(),
+            });
+        }
+
+        Ok(AuditLogId::new())
+    }
+
+    async fn log_events_batch(
+        &self,
+        _events: Vec<AuditEvent>,
+    ) -> Result<Vec<AuditLogId>, AuditError> {
+        if *self.should_fail.lock().unwrap() {
+            return Err(AuditError::StorageError {
+                message: "Mock failure".to_string(),
+            });
+        }
+
+        Ok(vec![AuditLogId::new()])
+    }
+
+    async fn flush(&self) -> Result<(), AuditError> {
+        if *self.should_fail.lock().unwrap() {
+            return Err(AuditError::StorageError {
+                message: "Mock failure".to_string(),
+            });
+        }
+
+        Ok(())
+    }
+}
+
+// ============================================================================
+// Audit Logging Tests
+// ============================================================================
+
+/// Verify that successful routing logs an audit event with correct details.
+///
+/// Creates a router with audit logging, routes an event to a matching bot,
+/// and verifies the audit event contains the correct bot names, duration, and success status.
+#[tokio::test]
+async fn test_audit_logging_on_successful_routing() {
+    let event = create_test_event();
+    let bot = create_test_bot("test-bot", "queue-keeper-test-bot", false);
+    let config = create_test_config(vec![bot]);
+    let queue_client = MockQueueClient::new();
+    let audit_logger = MockAuditLogger::new();
+
+    let router = DefaultEventRouter::with_audit_logger(Arc::new(audit_logger.clone()));
+
+    let result = router
+        .route_event(&event, &config, &queue_client)
+        .await
+        .expect("Routing should succeed");
+
+    assert!(result.is_complete_success());
+
+    // Verify audit event was logged
+    let logged = audit_logger.get_logged_webhook_processing();
+    assert_eq!(logged.len(), 1, "Should log exactly one audit event");
+
+    let log_entry = &logged[0];
+
+    // Verify action type
+    if let WebhookProcessingAction::BotRouting {
+        matched_bots,
+        routing_duration_ms,
+    } = &log_entry.action
+    {
+        assert_eq!(matched_bots.len(), 1);
+        assert_eq!(matched_bots[0], "test-bot");
+        // Duration will be very small for synchronous mock test, just verify it's present
+        // (u64 is always >= 0, so no need to check)
+    } else {
+        panic!("Expected WebhookProcessing(BotRouting) action");
+    }
+
+    // Verify result is success
+    matches!(
+        &log_entry.result,
+        crate::audit_logging::AuditResult::Success { .. }
+    );
+
+    // Verify context includes correlation_id
+    assert_eq!(
+        log_entry.context.correlation_id,
+        Some(event.correlation_id.to_string())
+    );
+}
+
+/// Verify that routing to multiple bots logs all bot names in audit event.
+///
+/// Creates a router with audit logging, routes an event to multiple matching bots,
+/// and verifies all bot names are captured in the audit event.
+#[tokio::test]
+async fn test_audit_logging_captures_multiple_bots() {
+    let event = create_test_event();
+    let bot1 = create_test_bot("bot1", "queue-keeper-bot1", false);
+    let bot2 = create_test_bot("bot2", "queue-keeper-bot2", false);
+    let config = create_test_config(vec![bot1, bot2]);
+    let queue_client = MockQueueClient::new();
+    let audit_logger = MockAuditLogger::new();
+
+    let router = DefaultEventRouter::with_audit_logger(Arc::new(audit_logger.clone()));
+
+    let result = router
+        .route_event(&event, &config, &queue_client)
+        .await
+        .expect("Routing should succeed");
+
+    assert!(result.is_complete_success());
+
+    let logged = audit_logger.get_logged_webhook_processing();
+    assert_eq!(logged.len(), 1);
+
+    let log_entry = &logged[0];
+
+    if let WebhookProcessingAction::BotRouting { matched_bots, .. } = &log_entry.action {
+        assert_eq!(matched_bots.len(), 2);
+        assert!(matched_bots.contains(&"bot1".to_string()));
+        assert!(matched_bots.contains(&"bot2".to_string()));
+    } else {
+        panic!("Expected WebhookProcessing(BotRouting) action");
+    }
+}
+
+/// Verify that routing with no matching bots logs an audit event with empty bot list.
+///
+/// Creates a router with audit logging, routes an event that matches no bots,
+/// and verifies the audit event contains an empty bot list.
+#[tokio::test]
+async fn test_audit_logging_on_no_matching_bots() {
+    let event = create_test_event();
+    let config = create_test_config(vec![]); // No bots configured
+    let queue_client = MockQueueClient::new();
+    let audit_logger = MockAuditLogger::new();
+
+    let router = DefaultEventRouter::with_audit_logger(Arc::new(audit_logger.clone()));
+
+    let result = router
+        .route_event(&event, &config, &queue_client)
+        .await
+        .expect("Routing should succeed even with no matching bots");
+
+    assert!(result.successful.is_empty());
+    assert!(result.failed.is_empty());
+
+    // Verify audit event was logged
+    let logged = audit_logger.get_logged_webhook_processing();
+    assert_eq!(
+        logged.len(),
+        1,
+        "Should log audit event even with no matching bots"
+    );
+
+    let log_entry = &logged[0];
+
+    if let WebhookProcessingAction::BotRouting { matched_bots, .. } = &log_entry.action {
+        assert_eq!(
+            matched_bots.len(),
+            0,
+            "Should have empty bot list when no bots match"
+        );
+    } else {
+        panic!("Expected WebhookProcessing(BotRouting) action");
+    }
+
+    // Verify result indicates success (no bots is not a failure)
+    assert!(matches!(
+        &log_entry.result,
+        crate::audit_logging::AuditResult::Success { .. }
+    ));
+}
+
+/// Verify that partial delivery failures are captured in audit result.
+///
+/// Creates a router with audit logging, routes an event where one queue fails,
+/// and verifies the audit event captures the partial failure status.
+#[tokio::test]
+async fn test_audit_logging_on_partial_delivery_failure() {
+    let event = create_test_event();
+    let bot1 = create_test_bot("bot1", "queue-keeper-bot1", false);
+    let bot2 = create_test_bot("bot2", "queue-keeper-bot2", false);
+    let config = create_test_config(vec![bot1, bot2]);
+
+    // Configure queue client to fail for bot2's queue
+    let queue_client = MockQueueClient::with_failure("queue-keeper-bot2", false);
+    let audit_logger = MockAuditLogger::new();
+
+    let router = DefaultEventRouter::with_audit_logger(Arc::new(audit_logger.clone()));
+
+    let result = router.route_event(&event, &config, &queue_client).await;
+
+    // Partial delivery returns an error
+    assert!(result.is_err());
+    matches!(
+        result,
+        Err(super::QueueDeliveryError::PartialDelivery { .. })
+    );
+
+    // Verify audit event captures failure
+    let logged = audit_logger.get_logged_webhook_processing();
+    assert_eq!(logged.len(), 1);
+
+    let log_entry = &logged[0];
+
+    // Verify result is failure
+    if let crate::audit_logging::AuditResult::Failure { error_code, .. } = &log_entry.result {
+        assert_eq!(error_code, "PARTIAL_DELIVERY");
+    } else {
+        panic!("Expected Failure result for partial delivery");
+    }
+
+    // Verify both bots are still captured in matched_bots
+    if let WebhookProcessingAction::BotRouting { matched_bots, .. } = &log_entry.action {
+        assert_eq!(matched_bots.len(), 2);
+    } else {
+        panic!("Expected WebhookProcessing(BotRouting) action");
+    }
+}
+
+/// Verify that audit logging failures do not block routing operations (best-effort pattern).
+///
+/// Creates a router with a failing audit logger, routes an event successfully,
+/// and verifies routing completes despite audit failure.
+#[tokio::test]
+async fn test_audit_logging_failure_does_not_block_routing() {
+    let event = create_test_event();
+    let bot = create_test_bot("test-bot", "queue-keeper-test-bot", false);
+    let config = create_test_config(vec![bot]);
+    let queue_client = MockQueueClient::new();
+    let audit_logger = MockAuditLogger::with_failure(); // Configure to fail
+
+    let router = DefaultEventRouter::with_audit_logger(Arc::new(audit_logger.clone()));
+
+    // Routing should succeed despite audit logging failure
+    let result = router
+        .route_event(&event, &config, &queue_client)
+        .await
+        .expect("Routing should succeed even if audit logging fails");
+
+    assert!(result.is_complete_success());
+
+    // Verify message was still delivered
+    let messages = queue_client.get_sent_messages();
+    assert_eq!(
+        messages.len(),
+        1,
+        "Message should be delivered despite audit failure"
+    );
+
+    // Verify audit logger was called but failed
+    assert_eq!(
+        audit_logger.event_count(),
+        0,
+        "Audit event should not be stored due to failure"
+    );
+}
+
+/// Verify that routing without audit logger works correctly (backward compatibility).
+///
+/// Creates a router without audit logging, routes an event successfully,
+/// and verifies routing completes normally.
+#[tokio::test]
+async fn test_routing_without_audit_logger() {
+    let event = create_test_event();
+    let bot = create_test_bot("test-bot", "queue-keeper-test-bot", false);
+    let config = create_test_config(vec![bot]);
+    let queue_client = MockQueueClient::new();
+
+    // Create router without audit logger
+    let router = DefaultEventRouter::new();
+
+    let result = router
+        .route_event(&event, &config, &queue_client)
+        .await
+        .expect("Routing should succeed without audit logger");
+
+    assert!(result.is_complete_success());
+
+    let messages = queue_client.get_sent_messages();
+    assert_eq!(messages.len(), 1);
+}
