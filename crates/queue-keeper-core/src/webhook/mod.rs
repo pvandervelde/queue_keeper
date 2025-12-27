@@ -745,7 +745,6 @@ impl WebhookProcessor for WebhookProcessorImpl {
         // 5. Log successful webhook processing to audit trail
         if let Some(audit_logger) = &self.audit_logger {
             let processing_time = start_time.elapsed();
-            let processing_time = start_time.elapsed();
             let result = AuditResult::Success {
                 duration: Some(processing_time),
                 details: Some(format!("Webhook processed: {}", request.event_type())),
