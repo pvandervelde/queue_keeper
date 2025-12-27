@@ -12,14 +12,13 @@ use tempfile::TempDir;
 /// Create test audit logger with temporary directory
 fn create_test_logger() -> (FilesystemAuditLogger, TempDir) {
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
-    let logger = FilesystemAuditLogger::new(temp_dir.path().to_path_buf())
-        .expect("Failed to create logger");
+    let logger =
+        FilesystemAuditLogger::new(temp_dir.path().to_path_buf()).expect("Failed to create logger");
     (logger, temp_dir)
 }
 
 /// Create test audit event
 fn create_test_event(event_type: AuditEventType) -> AuditEvent {
-    let occurred_at = Timestamp::now();
     let actor = AuditActor::System {
         component_name: "test-component".to_string(),
         instance_id: "instance-1".to_string(),
@@ -44,8 +43,8 @@ fn create_test_event(event_type: AuditEventType) -> AuditEvent {
 /// Create test webhook processing event
 async fn create_webhook_event(logger: &FilesystemAuditLogger) -> AuditLogId {
     let event_id = EventId::new();
-    let session_id = SessionId::new("test-session-123".to_string())
-        .expect("Failed to create session id");
+    let session_id =
+        SessionId::new("test-session-123".to_string()).expect("Failed to create session id");
     let repository = Repository {
         id: RepositoryId::new(12345),
         name: "test-repo".to_string(),
@@ -97,9 +96,18 @@ async fn test_query_events_no_filters() {
     let event2 = create_test_event(AuditEventType::WebhookProcessing);
     let event3 = create_test_event(AuditEventType::Administration);
 
-    logger.log_event(event1).await.expect("Failed to log event1");
-    logger.log_event(event2).await.expect("Failed to log event2");
-    logger.log_event(event3).await.expect("Failed to log event3");
+    logger
+        .log_event(event1)
+        .await
+        .expect("Failed to log event1");
+    logger
+        .log_event(event2)
+        .await
+        .expect("Failed to log event2");
+    logger
+        .log_event(event3)
+        .await
+        .expect("Failed to log event3");
 
     // Query without filters
     let query_spec = AuditQuerySpec {
@@ -143,9 +151,18 @@ async fn test_query_events_filter_by_event_type() {
     let event2 = create_test_event(AuditEventType::WebhookProcessing);
     let event3 = create_test_event(AuditEventType::Administration);
 
-    logger.log_event(event1).await.expect("Failed to log event1");
-    logger.log_event(event2).await.expect("Failed to log event2");
-    logger.log_event(event3).await.expect("Failed to log event3");
+    logger
+        .log_event(event1)
+        .await
+        .expect("Failed to log event1");
+    logger
+        .log_event(event2)
+        .await
+        .expect("Failed to log event2");
+    logger
+        .log_event(event3)
+        .await
+        .expect("Failed to log event3");
 
     // Query for WebhookProcessing events only
     let query_spec = AuditQuerySpec {
@@ -193,8 +210,14 @@ async fn test_query_events_filter_by_time_range() {
     let event1 = create_test_event(AuditEventType::WebhookProcessing);
     let event2 = create_test_event(AuditEventType::WebhookProcessing);
 
-    logger.log_event(event1).await.expect("Failed to log event1");
-    logger.log_event(event2).await.expect("Failed to log event2");
+    logger
+        .log_event(event1)
+        .await
+        .expect("Failed to log event1");
+    logger
+        .log_event(event2)
+        .await
+        .expect("Failed to log event2");
 
     // Capture end time after events are created
     let now = Timestamp::now();
@@ -298,7 +321,10 @@ async fn test_get_event_by_id() {
     let (logger, _temp_dir) = create_test_logger();
 
     let event = create_test_event(AuditEventType::WebhookProcessing);
-    let audit_id = logger.log_event(event.clone()).await.expect("Failed to log event");
+    let audit_id = logger
+        .log_event(event.clone())
+        .await
+        .expect("Failed to log event");
 
     let retrieved = logger
         .get_event(audit_id)
@@ -333,8 +359,8 @@ async fn test_get_event_not_found() {
 async fn test_get_session_trail() {
     let (logger, _temp_dir) = create_test_logger();
 
-    let session_id = SessionId::new("test-session-123".to_string())
-        .expect("Failed to create session id");
+    let session_id =
+        SessionId::new("test-session-123".to_string()).expect("Failed to create session id");
 
     // Create multiple events for same session
     for _ in 0..3 {
@@ -348,7 +374,7 @@ async fn test_get_session_trail() {
 
     // Note: This test may return 0 events if session IDs don't match
     // In a real implementation, we'd need to pass session_id to create_webhook_event
-    assert!(trail.len() >= 0);
+    // (usize is always >= 0, so just verify the call succeeds)
 }
 
 /// Verify that verify_chain_integrity detects intact chains.
@@ -362,8 +388,14 @@ async fn test_verify_chain_integrity() {
     let event1 = create_test_event(AuditEventType::WebhookProcessing);
     let event2 = create_test_event(AuditEventType::WebhookProcessing);
 
-    logger.log_event(event1).await.expect("Failed to log event1");
-    logger.log_event(event2).await.expect("Failed to log event2");
+    logger
+        .log_event(event1)
+        .await
+        .expect("Failed to log event1");
+    logger
+        .log_event(event2)
+        .await
+        .expect("Failed to log event2");
 
     let now = Timestamp::now();
     let one_hour_ago = now.subtract_duration(StdDuration::from_secs(3600));
@@ -432,8 +464,7 @@ async fn test_delete_expired_logs() {
         .await
         .expect("Delete expired logs should succeed");
 
-    // Verify deletion result
-    assert!(result.deleted_count >= 0);
+    // Verify deletion result (usize is always >= 0)
 }
 
 /// Verify that archive_logs moves old events to archive location.
@@ -450,14 +481,18 @@ async fn test_archive_logs() {
     }
 
     let before_date = Timestamp::now().add_seconds(3600); // Archive everything (1 hour in future)
-    let archive_location = _temp_dir.path().join("archive").to_string_lossy().to_string();
+    let archive_location = _temp_dir
+        .path()
+        .join("archive")
+        .to_string_lossy()
+        .to_string();
 
     let result = logger
         .archive_logs(before_date, archive_location)
         .await
         .expect("Archive logs should succeed");
 
-    assert!(result.archived_count >= 0);
+    // Verify result (usize is always >= 0)
 }
 
 /// Verify that compress_logs compresses old events.
@@ -481,7 +516,7 @@ async fn test_compress_logs() {
         .await
         .expect("Compress logs should succeed");
 
-    assert!(result.compressed_count >= 0);
+    // Verify result (usize is always >= 0)
 }
 
 /// Verify that empty query returns empty results.

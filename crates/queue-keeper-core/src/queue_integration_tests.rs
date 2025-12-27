@@ -581,9 +581,9 @@ use crate::{EventId, SessionId};
 
 #[derive(Clone, Debug)]
 struct LoggedWebhookProcessing {
-    event_id: EventId,
-    session_id: SessionId,
-    repository: Repository,
+    _event_id: EventId,
+    _session_id: SessionId,
+    _repository: Repository,
     action: WebhookProcessingAction,
     result: crate::audit_logging::AuditResult,
     context: crate::audit_logging::AuditContext,
@@ -650,9 +650,9 @@ impl AuditLogger for MockAuditLogger {
             .lock()
             .unwrap()
             .push(LoggedWebhookProcessing {
-                event_id,
-                session_id,
-                repository,
+                _event_id: event_id,
+                _session_id: session_id,
+                _repository: repository,
                 action,
                 result,
                 context,
@@ -756,10 +756,7 @@ async fn test_audit_logging_on_successful_routing() {
         assert_eq!(matched_bots.len(), 1);
         assert_eq!(matched_bots[0], "test-bot");
         // Duration will be very small for synchronous mock test, just verify it's present
-        assert!(
-            *routing_duration_ms >= 0,
-            "Duration should be recorded (even if 0)"
-        );
+        // (u64 is always >= 0, so no need to check)
     } else {
         panic!("Expected WebhookProcessing(BotRouting) action");
     }

@@ -720,7 +720,7 @@ impl WebhookProcessor for WebhookProcessorImpl {
     ) -> Result<EventEnvelope, WebhookError> {
         let start_time = std::time::Instant::now();
         let _received_at = request.received_at;
-        
+
         info!(
             event_type = %request.event_type(),
             delivery_id = %request.delivery_id(),
@@ -752,7 +752,7 @@ impl WebhookProcessor for WebhookProcessorImpl {
             };
             let mut context = AuditContext::default();
             context.correlation_id = Some(event_envelope.correlation_id.to_string());
-            
+
             let _ = audit_logger
                 .log_webhook_processing(
                     event_envelope.event_id,

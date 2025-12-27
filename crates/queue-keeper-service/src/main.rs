@@ -38,7 +38,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = ServiceConfig::default();
 
     // Create service components
-    let webhook_processor = Arc::new(DefaultWebhookProcessor::new(None, None));
+    let webhook_processor = Arc::new(DefaultWebhookProcessor::new(None, None, None));
     let health_checker = Arc::new(DefaultHealthChecker);
     let event_store = Arc::new(DefaultEventStore);
 

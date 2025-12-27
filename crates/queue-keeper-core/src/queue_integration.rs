@@ -182,9 +182,7 @@ pub struct DefaultEventRouter {
 impl DefaultEventRouter {
     /// Create new default event router
     pub fn new() -> Self {
-        Self {
-            audit_logger: None,
-        }
+        Self { audit_logger: None }
     }
 
     /// Create new default event router with audit logging
@@ -283,7 +281,7 @@ impl EventRouter for DefaultEventRouter {
                 };
                 let mut context = AuditContext::default();
                 context.correlation_id = Some(event.correlation_id.to_string());
-                
+
                 let _ = audit_logger
                     .log_webhook_processing(
                         event.event_id,
@@ -355,15 +353,15 @@ impl EventRouter for DefaultEventRouter {
         // Log routing completion to audit trail
         if let Some(audit_logger) = &self.audit_logger {
             let routing_time = start_time.elapsed();
-            let matched_bot_names: Vec<String> = target_bots.iter().map(|b| b.name.as_str().to_string()).collect();
-            
+            let matched_bot_names: Vec<String> = target_bots
+                .iter()
+                .map(|b| b.name.as_str().to_string())
+                .collect();
+
             let audit_result = if result.is_complete_success() {
                 AuditResult::Success {
                     duration: Some(routing_time),
-                    details: Some(format!(
-                        "Delivered to {} bot(s)",
-                        result.successful.len()
-                    )),
+                    details: Some(format!("Delivered to {} bot(s)", result.successful.len())),
                 }
             } else {
                 AuditResult::Failure {
@@ -376,10 +374,10 @@ impl EventRouter for DefaultEventRouter {
                     retryable: result.failed.iter().any(|f| f.is_transient),
                 }
             };
-            
+
             let mut context = AuditContext::default();
             context.correlation_id = Some(event.correlation_id.to_string());
-            
+
             let _ = audit_logger
                 .log_webhook_processing(
                     event.event_id,
