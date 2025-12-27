@@ -719,7 +719,6 @@ impl WebhookProcessor for WebhookProcessorImpl {
         request: WebhookRequest,
     ) -> Result<EventEnvelope, WebhookError> {
         let start_time = std::time::Instant::now();
-        let _received_at = request.received_at;
 
         info!(
             event_type = %request.event_type(),
@@ -745,6 +744,7 @@ impl WebhookProcessor for WebhookProcessorImpl {
 
         // 5. Log successful webhook processing to audit trail
         if let Some(audit_logger) = &self.audit_logger {
+            let processing_time = start_time.elapsed();
             let processing_time = start_time.elapsed();
             let result = AuditResult::Success {
                 duration: Some(processing_time),

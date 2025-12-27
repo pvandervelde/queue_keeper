@@ -300,6 +300,7 @@ impl EventRouter for DefaultEventRouter {
         }
 
         // Attempt delivery to each target bot queue
+        // Note: We borrow target_bots here so we can reuse the Vec for audit logging below
         for bot in &target_bots {
             // Convert core QueueName to queue-runtime QueueName
             let queue_name = match QueueName::new(bot.queue.as_str().to_string()) {

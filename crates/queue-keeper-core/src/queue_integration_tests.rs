@@ -852,10 +852,10 @@ async fn test_audit_logging_on_no_matching_bots() {
     }
 
     // Verify result indicates success (no bots is not a failure)
-    matches!(
+    assert!(matches!(
         &log_entry.result,
         crate::audit_logging::AuditResult::Success { .. }
-    );
+    ));
 }
 
 /// Verify that partial delivery failures are captured in audit result.
