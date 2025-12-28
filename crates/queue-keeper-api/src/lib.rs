@@ -26,6 +26,7 @@ use axum::{
 use bytes::Bytes;
 use prometheus::{Gauge, Histogram, IntCounter, IntGauge, TextEncoder};
 use queue_keeper_core::{
+    monitoring::MetricsCollector,
     webhook::{EventEnvelope, WebhookError, WebhookHeaders, WebhookProcessor, WebhookRequest},
     EventId, QueueKeeperError, Repository, SessionId, Timestamp, ValidationError,
 };
@@ -394,6 +395,9 @@ pub async fn handle_webhook(
 ) -> Result<Json<WebhookResponse>, WebhookHandlerError> {
     info!("Received webhook request");
 
+    // Start timing for metrics
+    let start = std::time::Instant::now();
+
     // Convert headers to HashMap
     let header_map: HashMap<String, String> = headers
         .iter()
@@ -406,19 +410,33 @@ pub async fn handle_webhook(
         .collect();
 
     // Parse webhook headers
-    let webhook_headers = WebhookHeaders::from_http_headers(&header_map)
-        .map_err(WebhookHandlerError::InvalidHeaders)?;
+    let webhook_headers = match WebhookHeaders::from_http_headers(&header_map) {
+        Ok(headers) => headers,
+        Err(e) => {
+            let duration = start.elapsed();
+            state.metrics.record_webhook_request(duration, false);
+            state.metrics.record_webhook_validation_failure();
+            return Err(WebhookHandlerError::InvalidHeaders(e));
+        }
+    };
 
     // Create webhook request
     let webhook_request = WebhookRequest::new(webhook_headers, body);
 
     // Process webhook through processor (validation + normalization + storage)
     // This is the "fast path" - must complete within ~500ms
-    let event_envelope = state
+    let event_envelope = match state
         .webhook_processor
         .process_webhook(webhook_request)
         .await
-        .map_err(WebhookHandlerError::ProcessingFailed)?;
+    {
+        Ok(envelope) => envelope,
+        Err(e) => {
+            let duration = start.elapsed();
+            state.metrics.record_webhook_request(duration, false);
+            return Err(WebhookHandlerError::ProcessingFailed(e));
+        }
+    };
 
     info!(
         event_id = %event_envelope.event_id,
@@ -427,6 +445,10 @@ pub async fn handle_webhook(
         session_id = %event_envelope.session_id,
         "Successfully processed webhook - returning immediate response"
     );
+
+    // Record successful webhook processing metrics
+    let duration = start.elapsed();
+    state.metrics.record_webhook_request(duration, true);
 
     // TODO: Task 16.6 - Spawn async task for queue delivery with retry loop
     // This will be implemented when EventRouter is integrated into AppState:
