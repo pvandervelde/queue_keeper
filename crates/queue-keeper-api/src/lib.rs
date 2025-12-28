@@ -1668,11 +1668,23 @@ pub struct ServiceMetrics {
     pub dead_letter_queue_depth: IntGauge,
     pub session_ordering_violations: IntCounter,
 
-    // Error metrics
+    // Bot-specific metrics
+    pub events_processed_per_bot: IntCounter,
+    pub queue_send_errors_total: IntCounter,
+    pub active_sessions: IntGauge,
+
+    // Replay and administrative operations
+    pub replay_operations_total: IntCounter,
+    pub replay_events_processed: IntCounter,
+    pub replay_failures_total: IntCounter,
+
+    // Error and security metrics
     pub error_rate_by_category: IntCounter,
     pub circuit_breaker_state: IntGauge,
     pub retry_attempts_total: IntCounter,
     pub blob_storage_failures: IntCounter,
+    pub signature_validation_failures: IntCounter,
+    pub authentication_failures_total: IntCounter,
 }
 
 impl ServiceMetrics {
@@ -1738,6 +1750,32 @@ impl ServiceMetrics {
                 "Events processed out of order"
             )?,
 
+            events_processed_per_bot: register_int_counter!(
+                "events_processed_per_bot",
+                "Events routed to each bot queue"
+            )?,
+            queue_send_errors_total: register_int_counter!(
+                "queue_send_errors_total",
+                "Failed queue send operations"
+            )?,
+            active_sessions: register_int_gauge!(
+                "active_sessions",
+                "Number of active message sessions"
+            )?,
+
+            replay_operations_total: register_int_counter!(
+                "replay_operations_total",
+                "Total replay operations initiated"
+            )?,
+            replay_events_processed: register_int_counter!(
+                "replay_events_processed",
+                "Events processed during replay operations"
+            )?,
+            replay_failures_total: register_int_counter!(
+                "replay_failures_total",
+                "Failed replay operations"
+            )?,
+
             error_rate_by_category: register_int_counter!(
                 "error_rate_by_category",
                 "Errors grouped by type (4xx, 5xx, network)"
@@ -1753,6 +1791,14 @@ impl ServiceMetrics {
             blob_storage_failures: register_int_counter!(
                 "blob_storage_failures",
                 "Audit trail storage failures"
+            )?,
+            signature_validation_failures: register_int_counter!(
+                "signature_validation_failures",
+                "Failed webhook signature validations"
+            )?,
+            authentication_failures_total: register_int_counter!(
+                "authentication_failures_total",
+                "Failed authentication attempts"
             )?,
         }))
     }
@@ -1792,17 +1838,20 @@ impl queue_keeper_core::monitoring::MetricsCollector for ServiceMetrics {
 
     fn record_webhook_validation_failure(&self) {
         self.webhook_validation_failures.inc();
+        self.signature_validation_failures.inc();
     }
 
     fn record_queue_routing(&self, duration: std::time::Duration, _queue_count: usize) {
         self.webhook_queue_routing_duration
             .observe(duration.as_secs_f64());
+        self.events_processed_per_bot.inc();
     }
 
     fn record_queue_delivery_attempt(&self, success: bool) {
         // Track via error_rate_by_category for failed deliveries
         if !success {
             self.error_rate_by_category.inc();
+            self.queue_send_errors_total.inc();
         }
     }
 
@@ -1937,6 +1986,46 @@ impl Default for ServiceMetrics {
             blob_storage_failures: register_int_counter!(
                 format!("blob_storage_failures_test_{}", suffix),
                 "Test blob storage failures"
+            )
+            .unwrap(),
+            events_processed_per_bot: register_int_counter!(
+                format!("events_processed_per_bot_test_{}", suffix),
+                "Test events per bot"
+            )
+            .unwrap(),
+            queue_send_errors_total: register_int_counter!(
+                format!("queue_send_errors_total_test_{}", suffix),
+                "Test queue send errors"
+            )
+            .unwrap(),
+            active_sessions: register_int_gauge!(
+                format!("active_sessions_test_{}", suffix),
+                "Test active sessions"
+            )
+            .unwrap(),
+            replay_operations_total: register_int_counter!(
+                format!("replay_operations_total_test_{}", suffix),
+                "Test replay operations"
+            )
+            .unwrap(),
+            replay_events_processed: register_int_counter!(
+                format!("replay_events_processed_test_{}", suffix),
+                "Test replay events processed"
+            )
+            .unwrap(),
+            replay_failures_total: register_int_counter!(
+                format!("replay_failures_total_test_{}", suffix),
+                "Test replay failures"
+            )
+            .unwrap(),
+            signature_validation_failures: register_int_counter!(
+                format!("signature_validation_failures_test_{}", suffix),
+                "Test signature validation failures"
+            )
+            .unwrap(),
+            authentication_failures_total: register_int_counter!(
+                format!("authentication_failures_total_test_{}", suffix),
+                "Test authentication failures"
             )
             .unwrap(),
         }
