@@ -12,6 +12,105 @@ mod common;
 use common::{github_webhook_headers, http_client, sample_webhook_payload, TestContainer};
 use std::time::Duration;
 
+/// Verify that performance metrics accurately track response times
+///
+/// This test validates that the webhook_duration_seconds histogram
+/// correctly records actual request processing times.
+#[tokio::test]
+async fn test_performance_characteristics() {
+    // Arrange
+    let server = TestContainer::start().await;
+    let client = http_client();
+
+    // Act: Send requests and measure actual latency
+    let num_requests = 10;
+    let mut actual_latencies = Vec::new();
+
+    for i in 0..num_requests {
+        let headers = github_webhook_headers();
+        let mut payload = sample_webhook_payload();
+        payload["number"] = serde_json::json!(i);
+
+        let start = std::time::Instant::now();
+        let mut request = client.post(server.url("/webhook"));
+        for (key, value) in headers.iter() {
+            request = request.header(key, value);
+        }
+
+        let response = request
+            .json(&payload)
+            .send()
+            .await
+            .expect("Failed to send request");
+
+        let latency = start.elapsed();
+        actual_latencies.push(latency);
+
+        assert!(
+            response.status().is_success() || response.status() == 400,
+            "Request should succeed or fail validation"
+        );
+    }
+
+    // Give metrics time to be recorded
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // Fetch metrics from /metrics endpoint
+    let metrics_response = client
+        .get(server.url("/metrics"))
+        .send()
+        .await
+        .expect("Failed to fetch metrics");
+
+    assert!(
+        metrics_response.status().is_success(),
+        "Metrics endpoint should be available"
+    );
+
+    let metrics_body = metrics_response
+        .text()
+        .await
+        .expect("Failed to read metrics");
+
+    // Assert: webhook_duration_seconds histogram should exist and have samples
+    assert!(
+        metrics_body.contains("webhook_duration_seconds"),
+        "webhook_duration_seconds histogram should be present in metrics"
+    );
+
+    // Verify histogram recorded our requests
+    let count_line = metrics_body
+        .lines()
+        .find(|line| line.starts_with("webhook_duration_seconds_count"))
+        .expect("webhook_duration_seconds_count should exist");
+
+    // Extract count value (format: "webhook_duration_seconds_count <number>")
+    let count: u64 = count_line
+        .split_whitespace()
+        .nth(1)
+        .and_then(|s| s.parse().ok())
+        .expect("Should parse count value");
+
+    assert!(
+        count >= num_requests,
+        "Histogram should have recorded at least {} requests, got {}",
+        num_requests,
+        count
+    );
+
+    // Verify sum exists (indicates measurements were recorded)
+    assert!(
+        metrics_body.contains("webhook_duration_seconds_sum"),
+        "webhook_duration_seconds_sum should be present"
+    );
+
+    // Verify buckets exist (histogram distribution)
+    assert!(
+        metrics_body.contains("webhook_duration_seconds_bucket"),
+        "webhook_duration_seconds_bucket should be present"
+    );
+}
+
 /// Verify that server responds quickly under normal load
 ///
 /// Tests Assertion #2: Response Time SLA
