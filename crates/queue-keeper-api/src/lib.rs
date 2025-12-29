@@ -24,7 +24,7 @@ use axum::{
     Router,
 };
 use bytes::Bytes;
-use prometheus::{Gauge, Histogram, IntCounter, IntGauge, TextEncoder};
+use prometheus::{Gauge, Histogram, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, TextEncoder};
 use queue_keeper_core::{
     monitoring::MetricsCollector,
     webhook::{EventEnvelope, WebhookError, WebhookHeaders, WebhookProcessor, WebhookRequest},
@@ -1685,13 +1685,13 @@ pub struct ServiceMetrics {
     pub webhook_queue_routing_duration: Histogram,
 
     // Queue management metrics
-    pub queue_depth_messages: IntGauge,
+    pub queue_depth_messages: IntGaugeVec,
     pub queue_processing_rate: Gauge,
     pub dead_letter_queue_depth: IntGauge,
     pub session_ordering_violations: IntCounter,
 
     // Bot-specific metrics
-    pub events_processed_per_bot: IntCounter,
+    pub events_processed_per_bot: IntCounterVec,
     pub queue_send_errors_total: IntCounter,
     pub active_sessions: IntGauge,
 
@@ -1701,9 +1701,9 @@ pub struct ServiceMetrics {
     pub replay_failures_total: IntCounter,
 
     // Error and security metrics
-    pub error_rate_by_category: IntCounter,
-    pub circuit_breaker_state: IntGauge,
-    pub retry_attempts_total: IntCounter,
+    pub error_rate_by_category: IntCounterVec,
+    pub circuit_breaker_state: IntGaugeVec,
+    pub retry_attempts_total: IntCounterVec,
     pub blob_storage_failures: IntCounter,
     pub signature_validation_failures: IntCounter,
     pub authentication_failures_total: IntCounter,
@@ -1712,7 +1712,8 @@ pub struct ServiceMetrics {
 impl ServiceMetrics {
     pub fn new() -> Result<Arc<Self>, prometheus::Error> {
         use prometheus::{
-            register_gauge, register_histogram, register_int_counter, register_int_gauge,
+            register_gauge, register_histogram, register_int_counter, register_int_counter_vec,
+            register_int_gauge, register_int_gauge_vec,
         };
 
         Ok(Arc::new(Self {
@@ -1755,9 +1756,10 @@ impl ServiceMetrics {
                 vec![0.001, 0.01, 0.1, 0.2, 0.5, 1.0]
             )?,
 
-            queue_depth_messages: register_int_gauge!(
+            queue_depth_messages: register_int_gauge_vec!(
                 "queue_depth_messages",
-                "Messages waiting in each bot queue"
+                "Messages waiting in each bot queue",
+                &["queue_name"]
             )?,
             queue_processing_rate: register_gauge!(
                 "queue_processing_rate",
@@ -1772,9 +1774,10 @@ impl ServiceMetrics {
                 "Events processed out of order"
             )?,
 
-            events_processed_per_bot: register_int_counter!(
+            events_processed_per_bot: register_int_counter_vec!(
                 "events_processed_per_bot",
-                "Events routed to each bot queue"
+                "Events routed to each bot queue",
+                &["bot_name"]
             )?,
             queue_send_errors_total: register_int_counter!(
                 "queue_send_errors_total",
@@ -1798,17 +1801,20 @@ impl ServiceMetrics {
                 "Failed replay operations"
             )?,
 
-            error_rate_by_category: register_int_counter!(
+            error_rate_by_category: register_int_counter_vec!(
                 "error_rate_by_category",
-                "Errors grouped by type (4xx, 5xx, network)"
+                "Errors grouped by category and transience",
+                &["category", "transient"]
             )?,
-            circuit_breaker_state: register_int_gauge!(
+            circuit_breaker_state: register_int_gauge_vec!(
                 "circuit_breaker_state",
-                "Service circuit breaker status"
+                "Service circuit breaker status",
+                &["service"]
             )?,
-            retry_attempts_total: register_int_counter!(
+            retry_attempts_total: register_int_counter_vec!(
                 "retry_attempts_total",
-                "Retry operations by service"
+                "Retry operations by service",
+                &["service"]
             )?,
             blob_storage_failures: register_int_counter!(
                 "blob_storage_failures",
@@ -1863,38 +1869,58 @@ impl queue_keeper_core::monitoring::MetricsCollector for ServiceMetrics {
         self.signature_validation_failures.inc();
     }
 
-    fn record_queue_routing(&self, duration: std::time::Duration, _queue_count: usize) {
+    fn record_queue_routing(&self, duration: std::time::Duration, queue_count: usize) {
         self.webhook_queue_routing_duration
             .observe(duration.as_secs_f64());
-        self.events_processed_per_bot.inc();
+        // Increment counter for each bot queue routed to
+        // Use "multiple" label when routing to multiple queues
+        let bot_label = if queue_count <= 1 {
+            "single"
+        } else {
+            "multiple"
+        };
+        self.events_processed_per_bot
+            .with_label_values(&[bot_label])
+            .inc_by(queue_count as u64);
     }
 
     fn record_queue_delivery_attempt(&self, success: bool) {
         // Track via error_rate_by_category for failed deliveries
         if !success {
-            self.error_rate_by_category.inc();
+            self.error_rate_by_category
+                .with_label_values(&["queue_delivery", "false"])
+                .inc();
             self.queue_send_errors_total.inc();
         }
     }
 
-    fn record_error(&self, _category: &str, _is_transient: bool) {
-        self.error_rate_by_category.inc();
+    fn record_error(&self, category: &str, is_transient: bool) {
+        let transient_label = if is_transient { "true" } else { "false" };
+        self.error_rate_by_category
+            .with_label_values(&[category, transient_label])
+            .inc();
     }
 
-    fn record_circuit_breaker_state(&self, _service: &str, state: i64) {
-        self.circuit_breaker_state.set(state);
+    fn record_circuit_breaker_state(&self, service: &str, state: i64) {
+        self.circuit_breaker_state
+            .with_label_values(&[service])
+            .set(state);
     }
 
-    fn record_retry_attempt(&self, _service: &str) {
-        self.retry_attempts_total.inc();
+    fn record_retry_attempt(&self, service: &str) {
+        self.retry_attempts_total
+            .with_label_values(&[service])
+            .inc();
     }
 
     fn record_blob_storage_failure(&self) {
         self.blob_storage_failures.inc();
     }
 
-    fn record_queue_depth(&self, _queue_name: &str, depth: i64) {
-        self.queue_depth_messages.set(depth);
+    fn record_queue_depth(&self, queue_name: &str, depth: i64) {
+        self.queue_depth_messages
+            .with_label_values(&[queue_name])
+            .set(depth);
     }
 
     fn record_dead_letter_queue_depth(&self, depth: i64) {
@@ -1915,7 +1941,8 @@ impl Default for ServiceMetrics {
         // This is a stub implementation for testing
         // In production, use ServiceMetrics::new() instead
         use prometheus::{
-            register_gauge, register_histogram, register_int_counter, register_int_gauge,
+            register_gauge, register_histogram, register_int_counter, register_int_counter_vec,
+            register_int_gauge, register_int_gauge_vec,
         };
 
         // Use unique names with timestamp to avoid registration conflicts in tests
@@ -1970,9 +1997,10 @@ impl Default for ServiceMetrics {
                 vec![]
             )
             .unwrap(),
-            queue_depth_messages: register_int_gauge!(
+            queue_depth_messages: register_int_gauge_vec!(
                 format!("queue_depth_messages_test_{}", suffix),
-                "Test queue depth"
+                "Test queue depth",
+                &["queue_name"]
             )
             .unwrap(),
             queue_processing_rate: register_gauge!(
@@ -1990,19 +2018,22 @@ impl Default for ServiceMetrics {
                 "Test session ordering violations"
             )
             .unwrap(),
-            error_rate_by_category: register_int_counter!(
+            error_rate_by_category: register_int_counter_vec!(
                 format!("error_rate_by_category_test_{}", suffix),
-                "Test error rate"
+                "Test error rate",
+                &["category", "transient"]
             )
             .unwrap(),
-            circuit_breaker_state: register_int_gauge!(
+            circuit_breaker_state: register_int_gauge_vec!(
                 format!("circuit_breaker_state_test_{}", suffix),
-                "Test circuit breaker state"
+                "Test circuit breaker state",
+                &["service"]
             )
             .unwrap(),
-            retry_attempts_total: register_int_counter!(
+            retry_attempts_total: register_int_counter_vec!(
                 format!("retry_attempts_total_test_{}", suffix),
-                "Test retry attempts"
+                "Test retry attempts",
+                &["service"]
             )
             .unwrap(),
             blob_storage_failures: register_int_counter!(
@@ -2010,9 +2041,10 @@ impl Default for ServiceMetrics {
                 "Test blob storage failures"
             )
             .unwrap(),
-            events_processed_per_bot: register_int_counter!(
+            events_processed_per_bot: register_int_counter_vec!(
                 format!("events_processed_per_bot_test_{}", suffix),
-                "Test events per bot"
+                "Test events per bot",
+                &["bot_name"]
             )
             .unwrap(),
             queue_send_errors_total: register_int_counter!(
