@@ -55,8 +55,96 @@ impl AzureProductionConfig {
     /// # Errors
     /// Returns error if required variables are missing or invalid
     pub fn from_env() -> Result<Self, AzureConfigError> {
-        // TODO: implement
-        todo!()
+        // Load required environment variables
+        let vault_url =
+            std::env::var("AZURE_KEY_VAULT_URL").map_err(|_| AzureConfigError::MissingEnvVar {
+                variable: "AZURE_KEY_VAULT_URL".to_string(),
+            })?;
+
+        let storage_account = std::env::var("AZURE_STORAGE_ACCOUNT").map_err(|_| {
+            AzureConfigError::MissingEnvVar {
+                variable: "AZURE_STORAGE_ACCOUNT".to_string(),
+            }
+        })?;
+
+        let storage_container = std::env::var("AZURE_STORAGE_CONTAINER").map_err(|_| {
+            AzureConfigError::MissingEnvVar {
+                variable: "AZURE_STORAGE_CONTAINER".to_string(),
+            }
+        })?;
+
+        let servicebus_namespace = std::env::var("AZURE_SERVICEBUS_NAMESPACE").map_err(|_| {
+            AzureConfigError::MissingEnvVar {
+                variable: "AZURE_SERVICEBUS_NAMESPACE".to_string(),
+            }
+        })?;
+
+        let appinsights_connection_string = std::env::var("AZURE_APPINSIGHTS_CONNECTION_STRING")
+            .map_err(|_| AzureConfigError::MissingEnvVar {
+                variable: "AZURE_APPINSIGHTS_CONNECTION_STRING".to_string(),
+            })?;
+
+        let environment =
+            std::env::var("AZURE_ENVIRONMENT").map_err(|_| AzureConfigError::MissingEnvVar {
+                variable: "AZURE_ENVIRONMENT".to_string(),
+            })?;
+
+        let region =
+            std::env::var("AZURE_REGION").map_err(|_| AzureConfigError::MissingEnvVar {
+                variable: "AZURE_REGION".to_string(),
+            })?;
+
+        // Determine if we're in production based on environment
+        let is_production = environment == "production";
+
+        // Create configuration
+        let config = Self {
+            key_vault: if is_production {
+                AzureKeyVaultConfig::production(vault_url)
+            } else {
+                AzureKeyVaultConfig::development(vault_url)
+            },
+            blob_storage: if is_production {
+                AzureBlobStorageConfig::production(storage_account, storage_container)
+            } else {
+                // Development might have connection string
+                let conn_str = std::env::var("AZURE_STORAGE_CONNECTION_STRING").ok();
+                if let Some(conn_str) = conn_str {
+                    AzureBlobStorageConfig::development(
+                        storage_account,
+                        storage_container,
+                        conn_str,
+                    )
+                } else {
+                    AzureBlobStorageConfig::production(storage_account, storage_container)
+                }
+            },
+            service_bus: if is_production {
+                AzureServiceBusConfig::production(servicebus_namespace)
+            } else {
+                // Development might have connection string
+                let conn_str = std::env::var("AZURE_SERVICEBUS_CONNECTION_STRING").ok();
+                if let Some(conn_str) = conn_str {
+                    AzureServiceBusConfig::development(servicebus_namespace, conn_str)
+                } else {
+                    AzureServiceBusConfig::production(servicebus_namespace)
+                }
+            },
+            telemetry: if is_production {
+                let version =
+                    std::env::var("SERVICE_VERSION").unwrap_or_else(|_| "1.0.0".to_string());
+                AzureTelemetryConfig::production(appinsights_connection_string, version)
+            } else {
+                AzureTelemetryConfig::development(appinsights_connection_string)
+            },
+            environment,
+            region,
+        };
+
+        // Validate before returning
+        config.validate()?;
+
+        Ok(config)
     }
 
     /// Validate configuration
@@ -68,8 +156,109 @@ impl AzureProductionConfig {
     /// - Environment is one of: dev, staging, production
     /// - Region is a valid Azure region
     pub fn validate(&self) -> Result<(), AzureConfigError> {
-        // TODO: implement
-        todo!()
+        // Validate Key Vault URL
+        if !self.key_vault.vault_url.starts_with("https://") {
+            return Err(AzureConfigError::InvalidKeyVaultUrl {
+                url: self.key_vault.vault_url.clone(),
+                reason: "Key Vault URL must use HTTPS".to_string(),
+            });
+        }
+
+        if !self.key_vault.vault_url.contains(".vault.azure.net") {
+            return Err(AzureConfigError::InvalidKeyVaultUrl {
+                url: self.key_vault.vault_url.clone(),
+                reason: "Key Vault URL must end with .vault.azure.net".to_string(),
+            });
+        }
+
+        // Validate storage account name
+        let account_name = &self.blob_storage.account_name;
+        if account_name.len() < 3 || account_name.len() > 24 {
+            return Err(AzureConfigError::InvalidStorageAccount {
+                name: account_name.clone(),
+                reason: "Storage account name must be 3-24 characters".to_string(),
+            });
+        }
+
+        if !account_name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        {
+            return Err(AzureConfigError::InvalidStorageAccount {
+                name: account_name.clone(),
+                reason: "Storage account name must contain only lowercase letters and numbers"
+                    .to_string(),
+            });
+        }
+
+        // Validate Service Bus namespace
+        let namespace = &self.service_bus.namespace;
+        if namespace.is_empty() || namespace.len() > 50 {
+            return Err(AzureConfigError::InvalidServiceBusNamespace {
+                namespace: namespace.clone(),
+                reason: "Service Bus namespace must be 1-50 characters".to_string(),
+            });
+        }
+
+        // Validate environment
+        if !["dev", "staging", "production"].contains(&self.environment.as_str()) {
+            return Err(AzureConfigError::InvalidEnvironment {
+                environment: self.environment.clone(),
+            });
+        }
+
+        // Validate region (basic check - Azure has many regions)
+        if self.region.is_empty() {
+            return Err(AzureConfigError::InvalidRegion {
+                region: self.region.clone(),
+            });
+        }
+
+        // Valid Azure regions (common ones for validation)
+        let valid_regions = [
+            "eastus",
+            "eastus2",
+            "westus",
+            "westus2",
+            "westus3",
+            "centralus",
+            "northcentralus",
+            "southcentralus",
+            "westcentralus",
+            "canadacentral",
+            "canadaeast",
+            "brazilsouth",
+            "northeurope",
+            "westeurope",
+            "uksouth",
+            "ukwest",
+            "francecentral",
+            "francesouth",
+            "germanywestcentral",
+            "norwayeast",
+            "switzerlandnorth",
+            "swedencentral",
+            "eastasia",
+            "southeastasia",
+            "japaneast",
+            "japanwest",
+            "australiaeast",
+            "australiasoutheast",
+            "australiacentral",
+            "centralindia",
+            "southindia",
+            "westindia",
+            "koreacentral",
+            "koreasouth",
+        ];
+
+        if !valid_regions.contains(&self.region.as_str()) {
+            return Err(AzureConfigError::InvalidRegion {
+                region: self.region.clone(),
+            });
+        }
+
+        Ok(())
     }
 }
 
