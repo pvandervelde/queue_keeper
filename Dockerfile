@@ -67,7 +67,7 @@ RUN strip /app/target/release/queue-keeper-service
 # ============================================================================
 # Stage 2: Runtime
 # ============================================================================
-FROM debian:bookworm-slim@sha256:e899040a73d36e2b36fa33216943539d9957cba8172b858097c2cabcdb20a3e2
+FROM debian:bookworm-slim@sha256:d5d3f9c23164ea16f31852f95bd5959aad1c5e854332fe00f7b3a20fcc9f635c
 
 # Install runtime dependencies (minimal set)
 RUN apt-get update && apt-get install -y \
