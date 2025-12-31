@@ -11,6 +11,7 @@
 //! See specs/interfaces/http-service.md for complete specification.
 
 // Public modules
+pub mod azure_config;
 pub mod config;
 pub mod dlq_storage;
 pub mod errors;
@@ -46,6 +47,10 @@ use tower_http::{compression::CompressionLayer, cors::CorsLayer, trace::TraceLay
 use tracing::{error, info, instrument, warn};
 
 // Re-export public types
+pub use azure_config::{
+    AzureBlobStorageConfig, AzureConfigError, AzureKeyVaultConfig, AzureProductionConfig,
+    AzureServiceBusConfig, AzureTelemetryConfig,
+};
 pub use config::{LoggingConfig, SecurityConfig, ServerConfig, ServiceConfig, WebhookConfig};
 pub use errors::{ConfigError, ServiceError, WebhookHandlerError};
 pub use metrics::{ServiceMetrics, TelemetryConfig};
