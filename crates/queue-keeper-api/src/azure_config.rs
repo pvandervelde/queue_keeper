@@ -207,52 +207,11 @@ impl AzureProductionConfig {
             });
         }
 
-        // Validate region (basic check - Azure has many regions)
+        // Validate region (non-empty check only - Azure frequently adds new regions)
+        // Note: We don't validate against a hardcoded list to avoid breaking when Azure
+        // adds new regions. The Azure SDK will return appropriate errors if the region
+        // is invalid.
         if self.region.is_empty() {
-            return Err(AzureConfigError::InvalidRegion {
-                region: self.region.clone(),
-            });
-        }
-
-        // Valid Azure regions (common ones for validation)
-        let valid_regions = [
-            "eastus",
-            "eastus2",
-            "westus",
-            "westus2",
-            "westus3",
-            "centralus",
-            "northcentralus",
-            "southcentralus",
-            "westcentralus",
-            "canadacentral",
-            "canadaeast",
-            "brazilsouth",
-            "northeurope",
-            "westeurope",
-            "uksouth",
-            "ukwest",
-            "francecentral",
-            "francesouth",
-            "germanywestcentral",
-            "norwayeast",
-            "switzerlandnorth",
-            "swedencentral",
-            "eastasia",
-            "southeastasia",
-            "japaneast",
-            "japanwest",
-            "australiaeast",
-            "australiasoutheast",
-            "australiacentral",
-            "centralindia",
-            "southindia",
-            "westindia",
-            "koreacentral",
-            "koreasouth",
-        ];
-
-        if !valid_regions.contains(&self.region.as_str()) {
             return Err(AzureConfigError::InvalidRegion {
                 region: self.region.clone(),
             });

@@ -1,6 +1,7 @@
 //! Tests for Azure production configuration
 
 use super::*;
+use serial_test::serial;
 
 // ============================================================================
 // AzureProductionConfig Tests
@@ -11,6 +12,7 @@ mod production_config_tests {
 
     /// Verify that AzureProductionConfig can be loaded from environment variables.
     #[test]
+    #[serial]
     fn test_from_env_with_valid_variables() {
         // Arrange
         std::env::set_var("AZURE_KEY_VAULT_URL", "https://test-vault.vault.azure.net/");
@@ -52,6 +54,7 @@ mod production_config_tests {
 
     /// Verify that missing environment variables return appropriate errors.
     #[test]
+    #[serial]
     fn test_from_env_missing_required_variable() {
         // Arrange - ensure no Azure environment variables are set
         std::env::remove_var("AZURE_KEY_VAULT_URL");
@@ -176,6 +179,40 @@ mod production_config_tests {
                 AzureConfigError::InvalidEnvironment { .. }
             ),
             "Should return InvalidEnvironment error"
+        );
+    }
+
+    /// Verify that validation catches empty regions.
+    #[test]
+    fn test_validate_empty_region() {
+        // Arrange
+        let config = AzureProductionConfig {
+            key_vault: AzureKeyVaultConfig {
+                vault_url: "https://test.vault.azure.net/".to_string(),
+                use_managed_identity: true,
+                cache_ttl_seconds: 300,
+            },
+            blob_storage: AzureBlobStorageConfig::production(
+                "teststorage".to_string(),
+                "webhooks".to_string(),
+            ),
+            service_bus: AzureServiceBusConfig::production("test-sb".to_string()),
+            telemetry: AzureTelemetryConfig::production(
+                "InstrumentationKey=test".to_string(),
+                "1.0.0".to_string(),
+            ),
+            environment: "production".to_string(),
+            region: String::new(), // Empty region
+        };
+
+        // Act
+        let result = config.validate();
+
+        // Assert
+        assert!(result.is_err(), "Should fail validation");
+        assert!(
+            matches!(result.unwrap_err(), AzureConfigError::InvalidRegion { .. }),
+            "Should return InvalidRegion error"
         );
     }
 
