@@ -949,15 +949,19 @@ impl SessionProvider for AwsSessionProvider {
     }
 
     async fn renew_session_lock(&self) -> Result<(), QueueError> {
-        // TODO: Implement session lock renewal
-        // Note: AWS SQS doesn't have explicit session locks like Azure
-        // This is a no-op for AWS
+        // Note: AWS SQS FIFO queues do not have explicit session locks like Azure Service Bus.
+        // Message ordering within a message group is guaranteed by AWS SQS itself.
+        // Visibility timeout serves as the implicit lock mechanism - messages remain
+        // invisible to other consumers during processing.
+        // Therefore, session lock renewal is not applicable to AWS SQS.
         Ok(())
     }
 
     async fn close_session(&self) -> Result<(), QueueError> {
-        // TODO: Implement session close
-        // Note: AWS SQS doesn't require explicit session close
+        // Note: AWS SQS FIFO queues do not require explicit session termination.
+        // Sessions are implicit through message groups - there's no server-side
+        // session state to clean up. The message group simply becomes idle when
+        // no messages are being processed.
         Ok(())
     }
 
@@ -966,9 +970,12 @@ impl SessionProvider for AwsSessionProvider {
     }
 
     fn session_expires_at(&self) -> Timestamp {
-        // TODO: Implement session expiry tracking
-        // AWS SQS FIFO queues don't have explicit session expiry
-        // Return a far future timestamp
-        Timestamp::now()
+        // Note: AWS SQS FIFO queues do not have explicit session expiry times.
+        // Sessions (message groups) are persistent and don't expire - they simply
+        // become idle when no messages are being processed. The visibility timeout
+        // controls how long a message remains locked to a specific consumer, but
+        // the message group itself has no expiration.
+        // Return a far-future timestamp to indicate no expiration.
+        Timestamp::from_datetime(chrono::Utc::now() + chrono::Duration::days(365))
     }
 }

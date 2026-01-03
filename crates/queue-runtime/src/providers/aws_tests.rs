@@ -1,9 +1,28 @@
 //! Tests for AWS SQS provider implementation.
 
 use super::*;
-use crate::message::{Message, MessageId, QueueName, ReceiptHandle, SessionId};
+use crate::client::QueueProvider;
+use crate::message::{Message, QueueName, ReceiptHandle, SessionId, Timestamp};
 use crate::provider::{AwsSqsConfig, ProviderType, SessionSupport};
+use bytes::Bytes;
 use chrono::Duration;
+use std::sync::Arc;
+
+// ============================================================================
+// Test Helper Functions
+// ============================================================================
+
+/// Helper to create a test message with JSON body
+fn create_test_message(json: serde_json::Value) -> Message {
+    let body = Bytes::from(serde_json::to_vec(&json).unwrap());
+    Message::new(body)
+}
+
+/// Helper to create a test message with session ID
+fn create_test_message_with_session(json: serde_json::Value, session_id: SessionId) -> Message {
+    let body = Bytes::from(serde_json::to_vec(&json).unwrap());
+    Message::new(body).with_session_id(session_id)
+}
 
 // ============================================================================
 // Configuration and Initialization Tests
@@ -127,7 +146,7 @@ mod queue_url_tests {
         };
 
         let provider = AwsSqsProvider::new(config).await.unwrap();
-        let queue_name = QueueName::new("test-queue").unwrap();
+        let queue_name = QueueName::new("test-queue".to_string()).unwrap();
 
         // First call should fetch and cache
         let url1 = provider.get_queue_url(&queue_name).await;
@@ -150,7 +169,7 @@ mod queue_url_tests {
         };
 
         let provider = AwsSqsProvider::new(config).await.unwrap();
-        let queue_name = QueueName::new("invalid queue name!!!").unwrap();
+        let queue_name = QueueName::new("invalid queue name!!!".to_string()).unwrap();
 
         let result = provider.get_queue_url(&queue_name).await;
         assert!(result.is_err(), "Invalid queue name should be rejected");
@@ -167,7 +186,7 @@ mod queue_url_tests {
         };
 
         let provider = AwsSqsProvider::new(config).await.unwrap();
-        let queue_name = QueueName::new("non-existent-queue").unwrap();
+        let queue_name = QueueName::new("non-existent-queue".to_string()).unwrap();
 
         let result = provider.get_queue_url(&queue_name).await;
         assert!(result.is_err());
@@ -195,15 +214,15 @@ mod send_tests {
         };
 
         let provider = AwsSqsProvider::new(config).await.unwrap();
-        let queue_name = QueueName::new("test-queue").unwrap();
-        let message = Message::new(serde_json::json!({"test": "data"}), None).unwrap();
+        let queue_name = QueueName::new("test-queue".to_string()).unwrap();
+        let message = create_test_message(serde_json::json!({"test": "data"}));
 
         let result = provider.send_message(&queue_name, &message).await;
         assert!(result.is_ok(), "Send to standard queue should succeed");
 
         let message_id = result.unwrap();
         assert!(
-            !message_id.as_ref().is_empty(),
+            !message_id.as_str().is_empty(),
             "Message ID should not be empty"
         );
     }
@@ -219,9 +238,10 @@ mod send_tests {
         };
 
         let provider = AwsSqsProvider::new(config).await.unwrap();
-        let queue_name = QueueName::new("test-queue.fifo").unwrap();
-        let session_id = SessionId::new("owner/repo/pr/123").unwrap();
-        let message = Message::new(serde_json::json!({"test": "data"}), Some(session_id)).unwrap();
+        let queue_name = QueueName::new("test-queue.fifo".to_string()).unwrap();
+        let session_id = SessionId::new("owner/repo/pr/123".to_string()).unwrap();
+        let message =
+            create_test_message_with_session(serde_json::json!({"test": "data"}), session_id);
 
         let result = provider.send_message(&queue_name, &message).await;
         assert!(result.is_ok(), "Send to FIFO queue should succeed");
@@ -238,8 +258,8 @@ mod send_tests {
         };
 
         let provider = AwsSqsProvider::new(config).await.unwrap();
-        let queue_name = QueueName::new("test-queue").unwrap();
-        let message = Message::new(serde_json::json!({"key": "value"}), None).unwrap();
+        let queue_name = QueueName::new("test-queue".to_string()).unwrap();
+        let message = create_test_message(serde_json::json!({"key": "value"}));
 
         let result = provider.send_message(&queue_name, &message).await;
         assert!(result.is_ok(), "Message with attributes should be sent");
@@ -256,8 +276,8 @@ mod send_tests {
         };
 
         let provider = AwsSqsProvider::new(config).await.unwrap();
-        let queue_name = QueueName::new("nonexistent-queue").unwrap();
-        let message = Message::new(serde_json::json!({"test": "data"}), None).unwrap();
+        let queue_name = QueueName::new("nonexistent-queue".to_string()).unwrap();
+        let message = create_test_message(serde_json::json!({"test": "data"}));
 
         let result = provider.send_message(&queue_name, &message).await;
         assert!(result.is_err());
@@ -277,11 +297,11 @@ mod send_tests {
         };
 
         let provider = AwsSqsProvider::new(config).await.unwrap();
-        let queue_name = QueueName::new("test-queue").unwrap();
+        let queue_name = QueueName::new("test-queue".to_string()).unwrap();
 
         // Create message larger than 256KB
         let large_data = "x".repeat(300 * 1024);
-        let message = Message::new(serde_json::json!({"data": large_data}), None).unwrap();
+        let message = create_test_message(serde_json::json!({"data": large_data}));
 
         let result = provider.send_message(&queue_name, &message).await;
         assert!(result.is_err());
@@ -303,11 +323,11 @@ mod send_tests {
         };
 
         let provider = AwsSqsProvider::new(config).await.unwrap();
-        let queue_name = QueueName::new("test-queue").unwrap();
+        let queue_name = QueueName::new("test-queue".to_string()).unwrap();
 
         // Note: With serde_json, most types serialize successfully
         // This test validates the error path exists
-        let message = Message::new(serde_json::json!(null), None).unwrap();
+        let message = create_test_message(serde_json::json!(null));
         let result = provider.send_message(&queue_name, &message).await;
 
         // Should succeed with null value (valid JSON)
@@ -333,10 +353,10 @@ mod receive_tests {
         };
 
         let provider = AwsSqsProvider::new(config).await.unwrap();
-        let queue_name = QueueName::new("test-queue").unwrap();
+        let queue_name = QueueName::new("test-queue".to_string()).unwrap();
 
         // First send a message
-        let sent_message = Message::new(serde_json::json!({"test": "data"}), None).unwrap();
+        let sent_message = create_test_message(serde_json::json!({"test": "data"}));
         provider
             .send_message(&queue_name, &sent_message)
             .await
@@ -344,7 +364,7 @@ mod receive_tests {
 
         // Then receive it
         let result = provider
-            .receive_message(&queue_name, Duration::from_secs(1))
+            .receive_message(&queue_name, Duration::seconds(1))
             .await;
         assert!(result.is_ok());
 
@@ -353,7 +373,7 @@ mod receive_tests {
 
         let msg = received.unwrap();
         assert!(
-            !msg.receipt_handle().as_ref().is_empty(),
+            !msg.receipt_handle.handle().is_empty(),
             "Receipt handle should not be empty"
         );
     }
@@ -369,10 +389,10 @@ mod receive_tests {
         };
 
         let provider = AwsSqsProvider::new(config).await.unwrap();
-        let queue_name = QueueName::new("empty-queue").unwrap();
+        let queue_name = QueueName::new("empty-queue".to_string()).unwrap();
 
         let result = provider
-            .receive_message(&queue_name, Duration::from_secs(1))
+            .receive_message(&queue_name, Duration::seconds(1))
             .await;
         assert!(result.is_ok());
         assert!(result.unwrap().is_none(), "Empty queue should return None");
@@ -389,11 +409,11 @@ mod receive_tests {
         };
 
         let provider = AwsSqsProvider::new(config).await.unwrap();
-        let queue_name = QueueName::new("test-queue").unwrap();
+        let queue_name = QueueName::new("test-queue".to_string()).unwrap();
 
         // Use longer timeout for long polling
         let result = provider
-            .receive_message(&queue_name, Duration::from_secs(20))
+            .receive_message(&queue_name, Duration::seconds(20))
             .await;
         assert!(result.is_ok(), "Long polling should work");
     }
@@ -409,21 +429,21 @@ mod receive_tests {
         };
 
         let provider = AwsSqsProvider::new(config).await.unwrap();
-        let queue_name = QueueName::new("test-queue").unwrap();
+        let queue_name = QueueName::new("test-queue".to_string()).unwrap();
 
         // Send message with attributes
-        let message = Message::new(serde_json::json!({"key": "value"}), None).unwrap();
+        let message = create_test_message(serde_json::json!({"key": "value"}));
         provider.send_message(&queue_name, &message).await.unwrap();
 
         // Receive and verify attributes
         let result = provider
-            .receive_message(&queue_name, Duration::from_secs(1))
+            .receive_message(&queue_name, Duration::seconds(1))
             .await;
         assert!(result.is_ok());
 
         if let Some(received) = result.unwrap() {
-            // Verify message content
-            assert!(received.message().body().is_object());
+            // Verify message content exists
+            assert!(!received.body.is_empty());
         }
     }
 
@@ -440,10 +460,10 @@ mod receive_tests {
         };
 
         let provider = AwsSqsProvider::new(config).await.unwrap();
-        let queue_name = QueueName::new("test-queue").unwrap();
+        let queue_name = QueueName::new("test-queue".to_string()).unwrap();
 
         let result = provider
-            .receive_message(&queue_name, Duration::from_secs(1))
+            .receive_message(&queue_name, Duration::seconds(1))
             .await;
         // Should either succeed with valid UTF-8 or return error
         assert!(result.is_ok() || result.is_err());
@@ -468,26 +488,24 @@ mod completion_tests {
         };
 
         let provider = AwsSqsProvider::new(config).await.unwrap();
-        let queue_name = QueueName::new("test-queue").unwrap();
+        let queue_name = QueueName::new("test-queue".to_string()).unwrap();
 
         // Send and receive message
-        let message = Message::new(serde_json::json!({"test": "data"}), None).unwrap();
+        let message = create_test_message(serde_json::json!({"test": "data"}));
         provider.send_message(&queue_name, &message).await.unwrap();
         let received = provider
-            .receive_message(&queue_name, Duration::from_secs(1))
+            .receive_message(&queue_name, Duration::seconds(1))
             .await
             .unwrap()
             .unwrap();
 
         // Complete the message
-        let result = provider
-            .complete_message(&queue_name, received.receipt_handle())
-            .await;
+        let result = provider.complete_message(&received.receipt_handle).await;
         assert!(result.is_ok(), "Message completion should succeed");
 
         // Try to receive again - should not get the same message
         let result2 = provider
-            .receive_message(&queue_name, Duration::from_secs(1))
+            .receive_message(&queue_name, Duration::seconds(1))
             .await;
         assert!(result2.is_ok());
         // Message should not reappear
@@ -504,12 +522,13 @@ mod completion_tests {
         };
 
         let provider = AwsSqsProvider::new(config).await.unwrap();
-        let queue_name = QueueName::new("test-queue").unwrap();
-        let invalid_receipt = ReceiptHandle::new("invalid-receipt-handle".to_string());
+        let invalid_receipt = ReceiptHandle::new(
+            "invalid-receipt-handle".to_string(),
+            Timestamp::now(),
+            ProviderType::AwsSqs,
+        );
 
-        let result = provider
-            .complete_message(&queue_name, &invalid_receipt)
-            .await;
+        let result = provider.complete_message(&invalid_receipt).await;
         assert!(result.is_err());
 
         let err = result.unwrap_err();
@@ -527,25 +546,23 @@ mod completion_tests {
         };
 
         let provider = AwsSqsProvider::new(config).await.unwrap();
-        let queue_name = QueueName::new("test-queue").unwrap();
+        let queue_name = QueueName::new("test-queue".to_string()).unwrap();
 
         // Send and receive with short visibility timeout
-        let message = Message::new(serde_json::json!({"test": "data"}), None).unwrap();
+        let message = create_test_message(serde_json::json!({"test": "data"}));
         provider.send_message(&queue_name, &message).await.unwrap();
         let received = provider
-            .receive_message(&queue_name, Duration::from_secs(1))
+            .receive_message(&queue_name, Duration::seconds(1))
             .await
             .unwrap()
             .unwrap();
 
         // Wait for visibility timeout to expire (would need actual timing)
         // For test purposes, assume receipt expires
-        tokio::time::sleep(Duration::from_secs(35)).await;
+        tokio::time::sleep(tokio::time::Duration::from_secs(35)).await;
 
         // Try to complete - should fail
-        let result = provider
-            .complete_message(&queue_name, received.receipt_handle())
-            .await;
+        let result = provider.complete_message(&received.receipt_handle).await;
         assert!(result.is_err(), "Expired receipt should be rejected");
     }
 
@@ -560,27 +577,23 @@ mod completion_tests {
         };
 
         let provider = AwsSqsProvider::new(config).await.unwrap();
-        let queue_name = QueueName::new("test-queue").unwrap();
+        let queue_name = QueueName::new("test-queue".to_string()).unwrap();
 
         // Send and receive
-        let message = Message::new(serde_json::json!({"test": "data"}), None).unwrap();
+        let message = create_test_message(serde_json::json!({"test": "data"}));
         provider.send_message(&queue_name, &message).await.unwrap();
         let received = provider
-            .receive_message(&queue_name, Duration::from_secs(1))
+            .receive_message(&queue_name, Duration::seconds(1))
             .await
             .unwrap()
             .unwrap();
 
         // First completion succeeds
-        let result1 = provider
-            .complete_message(&queue_name, received.receipt_handle())
-            .await;
+        let result1 = provider.complete_message(&received.receipt_handle).await;
         assert!(result1.is_ok());
 
         // Second completion fails
-        let result2 = provider
-            .complete_message(&queue_name, received.receipt_handle())
-            .await;
+        let result2 = provider.complete_message(&received.receipt_handle).await;
         assert!(result2.is_err());
     }
 }
@@ -603,35 +616,29 @@ mod rejection_tests {
         };
 
         let provider = AwsSqsProvider::new(config).await.unwrap();
-        let queue_name = QueueName::new("test-queue").unwrap();
+        let queue_name = QueueName::new("test-queue".to_string()).unwrap();
 
         // Send and receive
-        let message = Message::new(serde_json::json!({"test": "data"}), None).unwrap();
+        let message = create_test_message(serde_json::json!({"test": "data"}));
         provider.send_message(&queue_name, &message).await.unwrap();
         let received = provider
-            .receive_message(&queue_name, Duration::from_secs(1))
+            .receive_message(&queue_name, Duration::seconds(1))
             .await
             .unwrap()
             .unwrap();
 
-        // Reject the message
-        let result = provider
-            .reject_message(
-                &queue_name,
-                received.receipt_handle(),
-                Some(Duration::from_secs(0)),
-            )
-            .await;
-        assert!(result.is_ok(), "Message rejection should succeed");
+        // Abandon the message (makes it immediately available)
+        let result = provider.abandon_message(&received.receipt_handle).await;
+        assert!(result.is_ok(), "Message abandon should succeed");
 
         // Message should become available immediately
         let result2 = provider
-            .receive_message(&queue_name, Duration::from_secs(1))
+            .receive_message(&queue_name, Duration::seconds(1))
             .await;
         assert!(result2.is_ok());
         assert!(
             result2.unwrap().is_some(),
-            "Rejected message should be available"
+            "Abandoned message should be available"
         );
     }
 
@@ -646,33 +653,27 @@ mod rejection_tests {
         };
 
         let provider = AwsSqsProvider::new(config).await.unwrap();
-        let queue_name = QueueName::new("test-queue").unwrap();
+        let queue_name = QueueName::new("test-queue".to_string()).unwrap();
 
         // Send and receive
-        let message = Message::new(serde_json::json!({"test": "data"}), None).unwrap();
+        let message = create_test_message(serde_json::json!({"test": "data"}));
         provider.send_message(&queue_name, &message).await.unwrap();
         let received = provider
-            .receive_message(&queue_name, Duration::from_secs(1))
+            .receive_message(&queue_name, Duration::seconds(1))
             .await
             .unwrap()
             .unwrap();
 
-        // Reject with 5 second visibility timeout
-        let result = provider
-            .reject_message(
-                &queue_name,
-                received.receipt_handle(),
-                Some(Duration::from_secs(5)),
-            )
-            .await;
+        // Abandon message (visibility timeout is reset to 0)
+        let result = provider.abandon_message(&received.receipt_handle).await;
         assert!(result.is_ok());
 
-        // Immediate receive should not get the message
+        // Immediate receive should get the message
         let result2 = provider
-            .receive_message(&queue_name, Duration::from_secs(1))
+            .receive_message(&queue_name, Duration::seconds(1))
             .await;
         assert!(result2.is_ok());
-        // Message might not be available yet due to visibility timeout
+        // Message should be available again
     }
 
     /// Verify message visibility timeout expiry makes message available
@@ -686,24 +687,24 @@ mod rejection_tests {
         };
 
         let provider = AwsSqsProvider::new(config).await.unwrap();
-        let queue_name = QueueName::new("test-queue").unwrap();
+        let queue_name = QueueName::new("test-queue".to_string()).unwrap();
 
         // Send and receive with short visibility
-        let message = Message::new(serde_json::json!({"test": "data"}), None).unwrap();
+        let message = create_test_message(serde_json::json!({"test": "data"}));
         provider.send_message(&queue_name, &message).await.unwrap();
         let _received = provider
-            .receive_message(&queue_name, Duration::from_secs(1))
+            .receive_message(&queue_name, Duration::seconds(1))
             .await
             .unwrap()
             .unwrap();
 
         // Wait for visibility timeout (typically 30 seconds default)
         // For testing, we'd use a short timeout queue configuration
-        tokio::time::sleep(Duration::from_secs(35)).await;
+        tokio::time::sleep(tokio::time::Duration::from_secs(35)).await;
 
         // Message should be available again
         let result = provider
-            .receive_message(&queue_name, Duration::from_secs(1))
+            .receive_message(&queue_name, Duration::seconds(1))
             .await;
         assert!(result.is_ok());
         // Should receive the message again after timeout
@@ -728,25 +729,21 @@ mod dlq_tests {
         };
 
         let provider = AwsSqsProvider::new(config).await.unwrap();
-        let queue_name = QueueName::new("test-queue").unwrap();
+        let queue_name = QueueName::new("test-queue".to_string()).unwrap();
 
         // Send message
-        let message = Message::new(serde_json::json!({"test": "data"}), None).unwrap();
+        let message = create_test_message(serde_json::json!({"test": "data"}));
         provider.send_message(&queue_name, &message).await.unwrap();
 
-        // Receive and reject multiple times (simulating failures)
+        // Receive and abandon multiple times (simulating failures)
         for _ in 0..5 {
             if let Some(received) = provider
-                .receive_message(&queue_name, Duration::from_secs(1))
+                .receive_message(&queue_name, Duration::seconds(1))
                 .await
                 .unwrap()
             {
                 provider
-                    .reject_message(
-                        &queue_name,
-                        received.receipt_handle(),
-                        Some(Duration::from_secs(0)),
-                    )
+                    .abandon_message(&received.receipt_handle)
                     .await
                     .ok();
             }
@@ -767,24 +764,20 @@ mod dlq_tests {
         };
 
         let provider = AwsSqsProvider::new(config).await.unwrap();
-        let queue_name = QueueName::new("test-queue").unwrap();
+        let queue_name = QueueName::new("test-queue".to_string()).unwrap();
 
         // Send and receive
-        let message = Message::new(serde_json::json!({"test": "data"}), None).unwrap();
+        let message = create_test_message(serde_json::json!({"test": "data"}));
         provider.send_message(&queue_name, &message).await.unwrap();
         let received = provider
-            .receive_message(&queue_name, Duration::from_secs(1))
+            .receive_message(&queue_name, Duration::seconds(1))
             .await
             .unwrap()
             .unwrap();
 
         // Manually dead letter
         let result = provider
-            .dead_letter_message(
-                &queue_name,
-                received.receipt_handle(),
-                "Test reason".to_string(),
-            )
+            .dead_letter_message(&received.receipt_handle, "Test reason")
             .await;
         assert!(result.is_ok(), "Manual dead letter should succeed");
     }
@@ -800,12 +793,11 @@ mod dlq_tests {
         };
 
         let provider = AwsSqsProvider::new(config).await.unwrap();
-        let queue_name = QueueName::new("test-queue").unwrap();
-        let dlq_name = QueueName::new("test-queue-dlq").unwrap();
+        let queue_name = QueueName::new("test-queue".to_string()).unwrap();
+        let dlq_name = QueueName::new("test-queue-dlq".to_string()).unwrap();
 
         // Send message
-        let original_message =
-            Message::new(serde_json::json!({"important": "data"}), None).unwrap();
+        let original_message = create_test_message(serde_json::json!({"important": "data"}));
         provider
             .send_message(&queue_name, &original_message)
             .await
@@ -814,10 +806,10 @@ mod dlq_tests {
         // Force to DLQ (implementation specific)
         // Verify message in DLQ has same content
         let dlq_message = provider
-            .receive_message(&dlq_name, Duration::from_secs(1))
+            .receive_message(&dlq_name, Duration::seconds(1))
             .await;
         if let Ok(Some(msg)) = dlq_message {
-            assert_eq!(msg.message().body(), original_message.body());
+            assert_eq!(msg.body, original_message.body);
         }
     }
 }
@@ -840,37 +832,42 @@ mod session_tests {
         };
 
         let provider = AwsSqsProvider::new(config).await.unwrap();
-        let queue_name = QueueName::new("test-queue.fifo").unwrap();
-        let session_id = SessionId::new("owner/repo/pr/123").unwrap();
+        let queue_name = QueueName::new("test-queue.fifo".to_string()).unwrap();
+        let session_id = SessionId::new("owner/repo/pr/123".to_string()).unwrap();
 
         // Send multiple messages in sequence
         for i in 1..=3 {
-            let message =
-                Message::new(serde_json::json!({"sequence": i}), Some(session_id.clone())).unwrap();
+            let message = create_test_message_with_session(
+                serde_json::json!({"sequence": i}),
+                session_id.clone(),
+            );
             provider.send_message(&queue_name, &message).await.unwrap();
         }
 
         // Receive messages - should be in order
         let msg1 = provider
-            .receive_message(&queue_name, Duration::from_secs(1))
+            .receive_message(&queue_name, Duration::seconds(1))
             .await
             .unwrap()
             .unwrap();
         let msg2 = provider
-            .receive_message(&queue_name, Duration::from_secs(1))
+            .receive_message(&queue_name, Duration::seconds(1))
             .await
             .unwrap()
             .unwrap();
         let msg3 = provider
-            .receive_message(&queue_name, Duration::from_secs(1))
+            .receive_message(&queue_name, Duration::seconds(1))
             .await
             .unwrap()
             .unwrap();
 
-        // Verify ordering (would need to check sequence numbers in body)
-        assert!(msg1.message().body()["sequence"] == 1);
-        assert!(msg2.message().body()["sequence"] == 2);
-        assert!(msg3.message().body()["sequence"] == 3);
+        // Verify ordering (would need to deserialize JSON from body)
+        let json1: serde_json::Value = serde_json::from_slice(&msg1.body).unwrap();
+        let json2: serde_json::Value = serde_json::from_slice(&msg2.body).unwrap();
+        let json3: serde_json::Value = serde_json::from_slice(&msg3.body).unwrap();
+        assert!(json1["sequence"] == 1);
+        assert!(json2["sequence"] == 2);
+        assert!(json3["sequence"] == 3);
     }
 
     /// Verify SessionId maps to MessageGroupId
@@ -884,8 +881,8 @@ mod session_tests {
         };
 
         let provider = AwsSqsProvider::new(config).await.unwrap();
-        let queue_name = QueueName::new("test-queue.fifo").unwrap();
-        let session_id = SessionId::new("owner/repo/issue/456").unwrap();
+        let queue_name = QueueName::new("test-queue.fifo".to_string()).unwrap();
+        let session_id = SessionId::new("owner/repo/issue/456".to_string()).unwrap();
 
         // Create session client
         let session_client = provider
@@ -911,8 +908,8 @@ mod session_tests {
         };
 
         let provider = AwsSqsProvider::new(config).await.unwrap();
-        let queue_name = QueueName::new("standard-queue").unwrap();
-        let session_id = SessionId::new("owner/repo/pr/789").unwrap();
+        let queue_name = QueueName::new("standard-queue".to_string()).unwrap();
+        let session_id = SessionId::new("owner/repo/pr/789".to_string()).unwrap();
 
         // Attempt to create session client for standard queue
         let result = provider
@@ -923,8 +920,10 @@ mod session_tests {
             "Standard queues should not support sessions"
         );
 
-        let err = result.unwrap_err();
-        assert!(matches!(err, QueueError::ProviderError { .. }));
+        // Verify error is correct type (don't try to match pattern since we can't debug the result)
+        if let Err(err) = result {
+            assert!(matches!(err, QueueError::ProviderError { .. }));
+        }
     }
 
     /// Verify multiple message groups can process concurrently
@@ -938,14 +937,14 @@ mod session_tests {
         };
 
         let provider = Arc::new(AwsSqsProvider::new(config).await.unwrap());
-        let queue_name = QueueName::new("test-queue.fifo").unwrap();
+        let queue_name = QueueName::new("test-queue.fifo".to_string()).unwrap();
 
         // Send messages to different groups
-        let session1 = SessionId::new("owner/repo/pr/1").unwrap();
-        let session2 = SessionId::new("owner/repo/pr/2").unwrap();
+        let session1 = SessionId::new("owner/repo/pr/1".to_string()).unwrap();
+        let session2 = SessionId::new("owner/repo/pr/2".to_string()).unwrap();
 
-        let msg1 = Message::new(serde_json::json!({"group": 1}), Some(session1)).unwrap();
-        let msg2 = Message::new(serde_json::json!({"group": 2}), Some(session2)).unwrap();
+        let msg1 = create_test_message_with_session(serde_json::json!({"group": 1}), session1);
+        let msg2 = create_test_message_with_session(serde_json::json!({"group": 2}), session2);
 
         provider.send_message(&queue_name, &msg1).await.unwrap();
         provider.send_message(&queue_name, &msg2).await.unwrap();
@@ -973,11 +972,11 @@ mod batch_tests {
         };
 
         let provider = AwsSqsProvider::new(config).await.unwrap();
-        let queue_name = QueueName::new("test-queue").unwrap();
+        let queue_name = QueueName::new("test-queue".to_string()).unwrap();
 
         // Send batch of messages (API supports up to 10)
         for i in 1..=10 {
-            let message = Message::new(serde_json::json!({"batch": i}), None).unwrap();
+            let message = create_test_message(serde_json::json!({"batch": i}));
             provider.send_message(&queue_name, &message).await.unwrap();
         }
 
@@ -995,11 +994,11 @@ mod batch_tests {
         };
 
         let provider = AwsSqsProvider::new(config).await.unwrap();
-        let queue_name = QueueName::new("test-queue").unwrap();
+        let queue_name = QueueName::new("test-queue".to_string()).unwrap();
 
         // Send more than 10 messages - should auto-chunk
         for i in 1..=15 {
-            let message = Message::new(serde_json::json!({"batch": i}), None).unwrap();
+            let message = create_test_message(serde_json::json!({"batch": i}));
             let result = provider.send_message(&queue_name, &message).await;
             assert!(result.is_ok(), "Message {} should be sent", i);
         }
@@ -1018,11 +1017,11 @@ mod batch_tests {
         };
 
         let provider = AwsSqsProvider::new(config).await.unwrap();
-        let queue_name = QueueName::new("test-queue").unwrap();
+        let queue_name = QueueName::new("test-queue".to_string()).unwrap();
 
         // In actual implementation, we'd test with mixed valid/invalid messages
         // For now, verify the API exists
-        let message = Message::new(serde_json::json!({"test": "data"}), None).unwrap();
+        let message = create_test_message(serde_json::json!({"test": "data"}));
         let result = provider.send_message(&queue_name, &message).await;
         assert!(result.is_ok() || result.is_err());
     }
@@ -1038,11 +1037,11 @@ mod batch_tests {
         };
 
         let provider = AwsSqsProvider::new(config).await.unwrap();
-        let queue_name = QueueName::new("test-queue").unwrap();
+        let queue_name = QueueName::new("test-queue".to_string()).unwrap();
 
         // Send multiple messages
         for i in 1..=5 {
-            let message = Message::new(serde_json::json!({"msg": i}), None).unwrap();
+            let message = create_test_message(serde_json::json!({"msg": i}));
             provider.send_message(&queue_name, &message).await.unwrap();
         }
 
@@ -1050,7 +1049,7 @@ mod batch_tests {
         let mut received_count = 0;
         for _ in 0..5 {
             if let Ok(Some(_)) = provider
-                .receive_message(&queue_name, Duration::from_secs(1))
+                .receive_message(&queue_name, Duration::seconds(1))
                 .await
             {
                 received_count += 1;
@@ -1146,7 +1145,7 @@ mod concurrency_tests {
         };
 
         let provider = Arc::new(AwsSqsProvider::new(config).await.unwrap());
-        let queue_name = QueueName::new("test-queue").unwrap();
+        let queue_name = QueueName::new("test-queue".to_string()).unwrap();
 
         let mut tasks = JoinSet::new();
 
@@ -1155,7 +1154,7 @@ mod concurrency_tests {
             let provider_clone = Arc::clone(&provider);
             let queue_clone = queue_name.clone();
             tasks.spawn(async move {
-                let message = Message::new(serde_json::json!({"concurrent": i}), None).unwrap();
+                let message = create_test_message(serde_json::json!({"concurrent": i}));
                 provider_clone.send_message(&queue_clone, &message).await
             });
         }
@@ -1182,11 +1181,11 @@ mod concurrency_tests {
         };
 
         let provider = Arc::new(AwsSqsProvider::new(config).await.unwrap());
-        let queue_name = QueueName::new("test-queue").unwrap();
+        let queue_name = QueueName::new("test-queue".to_string()).unwrap();
 
         // Send some messages first
         for i in 0..5 {
-            let message = Message::new(serde_json::json!({"msg": i}), None).unwrap();
+            let message = create_test_message(serde_json::json!({"msg": i}));
             provider.send_message(&queue_name, &message).await.unwrap();
         }
 
@@ -1198,7 +1197,7 @@ mod concurrency_tests {
             let queue_clone = queue_name.clone();
             tasks.spawn(async move {
                 provider_clone
-                    .receive_message(&queue_clone, Duration::from_secs(1))
+                    .receive_message(&queue_clone, Duration::seconds(1))
                     .await
             });
         }
@@ -1225,7 +1224,7 @@ mod concurrency_tests {
         };
 
         let provider = Arc::new(AwsSqsProvider::new(config).await.unwrap());
-        let queue_name = QueueName::new("test-queue").unwrap();
+        let queue_name = QueueName::new("test-queue".to_string()).unwrap();
 
         let mut tasks = JoinSet::new();
 
