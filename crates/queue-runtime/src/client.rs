@@ -230,14 +230,11 @@ impl QueueClientFactory {
                     .map_err(|e| e.to_queue_error())?;
                 Box::new(azure_provider)
             }
-            ProviderConfig::AwsSqs(_aws_config) => {
-                // TODO: Implement AWS SQS provider in future task
-                return Err(QueueError::ConfigurationError(
-                    crate::error::ConfigurationError::UnsupportedProvider {
-                        provider: "AwsSqs".to_string(),
-                        message: "AWS SQS provider not yet implemented".to_string(),
-                    },
-                ));
+            ProviderConfig::AwsSqs(aws_config) => {
+                let aws_provider = crate::providers::AwsSqsProvider::new(aws_config)
+                    .await
+                    .map_err(|e| e.to_queue_error())?;
+                Box::new(aws_provider)
             }
         };
 

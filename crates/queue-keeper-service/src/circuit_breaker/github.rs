@@ -13,6 +13,7 @@ use queue_keeper_core::circuit_breaker::{
 /// Wraps github_bot_sdk::GitHubClient with circuit breaker protection to prevent
 /// cascading failures when GitHub API experiences issues.
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct CircuitBreakerGitHubClient {
     /// Underlying GitHub client
     inner: Arc<GitHubClient>,
@@ -20,6 +21,7 @@ pub struct CircuitBreakerGitHubClient {
     circuit_breaker: DefaultCircuitBreaker<serde_json::Value, ApiError>,
 }
 
+#[allow(dead_code)]
 impl CircuitBreakerGitHubClient {
     /// Create new circuit breaker protected GitHub client.
     ///
@@ -50,6 +52,7 @@ impl CircuitBreakerGitHubClient {
 /// - Graceful degradation during outages
 /// - Half-open state for recovery testing
 /// - Comprehensive error mapping
+#[allow(dead_code)]
 impl CircuitBreakerGitHubClient {
     /// List installations with circuit breaker protection.
     pub async fn list_installations(

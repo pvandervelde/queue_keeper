@@ -367,7 +367,7 @@ async fn test_get_session_trail() {
         create_webhook_event(&logger).await;
     }
 
-    let trail = logger
+    let _trail = logger
         .get_session_trail(session_id)
         .await
         .expect("Get session trail should succeed");
@@ -459,7 +459,7 @@ async fn test_delete_expired_logs() {
         legal_hold_enabled: false,
     };
 
-    let result = logger
+    let _result = logger
         .delete_expired_logs(retention_policy)
         .await
         .expect("Delete expired logs should succeed");
@@ -487,7 +487,7 @@ async fn test_archive_logs() {
         .to_string_lossy()
         .to_string();
 
-    let result = logger
+    let _result = logger
         .archive_logs(before_date, archive_location)
         .await
         .expect("Archive logs should succeed");
@@ -511,7 +511,7 @@ async fn test_compress_logs() {
     let before_date = Timestamp::now().add_seconds(3600); // Compress everything (1 hour in future)
     let compression_level = CompressionLevel::Fast;
 
-    let result = logger
+    let _result = logger
         .compress_logs(before_date, compression_level)
         .await
         .expect("Compress logs should succeed");

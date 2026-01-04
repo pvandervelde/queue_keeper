@@ -18,6 +18,7 @@ use queue_runtime::{
 /// Wraps queue_runtime::QueueProvider with circuit breaker protection to prevent
 /// cascading failures when queue service experiences issues.
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct CircuitBreakerQueueProvider {
     /// Underlying queue provider
     inner: Arc<dyn QueueProvider>,
@@ -26,6 +27,7 @@ pub struct CircuitBreakerQueueProvider {
     circuit_breaker_receive: DefaultCircuitBreaker<Vec<ReceivedMessage>, QueueError>,
 }
 
+#[allow(dead_code)]
 impl CircuitBreakerQueueProvider {
     /// Create new circuit breaker protected queue provider.
     ///

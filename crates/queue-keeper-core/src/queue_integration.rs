@@ -279,8 +279,10 @@ impl EventRouter for DefaultEventRouter {
                     duration: Some(routing_time),
                     details: Some("No matching bots for event".to_string()),
                 };
-                let mut context = AuditContext::default();
-                context.correlation_id = Some(event.correlation_id.to_string());
+                let context = AuditContext {
+                    correlation_id: Some(event.correlation_id.to_string()),
+                    ..Default::default()
+                };
 
                 let _ = audit_logger
                     .log_webhook_processing(
@@ -376,8 +378,10 @@ impl EventRouter for DefaultEventRouter {
                 }
             };
 
-            let mut context = AuditContext::default();
-            context.correlation_id = Some(event.correlation_id.to_string());
+            let context = AuditContext {
+                correlation_id: Some(event.correlation_id.to_string()),
+                ..Default::default()
+            };
 
             let _ = audit_logger
                 .log_webhook_processing(

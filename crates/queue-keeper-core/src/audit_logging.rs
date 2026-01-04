@@ -8,7 +8,7 @@
 use crate::{EventId, Repository, SessionId, Timestamp};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fmt, str::FromStr, time::Duration};
+use std::{collections::HashMap, fmt, path::Path, str::FromStr, time::Duration};
 use thiserror::Error;
 use ulid::Ulid;
 
@@ -1732,7 +1732,7 @@ impl FilesystemAuditLogger {
     }
 
     /// Get path for today's log file
-    fn get_log_file_path(log_dir: &PathBuf) -> PathBuf {
+    fn get_log_file_path(log_dir: &Path) -> PathBuf {
         let now = Utc::now();
         let filename = format!("audit-{}.jsonl", now.format("%Y-%m-%d"));
         log_dir.join(filename)
@@ -1753,11 +1753,9 @@ impl FilesystemAuditLogger {
         let reader = BufReader::new(file);
         let mut last_hash = None;
 
-        for line in reader.lines() {
-            if let Ok(line_str) = line {
-                if let Ok(event) = serde_json::from_str::<AuditEvent>(&line_str) {
-                    last_hash = Some(event.content_hash);
-                }
+        for line_str in reader.lines().map_while(Result::ok) {
+            if let Ok(event) = serde_json::from_str::<AuditEvent>(&line_str) {
+                last_hash = Some(event.content_hash);
             }
         }
 
@@ -2013,6 +2011,12 @@ impl AuditLogger for BlobStorageAuditLogger {
 /// Never fails - best effort logging for observability.
 pub struct StdoutAuditLogger {
     writer: Arc<StdMutex<std::io::Stdout>>,
+}
+
+impl Default for StdoutAuditLogger {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl StdoutAuditLogger {
@@ -2385,7 +2389,7 @@ impl AuditQuery for FilesystemAuditLogger {
         }
 
         let total_count = all_events.len();
-        let total_pages = (total_count + pagination.per_page - 1) / pagination.per_page;
+        let total_pages = total_count.div_ceil(pagination.per_page);
 
         // Apply pagination
         let start = (pagination.page.saturating_sub(1)) * pagination.per_page;

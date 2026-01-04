@@ -572,9 +572,11 @@ fn test_audit_context_default() {
 
 #[test]
 fn test_audit_context_with_correlation_id() {
-    let mut context = AuditContext::default();
-    context.correlation_id = Some("corr-123".to_string());
-    context.request_id = Some("req-456".to_string());
+    let context = AuditContext {
+        correlation_id: Some("corr-123".to_string()),
+        request_id: Some("req-456".to_string()),
+        ..Default::default()
+    };
 
     assert_eq!(context.correlation_id, Some("corr-123".to_string()));
     assert_eq!(context.request_id, Some("req-456".to_string()));
@@ -582,14 +584,16 @@ fn test_audit_context_with_correlation_id() {
 
 #[test]
 fn test_audit_context_with_performance_metrics() {
-    let mut context = AuditContext::default();
-    context.performance = Some(PerformanceContext {
-        duration_ms: 250,
-        memory_usage_bytes: Some(1024 * 1024),
-        cpu_usage_percent: Some(45.5),
-        network_bytes_sent: Some(2048),
-        network_bytes_received: Some(4096),
-    });
+    let context = AuditContext {
+        performance: Some(PerformanceContext {
+            duration_ms: 250,
+            memory_usage_bytes: Some(1024 * 1024),
+            cpu_usage_percent: Some(45.5),
+            network_bytes_sent: Some(2048),
+            network_bytes_received: Some(4096),
+        }),
+        ..Default::default()
+    };
 
     assert!(context.performance.is_some());
     assert_eq!(context.performance.as_ref().unwrap().duration_ms, 250);

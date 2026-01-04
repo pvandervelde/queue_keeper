@@ -100,7 +100,7 @@ fn test_send_options_builder() {
 #[test]
 fn test_send_options_with_scheduled_time() {
     let scheduled_time = Timestamp::from_datetime(Utc::now() + Duration::hours(2));
-    let options = SendOptions::new().with_scheduled_enqueue_time(scheduled_time.clone());
+    let options = SendOptions::new().with_scheduled_enqueue_time(scheduled_time);
 
     assert_eq!(options.scheduled_enqueue_time, Some(scheduled_time));
 }

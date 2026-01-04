@@ -749,8 +749,10 @@ impl WebhookProcessor for WebhookProcessorImpl {
                 duration: Some(processing_time),
                 details: Some(format!("Webhook processed: {}", request.event_type())),
             };
-            let mut context = AuditContext::default();
-            context.correlation_id = Some(event_envelope.correlation_id.to_string());
+            let context = AuditContext {
+                correlation_id: Some(event_envelope.correlation_id.to_string()),
+                ..Default::default()
+            };
 
             let _ = audit_logger
                 .log_webhook_processing(

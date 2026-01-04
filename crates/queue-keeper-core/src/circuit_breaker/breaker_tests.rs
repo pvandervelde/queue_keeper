@@ -559,7 +559,7 @@ mod factory_tests {
     /// Verify factory default implementation.
     #[test]
     fn test_factory_default() {
-        let factory = DefaultCircuitBreakerFactory::default();
+        let factory = DefaultCircuitBreakerFactory;
         let config = CircuitBreakerConfig::default();
 
         let breaker = factory.create_circuit_breaker(config);
