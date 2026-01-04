@@ -3348,6 +3348,7 @@ dependencies = [
  "bytes",
  "chrono",
  "config",
+ "hex",
  "hmac",
  "reqwest",
  "serde",

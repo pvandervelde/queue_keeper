@@ -1,22 +1,26 @@
-//! AWS SQS provider implementation.
+//! AWS SQS provider implementation using HTTP REST API.
 //!
-//! This module provides production-ready AWS SQS integration with:
-//! - Standard queues for high-throughput scenarios (near-unlimited throughput)
-//! - FIFO queues for strict message ordering (3000 msgs/sec with batching)
-//! - Session emulation via FIFO message groups
-//! - Native dead letter queue integration
-//! - Multiple authentication methods (IAM roles, access keys, profiles)
-//! - Queue URL caching for performance optimization
-//! - Batch operations (up to 10 messages per batch)
+//! This module provides production-ready AWS SQS integration using direct HTTP calls
+//! instead of the AWS SDK. This approach enables proper unit testing with mocked HTTP
+//! responses, similar to the Azure provider implementation.
 //!
-//! ## Authentication Methods
+//! ## Key Features
 //!
-//! The provider supports multiple authentication methods via AWS credential chain:
-//! - **IAM Role**: For production deployments (EC2, ECS, Lambda)
-//! - **Access Keys**: For development and testing with explicit credentials
-//! - **Profile**: Named AWS profile from ~/.aws/credentials
-//! - **Session Token**: Temporary credentials with session token
-//! - **Default Chain**: Automatic credential discovery following AWS SDK defaults
+//! - **HTTP REST API**: Direct calls to AWS SQS REST API endpoints
+//! - **AWS Signature V4**: Manual request signing for authentication
+//! - **Standard queues**: High-throughput scenarios (near-unlimited throughput)
+//! - **FIFO queues**: Strict message ordering (3000 msgs/sec with batching)
+//! - **Session support**: Via FIFO message groups
+//! - **Dead letter queues**: Native AWS SQS DLQ integration
+//! - **Batch operations**: Up to 10 messages per batch
+//! - **Queue URL caching**: Performance optimization
+//! - **Test-friendly**: Mock HTTP responses in unit tests
+//!
+//! ## Authentication
+//!
+//! Implements AWS Signature Version 4 signing for request authentication:
+//! - **Access Keys**: Explicit access_key_id and secret_access_key
+//! - **IAM Roles**: Via environment variables or instance metadata (future)
 //!
 //! ## Queue Types
 //!
@@ -41,6 +45,13 @@
 //! - Different groups can process concurrently
 //! - Standard queues do not support sessions
 //!
+//! ## Benefits of HTTP Approach
+//!
+//! 1. **Testable**: Mock HTTP responses in unit tests
+//! 2. **Transparent**: Full control over request/response handling
+//! 3. **Lightweight**: No heavy SDK dependencies
+//! 4. **Consistent**: Matches Azure provider pattern
+//!
 //! ## Example
 //!
 //! ```no_run
@@ -50,8 +61,8 @@
 //! let config = QueueConfig {
 //!     provider: ProviderConfig::AwsSqs(AwsSqsConfig {
 //!         region: "us-east-1".to_string(),
-//!         access_key_id: None,
-//!         secret_access_key: None,
+//!         access_key_id: Some("AKIAIOSFODNN7EXAMPLE".to_string()),
+//!         secret_access_key: Some("wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string()),
 //!         use_fifo_queues: true,
 //!     }),
 //!     ..Default::default()
@@ -69,11 +80,12 @@ use crate::message::{
 };
 use crate::provider::{AwsSqsConfig, ProviderType, SessionSupport};
 use async_trait::async_trait;
-use aws_sdk_sqs::Client as SqsClient;
-use chrono::Duration;
+use chrono::{DateTime, Duration, Utc};
+use hmac::{Hmac, Mac};
+use reqwest::Client as HttpClient;
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fmt;
-use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -168,6 +180,162 @@ impl AwsError {
 }
 
 // ============================================================================
+// AWS Signature V4 Signing
+// ============================================================================
+
+type HmacSha256 = Hmac<Sha256>;
+
+/// AWS Signature Version 4 signer for request authentication
+///
+/// Implements the AWS Signature V4 signing process:
+/// 1. Create canonical request (method, URI, query, headers, payload)
+/// 2. Create string to sign (algorithm, timestamp, scope, request hash)
+/// 3. Derive signing key (4-level HMAC chain)
+/// 4. Calculate signature and build Authorization header
+///
+/// ## References
+///
+/// - [AWS Signature V4](https://docs.aws.amazon.com/general/latest/gr/signature-version-4.html)
+/// - [Signing Process](https://docs.aws.amazon.com/general/latest/gr/sigv4_signing.html)
+struct AwsV4Signer {
+    access_key: String,
+    secret_key: String,
+    region: String,
+    service: String,
+}
+
+impl AwsV4Signer {
+    /// Create new AWS Signature V4 signer
+    ///
+    /// # Arguments
+    ///
+    /// * `access_key` - AWS access key ID
+    /// * `secret_key` - AWS secret access key
+    /// * `region` - AWS region (e.g., "us-east-1")
+    fn new(access_key: String, secret_key: String, region: String) -> Self {
+        Self {
+            access_key,
+            secret_key,
+            region,
+            service: "sqs".to_string(),
+        }
+    }
+
+    /// Sign an HTTP request with AWS Signature V4
+    ///
+    /// Returns a HashMap of headers to add to the request, including:
+    /// - `Authorization`: AWS signature authorization header
+    /// - `x-amz-date`: ISO8601 timestamp
+    /// - `host`: Endpoint host
+    ///
+    /// # Arguments
+    ///
+    /// * `method` - HTTP method (GET, POST, etc.)
+    /// * `host` - Endpoint host (e.g., "sqs.us-east-1.amazonaws.com")
+    /// * `path` - Request path (e.g., "/")
+    /// * `query_params` - Query parameters as key-value pairs
+    /// * `body` - Request body (empty string for no body)
+    /// * `timestamp` - Request timestamp
+    fn sign_request(
+        &self,
+        method: &str,
+        host: &str,
+        path: &str,
+        query_params: &HashMap<String, String>,
+        body: &str,
+        timestamp: &DateTime<Utc>,
+    ) -> HashMap<String, String> {
+        let date_stamp = timestamp.format("%Y%m%d").to_string();
+        let amz_date = timestamp.format("%Y%m%dT%H%M%SZ").to_string();
+
+        // Task 1: Create canonical request
+        let canonical_uri = path;
+
+        // Sort query parameters for canonical request
+        let mut canonical_query_string = query_params
+            .iter()
+            .map(|(k, v)| format!("{}={}", urlencoding::encode(k), urlencoding::encode(v)))
+            .collect::<Vec<_>>();
+        canonical_query_string.sort();
+        let canonical_query_string = canonical_query_string.join("&");
+
+        // Canonical headers (must be sorted)
+        let canonical_headers = format!("host:{}\nx-amz-date:{}\n", host, amz_date);
+        let signed_headers = "host;x-amz-date";
+
+        // Payload hash
+        let payload_hash = format!("{:x}", Sha256::digest(body.as_bytes()));
+
+        // Build canonical request
+        let canonical_request = format!(
+            "{}\n{}\n{}\n{}\n{}\n{}",
+            method,
+            canonical_uri,
+            canonical_query_string,
+            canonical_headers,
+            signed_headers,
+            payload_hash
+        );
+
+        // Task 2: Create string to sign
+        let algorithm = "AWS4-HMAC-SHA256";
+        let credential_scope = format!(
+            "{}/{}/{}/aws4_request",
+            date_stamp, self.region, self.service
+        );
+        let canonical_request_hash = format!("{:x}", Sha256::digest(canonical_request.as_bytes()));
+
+        let string_to_sign = format!(
+            "{}\n{}\n{}\n{}",
+            algorithm, amz_date, credential_scope, canonical_request_hash
+        );
+
+        // Task 3: Calculate signature
+        let signature = self.calculate_signature(&string_to_sign, &date_stamp);
+
+        // Task 4: Build authorization header
+        let authorization_header = format!(
+            "{} Credential={}/{}, SignedHeaders={}, Signature={}",
+            algorithm, self.access_key, credential_scope, signed_headers, signature
+        );
+
+        let mut headers = HashMap::new();
+        headers.insert("Authorization".to_string(), authorization_header);
+        headers.insert("x-amz-date".to_string(), amz_date);
+        headers.insert("host".to_string(), host.to_string());
+
+        headers
+    }
+
+    /// Calculate AWS Signature V4 signature
+    ///
+    /// Uses 4-level HMAC-SHA256 chain to derive signing key:
+    /// 1. kSecret = "AWS4" + secret_key
+    /// 2. kDate = HMAC(kSecret, date)
+    /// 3. kRegion = HMAC(kDate, region)
+    /// 4. kService = HMAC(kRegion, service)
+    /// 5. kSigning = HMAC(kService, "aws4_request")
+    /// 6. signature = HMAC(kSigning, string_to_sign)
+    fn calculate_signature(&self, string_to_sign: &str, date_stamp: &str) -> String {
+        let k_secret = format!("AWS4{}", self.secret_key);
+        let k_date = self.hmac_sha256(k_secret.as_bytes(), date_stamp.as_bytes());
+        let k_region = self.hmac_sha256(&k_date, self.region.as_bytes());
+        let k_service = self.hmac_sha256(&k_region, self.service.as_bytes());
+        let k_signing = self.hmac_sha256(&k_service, b"aws4_request");
+        let signature = self.hmac_sha256(&k_signing, string_to_sign.as_bytes());
+
+        hex::encode(signature)
+    }
+
+    /// Compute HMAC-SHA256
+    fn hmac_sha256(&self, key: &[u8], data: &[u8]) -> Vec<u8> {
+        let mut mac = HmacSha256::new_from_slice(key).expect("HMAC can take key of any size");
+        mac.update(data);
+        mac.finalize().into_bytes().to_vec()
+    }
+}
+
+// ============================================================================
 // AWS SQS Provider
 // ============================================================================
 
@@ -187,8 +355,10 @@ impl AwsError {
 /// The provider is thread-safe and can be shared across async tasks using `Arc`.
 /// Internal state (queue URL cache) is protected by `RwLock`.
 pub struct AwsSqsProvider {
-    client: Arc<SqsClient>,
+    http_client: HttpClient,
+    signer: Option<AwsV4Signer>,
     config: AwsSqsConfig,
+    endpoint: String,
     queue_url_cache: Arc<RwLock<HashMap<QueueName, String>>>,
 }
 
@@ -232,32 +402,34 @@ impl AwsSqsProvider {
             ));
         }
 
-        // Build AWS SDK config
-        let aws_config = if let (Some(access_key), Some(secret_key)) =
+        // Setup signer if credentials provided
+        let signer = if let (Some(access_key), Some(secret_key)) =
             (&config.access_key_id, &config.secret_access_key)
         {
-            // Use explicit credentials
-            let creds =
-                aws_sdk_sqs::config::Credentials::new(access_key, secret_key, None, None, "static");
-            aws_config::defaults(aws_config::BehaviorVersion::latest())
-                .region(aws_config::Region::new(config.region.clone()))
-                .credentials_provider(creds)
-                .load()
-                .await
+            Some(AwsV4Signer::new(
+                access_key.clone(),
+                secret_key.clone(),
+                config.region.clone(),
+            ))
         } else {
-            // Use default credential chain (IAM role, profile, etc.)
-            aws_config::defaults(aws_config::BehaviorVersion::latest())
-                .region(aws_config::Region::new(config.region.clone()))
-                .load()
-                .await
+            // TODO: Support IAM roles via instance metadata
+            None
         };
 
-        // Create SQS client
-        let client = Arc::new(SqsClient::new(&aws_config));
+        // Build endpoint URL
+        let endpoint = format!("https://sqs.{}.amazonaws.com", config.region);
+
+        // Create HTTP client with timeout
+        let http_client = HttpClient::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .map_err(|e| AwsError::NetworkError(format!("Failed to create HTTP client: {}", e)))?;
 
         Ok(Self {
-            client,
+            http_client,
+            signer,
             config,
+            endpoint,
             queue_url_cache: Arc::new(RwLock::new(HashMap::new())),
         })
     }
