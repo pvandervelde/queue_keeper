@@ -750,7 +750,7 @@ async fn test_audit_logging_on_successful_routing() {
     // Verify action type
     if let WebhookProcessingAction::BotRouting {
         matched_bots,
-        routing_duration_ms,
+        routing_duration_ms: _,
     } = &log_entry.action
     {
         assert_eq!(matched_bots.len(), 1);

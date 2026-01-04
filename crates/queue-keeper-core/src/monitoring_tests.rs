@@ -131,7 +131,7 @@ fn test_noop_collector_processing_rate_metrics() {
 /// Test that NoOpMetricsCollector implements Default.
 #[test]
 fn test_noop_collector_default() {
-    let collector = NoOpMetricsCollector::default();
+    let collector = NoOpMetricsCollector;
 
     // Should work with default instance
     collector.record_webhook_request(Duration::from_secs(1), true);
@@ -141,7 +141,7 @@ fn test_noop_collector_default() {
 #[test]
 fn test_noop_collector_clone() {
     let collector = NoOpMetricsCollector;
-    let cloned = collector.clone();
+    let cloned = collector;
 
     // Both should work
     collector.record_webhook_request(Duration::from_secs(1), true);

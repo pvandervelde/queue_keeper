@@ -402,7 +402,7 @@ impl MockAuditLogger {
 impl AuditLogger for MockAuditLogger {
     async fn log_event(&self, event: AuditEvent) -> Result<AuditLogId, AuditError> {
         self.logged_events.lock().unwrap().push(event.clone());
-        Ok(event.audit_id.clone())
+        Ok(event.audit_id)
     }
 
     async fn log_webhook_processing(

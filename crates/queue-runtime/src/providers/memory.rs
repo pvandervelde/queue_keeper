@@ -107,7 +107,7 @@ impl StoredMessage {
             attributes: message.attributes.clone(),
             session_id: message.session_id.clone(),
             correlation_id: message.correlation_id.clone(),
-            enqueued_at: now.clone(),
+            enqueued_at: now,
             delivery_count: 0,
             available_at: now,
             expires_at,
@@ -273,7 +273,7 @@ impl InMemoryProvider {
             if let Some(inflight) = queue.in_flight.remove(&handle) {
                 let mut message = inflight.message;
                 // Make immediately available
-                message.available_at = now.clone();
+                message.available_at = now;
                 queue.messages.push_back(message);
             }
         }
@@ -419,7 +419,7 @@ impl QueueProvider for InMemoryProvider {
                             Timestamp::from_datetime(now.as_datetime() + Duration::seconds(30));
                         let receipt_handle = ReceiptHandle::new(
                             receipt_handle_str.clone(),
-                            lock_expires_at.clone(),
+                            lock_expires_at,
                             ProviderType::InMemory,
                         );
 
@@ -432,7 +432,7 @@ impl QueueProvider for InMemoryProvider {
                             correlation_id: stored_message.correlation_id.clone(),
                             receipt_handle: receipt_handle.clone(),
                             delivery_count: stored_message.delivery_count,
-                            first_delivered_at: stored_message.enqueued_at.clone(),
+                            first_delivered_at: stored_message.enqueued_at,
                             delivered_at: now,
                         };
 
@@ -627,7 +627,6 @@ impl QueueProvider for InMemoryProvider {
         if session_state.is_locked() {
             let locked_until = session_state
                 .lock_expires_at
-                .clone()
                 .unwrap_or_else(Timestamp::now);
             return Err(QueueError::SessionLocked {
                 session_id: target_session_id.as_str().to_string(),
@@ -642,7 +641,7 @@ impl QueueProvider for InMemoryProvider {
         let client_id = uuid::Uuid::new_v4().to_string();
 
         session_state.locked = true;
-        session_state.lock_expires_at = Some(lock_expires_at.clone());
+        session_state.lock_expires_at = Some(lock_expires_at);
         session_state.locked_by = Some(client_id.clone());
 
         // Create session provider
@@ -721,7 +720,6 @@ impl SessionProvider for InMemorySessionProvider {
                             session_id: self.session_id.as_str().to_string(),
                             locked_until: session_state
                                 .lock_expires_at
-                                .clone()
                                 .unwrap_or_else(Timestamp::now),
                         });
                     }
@@ -766,9 +764,9 @@ impl SessionProvider for InMemorySessionProvider {
                         // Track delivery
                         message.delivery_count += 1;
                         let first_delivered_at = if message.delivery_count == 1 {
-                            now.clone()
+                            now
                         } else {
-                            message.enqueued_at.clone()
+                            message.enqueued_at
                         };
 
                         // Add to in-flight
@@ -777,7 +775,7 @@ impl SessionProvider for InMemorySessionProvider {
                             InFlightMessage {
                                 message: message.clone(),
                                 receipt_handle: receipt.clone(),
-                                lock_expires_at: lock_expires_at.clone(),
+                                lock_expires_at,
                             },
                         );
 
@@ -832,7 +830,6 @@ impl SessionProvider for InMemorySessionProvider {
                             session_id: self.session_id.as_str().to_string(),
                             locked_until: session_state
                                 .lock_expires_at
-                                .clone()
                                 .unwrap_or_else(Timestamp::now),
                         });
                     }
@@ -866,7 +863,6 @@ impl SessionProvider for InMemorySessionProvider {
                             session_id: self.session_id.as_str().to_string(),
                             locked_until: session_state
                                 .lock_expires_at
-                                .clone()
                                 .unwrap_or_else(Timestamp::now),
                         });
                     }
@@ -918,7 +914,7 @@ impl SessionProvider for InMemorySessionProvider {
                             session_id: self.session_id.as_str().to_string(),
                             locked_until: session_state
                                 .lock_expires_at
-                                .clone()
+
                                 .unwrap_or_else(Timestamp::now),
                         });
                     }
@@ -950,7 +946,6 @@ impl SessionProvider for InMemorySessionProvider {
                         session_id: self.session_id.as_str().to_string(),
                         locked_until: session_state
                             .lock_expires_at
-                            .clone()
                             .unwrap_or_else(Timestamp::now),
                     });
                 }
@@ -990,6 +985,6 @@ impl SessionProvider for InMemorySessionProvider {
     }
 
     fn session_expires_at(&self) -> Timestamp {
-        self.lock_expires_at.clone()
+        self.lock_expires_at
     }
 }
