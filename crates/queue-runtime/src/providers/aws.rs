@@ -653,6 +653,53 @@ impl AwsSqsProvider {
         }
     }
 
+    /// Parse SendMessage XML response
+    fn parse_send_message_response(&self, xml: &str) -> Result<MessageId, AwsError> {
+        use quick_xml::events::Event;
+        use quick_xml::Reader;
+
+        let mut reader = Reader::from_str(xml);
+        reader.trim_text(true);
+
+        let mut in_message_id = false;
+        let mut buf = Vec::new();
+
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Start(ref e)) if e.name().as_ref() == b"MessageId" => {
+                    in_message_id = true;
+                }
+                Ok(Event::Text(e)) if in_message_id => {
+                    let msg_id = e
+                        .unescape()
+                        .map(|s| s.into_owned())
+                        .map_err(|e| {
+                            AwsError::SerializationError(format!("Failed to parse XML: {}", e))
+                        })?;
+                    
+                    // Parse the message ID string
+                    use std::str::FromStr;
+                    let message_id = MessageId::from_str(&msg_id)
+                        .unwrap_or_else(|_| MessageId::new());
+                    return Ok(message_id);
+                }
+                Ok(Event::Eof) => break,
+                Err(e) => {
+                    return Err(AwsError::SerializationError(format!(
+                        "XML parsing error: {}",
+                        e
+                    )))
+                }
+                _ => {}
+            }
+            buf.clear();
+        }
+
+        Err(AwsError::SerializationError(
+            "MessageId not found in response".to_string(),
+        ))
+    }
+
     /// Check if a queue is a FIFO queue
     fn is_fifo_queue(queue_name: &QueueName) -> bool {
         queue_name.as_str().ends_with(".fifo")
@@ -672,11 +719,63 @@ impl fmt::Debug for AwsSqsProvider {
 impl QueueProvider for AwsSqsProvider {
     async fn send_message(
         &self,
-        _queue: &QueueName,
-        _message: &Message,
+        queue: &QueueName,
+        message: &Message,
     ) -> Result<MessageId, QueueError> {
-        // TODO: Implement SendMessage with HTTP (task 24b.4)
-        Err(AwsError::ServiceError("Not yet implemented with HTTP".to_string()).to_queue_error())
+        let queue_url = self
+            .get_queue_url(queue)
+            .await
+            .map_err(|e| e.to_queue_error())?;
+
+        // Encode message body to base64 for AWS SQS
+        use base64::{engine::general_purpose::STANDARD, Engine};
+        let body_base64 = STANDARD.encode(&message.body);
+
+        // Check message size (AWS SQS limit: 256KB)
+        if body_base64.len() > 256 * 1024 {
+            return Err(AwsError::MessageTooLarge {
+                size: body_base64.len(),
+                max_size: 256 * 1024,
+            }
+            .to_queue_error());
+        }
+
+        // Build request parameters
+        let mut params = HashMap::new();
+        params.insert("Action".to_string(), "SendMessage".to_string());
+        params.insert("Version".to_string(), "2012-11-05".to_string());
+        params.insert("QueueUrl".to_string(), queue_url.clone());
+        params.insert("MessageBody".to_string(), body_base64);
+
+        // Add FIFO queue parameters if applicable
+        if Self::is_fifo_queue(queue) {
+            if let Some(ref session_id) = message.session_id {
+                params.insert("MessageGroupId".to_string(), session_id.as_str().to_string());
+                // Use UUID for deduplication ID
+                let dedup_id = uuid::Uuid::new_v4().to_string();
+                params.insert("MessageDeduplicationId".to_string(), dedup_id);
+            } else {
+                // FIFO queues require message group ID
+                return Err(QueueError::ValidationError(
+                    crate::error::ValidationError::Required {
+                        field: "session_id".to_string(),
+                    },
+                ));
+            }
+        }
+
+        // Make HTTP request
+        let response = self
+            .make_request("POST", "/", &params, "")
+            .await
+            .map_err(|e| e.to_queue_error())?;
+
+        // Parse XML response
+        let message_id = self
+            .parse_send_message_response(&response)
+            .map_err(|e| e.to_queue_error())?;
+
+        Ok(message_id)
     }
 
     async fn send_messages(
