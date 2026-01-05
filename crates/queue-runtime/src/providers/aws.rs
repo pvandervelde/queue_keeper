@@ -700,6 +700,149 @@ impl AwsSqsProvider {
         ))
     }
 
+    /// Parse ReceiveMessage XML response
+    fn parse_receive_message_response(
+        &self,
+        xml: &str,
+        queue: &QueueName,
+    ) -> Result<Vec<ReceivedMessage>, AwsError> {
+        use quick_xml::events::Event;
+        use quick_xml::Reader;
+
+        let mut reader = Reader::from_str(xml);
+        reader.trim_text(true);
+
+        let mut messages = Vec::new();
+        let mut in_message = false;
+        let mut current_message_id: Option<String> = None;
+        let mut current_receipt_handle: Option<String> = None;
+        let mut current_body: Option<String> = None;
+        let mut current_session_id: Option<String> = None;
+        let mut current_delivery_count: u32 = 1;
+        
+        let mut in_message_id = false;
+        let mut in_receipt_handle = false;
+        let mut in_body = false;
+        let mut in_attribute_name = false;
+        let mut in_attribute_value = false;
+        let mut current_attribute_name: Option<String> = None;
+        
+        let mut buf = Vec::new();
+
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Start(ref e)) => match e.name().as_ref() {
+                    b"Message" => {
+                        in_message = true;
+                        // Reset current message fields
+                        current_message_id = None;
+                        current_receipt_handle = None;
+                        current_body = None;
+                        current_session_id = None;
+                        current_delivery_count = 1;
+                    }
+                    b"MessageId" if in_message => in_message_id = true,
+                    b"ReceiptHandle" if in_message => in_receipt_handle = true,
+                    b"Body" if in_message => in_body = true,
+                    b"Name" if in_message => in_attribute_name = true,
+                    b"Value" if in_message => in_attribute_value = true,
+                    _ => {}
+                },
+                Ok(Event::Text(e)) => {
+                    let text = e.unescape().ok().map(|s| s.into_owned());
+                    if in_message_id {
+                        current_message_id = text;
+                        in_message_id = false;
+                    } else if in_receipt_handle {
+                        current_receipt_handle = text;
+                        in_receipt_handle = false;
+                    } else if in_body {
+                        current_body = text;
+                        in_body = false;
+                    } else if in_attribute_name {
+                        current_attribute_name = text;
+                        in_attribute_name = false;
+                    } else if in_attribute_value {
+                        if let Some(ref attr_name) = current_attribute_name {
+                            match attr_name.as_str() {
+                                "MessageGroupId" => current_session_id = text,
+                                "ApproximateReceiveCount" => {
+                                    if let Some(count_str) = text {
+                                        current_delivery_count = count_str.parse().unwrap_or(1);
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                        in_attribute_value = false;
+                        current_attribute_name = None;
+                    }
+                }
+                Ok(Event::End(ref e)) if e.name().as_ref() == b"Message" => {
+                    in_message = false;
+                    
+                    // Build ReceivedMessage if we have required fields
+                    if let (Some(body_base64), Some(receipt_handle)) =
+                        (current_body.as_ref(), current_receipt_handle.as_ref())
+                    {
+                        // Decode base64 body
+                        use base64::{engine::general_purpose::STANDARD, Engine};
+                        let body_bytes = STANDARD.decode(body_base64).map_err(|e| {
+                            AwsError::SerializationError(format!("Base64 decode failed: {}", e))
+                        })?;
+                        let body = bytes::Bytes::from(body_bytes);
+
+                        // Parse message ID
+                        use std::str::FromStr;
+                        let message_id = current_message_id
+                            .as_ref()
+                            .and_then(|id| MessageId::from_str(id).ok())
+                            .unwrap_or_else(MessageId::new);
+
+                        // Parse session ID
+                        let session_id = current_session_id
+                            .as_ref()
+                            .and_then(|id| SessionId::new(id.clone()).ok());
+
+                        // Create receipt handle
+                        let expires_at = Timestamp::now();
+                        let receipt = ReceiptHandle::new(
+                            receipt_handle.clone(),
+                            expires_at,
+                            ProviderType::AwsSqs,
+                        );
+
+                        // Create received message
+                        let received_message = ReceivedMessage {
+                            message_id,
+                            body,
+                            attributes: HashMap::new(),
+                            session_id,
+                            correlation_id: None,
+                            receipt_handle: receipt,
+                            delivery_count: current_delivery_count,
+                            first_delivered_at: Timestamp::now(),
+                            delivered_at: Timestamp::now(),
+                        };
+
+                        messages.push(received_message);
+                    }
+                }
+                Ok(Event::Eof) => break,
+                Err(e) => {
+                    return Err(AwsError::SerializationError(format!(
+                        "XML parsing error: {}",
+                        e
+                    )))
+                }
+                _ => {}
+            }
+            buf.clear();
+        }
+
+        Ok(messages)
+    }
+
     /// Check if a queue is a FIFO queue
     fn is_fifo_queue(queue_name: &QueueName) -> bool {
         queue_name.as_str().ends_with(".fifo")
@@ -789,21 +932,51 @@ impl QueueProvider for AwsSqsProvider {
 
     async fn receive_message(
         &self,
-        _queue: &QueueName,
-        _timeout: Duration,
+        queue: &QueueName,
+        timeout: Duration,
     ) -> Result<Option<ReceivedMessage>, QueueError> {
-        // TODO: Implement ReceiveMessage with HTTP (task 24b.5)
-        Err(AwsError::ServiceError("Not yet implemented with HTTP".to_string()).to_queue_error())
+        let messages = self.receive_messages(queue, 1, timeout).await?;
+        Ok(messages.into_iter().next())
     }
 
     async fn receive_messages(
         &self,
-        _queue: &QueueName,
-        _max_messages: u32,
-        _timeout: Duration,
+        queue: &QueueName,
+        max_messages: u32,
+        timeout: Duration,
     ) -> Result<Vec<ReceivedMessage>, QueueError> {
-        // TODO: Implement ReceiveMessage with HTTP (task 24b.5)
-        Err(AwsError::ServiceError("Not yet implemented with HTTP".to_string()).to_queue_error())
+        let queue_url = self
+            .get_queue_url(queue)
+            .await
+            .map_err(|e| e.to_queue_error())?;
+
+        // Convert timeout to seconds (AWS uses seconds for wait time)
+        let wait_time_seconds = timeout.num_seconds().clamp(0, 20); // AWS max is 20 seconds
+
+        // Build request parameters
+        let mut params = HashMap::new();
+        params.insert("Action".to_string(), "ReceiveMessage".to_string());
+        params.insert("Version".to_string(), "2012-11-05".to_string());
+        params.insert("QueueUrl".to_string(), queue_url);
+        params.insert(
+            "MaxNumberOfMessages".to_string(),
+            max_messages.min(10).to_string(), // AWS max is 10
+        );
+        params.insert("WaitTimeSeconds".to_string(), wait_time_seconds.to_string());
+        params.insert("AttributeName.1".to_string(), "All".to_string()); // Request all attributes
+
+        // Make HTTP request
+        let response = self
+            .make_request("POST", "/", &params, "")
+            .await
+            .map_err(|e| e.to_queue_error())?;
+
+        // Parse XML response
+        let messages = self
+            .parse_receive_message_response(&response, queue)
+            .map_err(|e| e.to_queue_error())?;
+
+        Ok(messages)
     }
 
     async fn complete_message(&self, _receipt: &ReceiptHandle) -> Result<(), QueueError> {
