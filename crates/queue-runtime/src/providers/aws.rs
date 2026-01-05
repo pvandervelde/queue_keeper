@@ -52,23 +52,120 @@
 //! 3. **Lightweight**: No heavy SDK dependencies
 //! 4. **Consistent**: Matches Azure provider pattern
 //!
+//! ## AWS Signature V4 Process
+//!
+//! All requests are signed using AWS Signature Version 4:
+//!
+//! 1. **Canonical Request**: Standardized request format
+//!    - HTTP method (POST for all SQS operations)
+//!    - Canonical URI (/)
+//!    - Canonical query string (sorted parameters)
+//!    - Canonical headers (host, x-amz-date)
+//!    - Hashed payload (SHA-256)
+//!
+//! 2. **String to Sign**: Combines algorithm, timestamp, scope, and hashed canonical request
+//!
+//! 3. **Signing Key Derivation**: 4-level HMAC chain
+//!    - kSecret = AWS secret access key
+//!    - kDate = HMAC-SHA256(kSecret, date)
+//!    - kRegion = HMAC-SHA256(kDate, region)
+//!    - kService = HMAC-SHA256(kRegion, "sqs")
+//!    - kSigning = HMAC-SHA256(kService, "aws4_request")
+//!
+//! 4. **Authorization Header**: Includes access key, credential scope, signed headers, and signature
+//!
+//! ## Testing
+//!
+//! The HTTP-based approach enables comprehensive unit testing:
+//!
+//! ```rust
+//! use queue_runtime::{AwsSqsProvider, AwsSqsConfig};
+//!
+//! # async fn test_example() {
+//! // Create provider with test credentials
+//! let config = AwsSqsConfig {
+//!     region: "us-east-1".to_string(),
+//!     access_key_id: Some("AKIAIOSFODNN7EXAMPLE".to_string()),
+//!     secret_access_key: Some("wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string()),
+//!     use_fifo_queues: false,
+//! };
+//!
+//! let provider = AwsSqsProvider::new(config).await.unwrap();
+//!
+//! // Operations will fail with test credentials (expected)
+//! // This tests the logic without requiring real AWS infrastructure
+//! # }
+//! ```
+//!
+//! For integration tests with LocalStack:
+//!
+//! ```bash
+//! # Start LocalStack with SQS
+//! docker run -d -p 4566:4566 -e SERVICES=sqs localstack/localstack
+//!
+//! # Run integration tests
+//! cargo test --package queue-runtime-integration-tests
+//! ```
+//!
 //! ## Example
 //!
 //! ```no_run
 //! use queue_runtime::{QueueClientFactory, QueueConfig, ProviderConfig, AwsSqsConfig};
+//! use queue_runtime::{Message, QueueName};
+//! use bytes::Bytes;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! // Configure AWS SQS provider
 //! let config = QueueConfig {
 //!     provider: ProviderConfig::AwsSqs(AwsSqsConfig {
 //!         region: "us-east-1".to_string(),
-//!         access_key_id: Some("AKIAIOSFODNN7EXAMPLE".to_string()),
-//!         secret_access_key: Some("wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string()),
+//!         access_key_id: Some("your-access-key".to_string()),
+//!         secret_access_key: Some("your-secret-key".to_string()),
 //!         use_fifo_queues: true,
 //!     }),
 //!     ..Default::default()
 //! };
 //!
+//! // Create client
 //! let client = QueueClientFactory::create_client(config).await?;
+//!
+//! // Send a message
+//! let queue = QueueName::new("my-queue".to_string())?;
+//! let message = Message::new(Bytes::from("Hello, SQS!"));
+//! let message_id = client.send_message(&queue, message).await?;
+//! println!("Sent message: {:?}", message_id);
+//!
+//! // Receive messages
+//! use chrono::Duration;
+//! if let Some(received) = client.receive_message(&queue, Duration::seconds(10)).await? {
+//!     println!("Received: {:?}", received.body);
+//!     
+//!     // Complete the message
+//!     client.complete_message(received.receipt_handle).await?;
+//! }
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## FIFO Queue Example
+//!
+//! ```no_run
+//! use queue_runtime::{Message, QueueName, SessionId};
+//! use bytes::Bytes;
+//! # use queue_runtime::{QueueClientFactory, QueueConfig, ProviderConfig, AwsSqsConfig};
+//!
+//! # async fn fifo_example() -> Result<(), Box<dyn std::error::Error>> {
+//! # let client = QueueClientFactory::create_client(QueueConfig::default()).await?;
+//! // FIFO queues require session IDs for ordering
+//! let queue = QueueName::new("my-queue-fifo".to_string())?;  // Note: .fifo suffix
+//! let session_id = SessionId::new("order-12345".to_string())?;
+//!
+//! // Messages with same session ID are processed in order
+//! let msg1 = Message::new(Bytes::from("First")).with_session_id(session_id.clone());
+//! let msg2 = Message::new(Bytes::from("Second")).with_session_id(session_id.clone());
+//!
+//! client.send_message(&queue, msg1).await?;
+//! client.send_message(&queue, msg2).await?;
 //! # Ok(())
 //! # }
 //! ```

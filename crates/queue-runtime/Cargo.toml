@@ -32,10 +32,6 @@ azure_messaging_servicebus = { workspace = true }
 azure_core = { workspace = true }
 azure_identity = { workspace = true }
 
-# AWS SQS
-aws-config = { workspace = true }
-aws-sdk-sqs = { workspace = true }
-
 # Configuration
 config = { workspace = true }
 
