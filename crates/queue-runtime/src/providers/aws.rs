@@ -480,9 +480,10 @@ impl AwsSqsProvider {
         query_params: &HashMap<String, String>,
         body: &str,
     ) -> Result<String, AwsError> {
-        let signer = self.signer.as_ref().ok_or_else(|| {
-            AwsError::Authentication("No credentials configured".to_string())
-        })?;
+        let signer = self
+            .signer
+            .as_ref()
+            .ok_or_else(|| AwsError::Authentication("No credentials configured".to_string()))?;
 
         // Parse host from endpoint
         let host = self
@@ -509,9 +510,9 @@ impl AwsSqsProvider {
 
         // Build HTTP request
         let mut request = self.http_client.request(
-            method.parse().map_err(|e| {
-                AwsError::ConfigurationError(format!("Invalid HTTP method: {}", e))
-            })?,
+            method
+                .parse()
+                .map_err(|e| AwsError::ConfigurationError(format!("Invalid HTTP method: {}", e)))?,
             &url,
         );
 
@@ -538,9 +539,10 @@ impl AwsSqsProvider {
 
         // Check status code
         let status = response.status();
-        let response_body = response.text().await.map_err(|e| {
-            AwsError::NetworkError(format!("Failed to read response body: {}", e))
-        })?;
+        let response_body = response
+            .text()
+            .await
+            .map_err(|e| AwsError::NetworkError(format!("Failed to read response body: {}", e)))?;
 
         if !status.is_success() {
             // Parse error from XML response
@@ -567,12 +569,9 @@ impl AwsSqsProvider {
                     in_queue_url = true;
                 }
                 Ok(Event::Text(e)) if in_queue_url => {
-                    return e
-                        .unescape()
-                        .map(|s| s.into_owned())
-                        .map_err(|e| {
-                            AwsError::SerializationError(format!("Failed to parse XML: {}", e))
-                        });
+                    return e.unescape().map(|s| s.into_owned()).map_err(|e| {
+                        AwsError::SerializationError(format!("Failed to parse XML: {}", e))
+                    });
                 }
                 Ok(Event::Eof) => break,
                 Err(e) => {
@@ -670,17 +669,14 @@ impl AwsSqsProvider {
                     in_message_id = true;
                 }
                 Ok(Event::Text(e)) if in_message_id => {
-                    let msg_id = e
-                        .unescape()
-                        .map(|s| s.into_owned())
-                        .map_err(|e| {
-                            AwsError::SerializationError(format!("Failed to parse XML: {}", e))
-                        })?;
-                    
+                    let msg_id = e.unescape().map(|s| s.into_owned()).map_err(|e| {
+                        AwsError::SerializationError(format!("Failed to parse XML: {}", e))
+                    })?;
+
                     // Parse the message ID string
                     use std::str::FromStr;
-                    let message_id = MessageId::from_str(&msg_id)
-                        .unwrap_or_else(|_| MessageId::new());
+                    let message_id =
+                        MessageId::from_str(&msg_id).unwrap_or_else(|_| MessageId::new());
                     return Ok(message_id);
                 }
                 Ok(Event::Eof) => break,
@@ -719,14 +715,14 @@ impl AwsSqsProvider {
         let mut current_body: Option<String> = None;
         let mut current_session_id: Option<String> = None;
         let mut current_delivery_count: u32 = 1;
-        
+
         let mut in_message_id = false;
         let mut in_receipt_handle = false;
         let mut in_body = false;
         let mut in_attribute_name = false;
         let mut in_attribute_value = false;
         let mut current_attribute_name: Option<String> = None;
-        
+
         let mut buf = Vec::new();
 
         loop {
@@ -780,7 +776,7 @@ impl AwsSqsProvider {
                 }
                 Ok(Event::End(ref e)) if e.name().as_ref() == b"Message" => {
                     in_message = false;
-                    
+
                     // Build ReceivedMessage if we have required fields
                     if let (Some(body_base64), Some(receipt_handle)) =
                         (current_body.as_ref(), current_receipt_handle.as_ref())
@@ -804,13 +800,12 @@ impl AwsSqsProvider {
                             .as_ref()
                             .and_then(|id| SessionId::new(id.clone()).ok());
 
-                        // Create receipt handle
+                        // Create receipt handle with queue name encoded
+                        // Format: "{queue_name}|{receipt_token}"
+                        let handle_with_queue = format!("{}|{}", queue.as_str(), receipt_handle);
                         let expires_at = Timestamp::now();
-                        let receipt = ReceiptHandle::new(
-                            receipt_handle.clone(),
-                            expires_at,
-                            ProviderType::AwsSqs,
-                        );
+                        let receipt =
+                            ReceiptHandle::new(handle_with_queue, expires_at, ProviderType::AwsSqs);
 
                         // Create received message
                         let received_message = ReceivedMessage {
@@ -893,7 +888,10 @@ impl QueueProvider for AwsSqsProvider {
         // Add FIFO queue parameters if applicable
         if Self::is_fifo_queue(queue) {
             if let Some(ref session_id) = message.session_id {
-                params.insert("MessageGroupId".to_string(), session_id.as_str().to_string());
+                params.insert(
+                    "MessageGroupId".to_string(),
+                    session_id.as_str().to_string(),
+                );
                 // Use UUID for deduplication ID
                 let dedup_id = uuid::Uuid::new_v4().to_string();
                 params.insert("MessageDeduplicationId".to_string(), dedup_id);
@@ -979,14 +977,88 @@ impl QueueProvider for AwsSqsProvider {
         Ok(messages)
     }
 
-    async fn complete_message(&self, _receipt: &ReceiptHandle) -> Result<(), QueueError> {
-        // TODO: Implement DeleteMessage with HTTP (task 24b.6)
-        Err(AwsError::ServiceError("Not yet implemented with HTTP".to_string()).to_queue_error())
+    async fn complete_message(&self, receipt: &ReceiptHandle) -> Result<(), QueueError> {
+        // Extract queue name from receipt handle (stored in provider type)
+        // For AWS, we need to parse the queue URL from the receipt handle's extra data
+        // Since we don't store that, we need to get the queue URL from the message
+        // Actually, receipt handle in AWS is just the opaque token, so we need a different approach
+
+        // Parse receipt handle to extract queue name and token
+        // Format: "{queue_name}|{receipt_token}"
+        let handle_str = receipt.handle();
+        let parts: Vec<&str> = handle_str.split('|').collect();
+
+        if parts.len() != 2 {
+            return Err(QueueError::MessageNotFound {
+                receipt: handle_str.to_string(),
+            });
+        }
+
+        let queue_name =
+            QueueName::new(parts[0].to_string()).map_err(|e| QueueError::ValidationError(e))?;
+        let receipt_token = parts[1];
+
+        // Get queue URL
+        let queue_url = self
+            .get_queue_url(&queue_name)
+            .await
+            .map_err(|e| e.to_queue_error())?;
+
+        // Build request parameters for DeleteMessage
+        let mut params = HashMap::new();
+        params.insert("Action".to_string(), "DeleteMessage".to_string());
+        params.insert("Version".to_string(), "2012-11-05".to_string());
+        params.insert("QueueUrl".to_string(), queue_url);
+        params.insert("ReceiptHandle".to_string(), receipt_token.to_string());
+
+        // Make HTTP request
+        let _response = self
+            .make_request("POST", "/", &params, "")
+            .await
+            .map_err(|e| e.to_queue_error())?;
+
+        // DeleteMessage returns empty response on success
+        Ok(())
     }
 
-    async fn abandon_message(&self, _receipt: &ReceiptHandle) -> Result<(), QueueError> {
-        // TODO: Implement ChangeMessageVisibility with HTTP (task 24b.6)
-        Err(AwsError::ServiceError("Not yet implemented with HTTP".to_string()).to_queue_error())
+    async fn abandon_message(&self, receipt: &ReceiptHandle) -> Result<(), QueueError> {
+        // Parse receipt handle to extract queue name and token
+        let handle_str = receipt.handle();
+        let parts: Vec<&str> = handle_str.split('|').collect();
+
+        if parts.len() != 2 {
+            return Err(QueueError::MessageNotFound {
+                receipt: handle_str.to_string(),
+            });
+        }
+
+        let queue_name =
+            QueueName::new(parts[0].to_string()).map_err(|e| QueueError::ValidationError(e))?;
+        let receipt_token = parts[1];
+
+        // Get queue URL
+        let queue_url = self
+            .get_queue_url(&queue_name)
+            .await
+            .map_err(|e| e.to_queue_error())?;
+
+        // Build request parameters for ChangeMessageVisibility
+        // Setting visibility timeout to 0 makes the message immediately available
+        let mut params = HashMap::new();
+        params.insert("Action".to_string(), "ChangeMessageVisibility".to_string());
+        params.insert("Version".to_string(), "2012-11-05".to_string());
+        params.insert("QueueUrl".to_string(), queue_url);
+        params.insert("ReceiptHandle".to_string(), receipt_token.to_string());
+        params.insert("VisibilityTimeout".to_string(), "0".to_string());
+
+        // Make HTTP request
+        let _response = self
+            .make_request("POST", "/", &params, "")
+            .await
+            .map_err(|e| e.to_queue_error())?;
+
+        // ChangeMessageVisibility returns empty response on success
+        Ok(())
     }
 
     async fn dead_letter_message(
@@ -1054,11 +1126,148 @@ impl AwsSqsProvider {
     /// Send a batch of up to 10 messages
     async fn send_messages_batch(
         &self,
-        _queue: &QueueName,
-        _messages: &[Message],
+        queue: &QueueName,
+        messages: &[Message],
     ) -> Result<Vec<MessageId>, QueueError> {
-        // TODO: Implement SendMessageBatch with HTTP (task 24b.6)
-        Err(AwsError::ServiceError("Not yet implemented with HTTP".to_string()).to_queue_error())
+        if messages.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // AWS SQS max batch size is 10
+        if messages.len() > 10 {
+            return Err(QueueError::ValidationError(
+                crate::error::ValidationError::OutOfRange {
+                    field: "messages".to_string(),
+                    message: format!("Batch size {} exceeds AWS SQS limit of 10", messages.len()),
+                },
+            ));
+        }
+
+        let queue_url = self
+            .get_queue_url(queue)
+            .await
+            .map_err(|e| e.to_queue_error())?;
+
+        // Build request parameters for SendMessageBatch
+        let mut params = HashMap::new();
+        params.insert("Action".to_string(), "SendMessageBatch".to_string());
+        params.insert("Version".to_string(), "2012-11-05".to_string());
+        params.insert("QueueUrl".to_string(), queue_url.clone());
+
+        // Encode each message body to base64
+        use base64::{engine::general_purpose::STANDARD, Engine};
+
+        // Add each message to batch with index-based parameters
+        for (idx, message) in messages.iter().enumerate() {
+            let entry_id = format!("msg-{}", idx);
+            let body_base64 = STANDARD.encode(&message.body);
+
+            // Check message size (AWS SQS limit: 256KB per message)
+            if body_base64.len() > 256 * 1024 {
+                return Err(AwsError::MessageTooLarge {
+                    size: body_base64.len(),
+                    max_size: 256 * 1024,
+                }
+                .to_queue_error());
+            }
+
+            params.insert(
+                format!("SendMessageBatchRequestEntry.{}.Id", idx + 1),
+                entry_id,
+            );
+            params.insert(
+                format!("SendMessageBatchRequestEntry.{}.MessageBody", idx + 1),
+                body_base64,
+            );
+
+            // Add FIFO parameters if this is a FIFO queue
+            if Self::is_fifo_queue(queue) {
+                // Use session_id as MessageGroupId if available
+                if let Some(ref session_id) = message.session_id {
+                    params.insert(
+                        format!("SendMessageBatchRequestEntry.{}.MessageGroupId", idx + 1),
+                        session_id.as_str().to_string(),
+                    );
+                }
+
+                // Generate MessageDeduplicationId from message content hash
+                // This ensures idempotency for FIFO queues
+                use sha2::{Digest, Sha256};
+                let mut hasher = Sha256::new();
+                hasher.update(&message.body);
+                if let Some(ref session_id) = message.session_id {
+                    hasher.update(session_id.as_str().as_bytes());
+                }
+                let hash = format!("{:x}", hasher.finalize());
+                params.insert(
+                    format!(
+                        "SendMessageBatchRequestEntry.{}.MessageDeduplicationId",
+                        idx + 1
+                    ),
+                    hash,
+                );
+            }
+        }
+
+        // Make HTTP request
+        let response = self
+            .make_request("POST", "/", &params, "")
+            .await
+            .map_err(|e| e.to_queue_error())?;
+
+        // Parse XML response
+        self.parse_send_message_batch_response(&response)
+            .map_err(|e| e.to_queue_error())
+    }
+
+    /// Parse SendMessageBatch XML response
+    fn parse_send_message_batch_response(&self, xml: &str) -> Result<Vec<MessageId>, AwsError> {
+        use quick_xml::events::Event;
+        use quick_xml::Reader;
+
+        let mut reader = Reader::from_str(xml);
+        reader.trim_text(true);
+
+        let mut message_ids = Vec::new();
+        let mut in_successful = false;
+        let mut in_message_id = false;
+        let mut buf = Vec::new();
+
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Start(ref e)) => match e.name().as_ref() {
+                    b"SendMessageBatchResultEntry" => in_successful = true,
+                    b"MessageId" if in_successful => in_message_id = true,
+                    _ => {}
+                },
+                Ok(Event::Text(e)) if in_message_id => {
+                    let msg_id = e.unescape().map(|s| s.into_owned()).map_err(|e| {
+                        AwsError::SerializationError(format!("Failed to parse XML: {}", e))
+                    })?;
+
+                    // Parse the message ID string
+                    use std::str::FromStr;
+                    let message_id =
+                        MessageId::from_str(&msg_id).unwrap_or_else(|_| MessageId::new());
+                    message_ids.push(message_id);
+                    in_message_id = false;
+                }
+                Ok(Event::End(ref e)) if e.name().as_ref() == b"SendMessageBatchResultEntry" => {
+                    in_successful = false;
+                }
+                Ok(Event::Eof) => break,
+                Err(e) => {
+                    return Err(AwsError::SerializationError(format!(
+                        "XML parsing error: {}",
+                        e
+                    )))
+                }
+                _ => {}
+            }
+            buf.clear();
+        }
+
+        Ok(message_ids)
     }
 }
 
