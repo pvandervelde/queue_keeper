@@ -47,6 +47,7 @@ urlencoding = "2.1"
 hmac = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }
+quick-xml = "0.31"
 
 [dev-dependencies]
 tempfile = "=3.23.0"

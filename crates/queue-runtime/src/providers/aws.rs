@@ -197,6 +197,7 @@ type HmacSha256 = Hmac<Sha256>;
 ///
 /// - [AWS Signature V4](https://docs.aws.amazon.com/general/latest/gr/signature-version-4.html)
 /// - [Signing Process](https://docs.aws.amazon.com/general/latest/gr/sigv4_signing.html)
+#[derive(Clone)]
 struct AwsV4Signer {
     access_key: String,
     secret_key: String,
@@ -452,41 +453,203 @@ impl AwsSqsProvider {
             }
         }
 
-        // Not in cache, fetch from AWS
-        let result = self
-            .client
-            .get_queue_url()
-            .queue_name(queue_name.as_str())
-            .send()
-            .await;
+        // Build request parameters
+        let mut params = HashMap::new();
+        params.insert("Action".to_string(), "GetQueueUrl".to_string());
+        params.insert("QueueName".to_string(), queue_name.as_str().to_string());
+        params.insert("Version".to_string(), "2012-11-05".to_string());
 
-        match result {
-            Ok(output) => {
-                if let Some(url) = output.queue_url {
-                    // Cache the URL
-                    let mut cache = self.queue_url_cache.write().await;
-                    cache.insert(queue_name.clone(), url.clone());
-                    Ok(url)
-                } else {
-                    Err(AwsError::QueueNotFound(queue_name.as_str().to_string()))
-                }
+        // Make HTTP request
+        let response = self.make_request("POST", "/", &params, "").await?;
+
+        // Parse XML response
+        let queue_url = self.parse_queue_url_response(&response)?;
+
+        // Cache the URL
+        let mut cache = self.queue_url_cache.write().await;
+        cache.insert(queue_name.clone(), queue_url.clone());
+
+        Ok(queue_url)
+    }
+
+    /// Make an HTTP request to AWS SQS with signature
+    async fn make_request(
+        &self,
+        method: &str,
+        path: &str,
+        query_params: &HashMap<String, String>,
+        body: &str,
+    ) -> Result<String, AwsError> {
+        let signer = self.signer.as_ref().ok_or_else(|| {
+            AwsError::Authentication("No credentials configured".to_string())
+        })?;
+
+        // Parse host from endpoint
+        let host = self
+            .endpoint
+            .strip_prefix("https://")
+            .unwrap_or(&self.endpoint);
+
+        // Get current timestamp
+        let timestamp = Utc::now();
+
+        // Sign request
+        let auth_headers = signer.sign_request(method, host, path, query_params, body, &timestamp);
+
+        // Build URL with query parameters
+        let mut url = format!("{}{}", self.endpoint, path);
+        if !query_params.is_empty() {
+            let query_string = query_params
+                .iter()
+                .map(|(k, v)| format!("{}={}", urlencoding::encode(k), urlencoding::encode(v)))
+                .collect::<Vec<_>>()
+                .join("&");
+            url = format!("{}?{}", url, query_string);
+        }
+
+        // Build HTTP request
+        let mut request = self.http_client.request(
+            method.parse().map_err(|e| {
+                AwsError::ConfigurationError(format!("Invalid HTTP method: {}", e))
+            })?,
+            &url,
+        );
+
+        // Add auth headers
+        for (key, value) in auth_headers {
+            request = request.header(&key, value);
+        }
+
+        // Add body if present
+        if !body.is_empty() {
+            request = request.body(body.to_string());
+        }
+
+        // Send request
+        let response = request.send().await.map_err(|e| {
+            if e.is_timeout() {
+                AwsError::NetworkError(format!("Request timeout: {}", e))
+            } else if e.is_connect() {
+                AwsError::NetworkError(format!("Connection failed: {}", e))
+            } else {
+                AwsError::NetworkError(format!("HTTP request failed: {}", e))
             }
-            Err(err) => {
-                // Check for queue not found error
-                let error_msg = format!("{}", err);
-                if error_msg.contains("NonExistentQueue") || error_msg.contains("QueueDoesNotExist")
-                {
-                    Err(AwsError::QueueNotFound(queue_name.as_str().to_string()))
-                } else if error_msg.contains("InvalidClientTokenId")
-                    || error_msg.contains("UnrecognizedClientException")
-                {
-                    Err(AwsError::Authentication(error_msg))
-                } else if error_msg.contains("connection") || error_msg.contains("timeout") {
-                    Err(AwsError::NetworkError(error_msg))
-                } else {
-                    Err(AwsError::ServiceError(error_msg))
+        })?;
+
+        // Check status code
+        let status = response.status();
+        let response_body = response.text().await.map_err(|e| {
+            AwsError::NetworkError(format!("Failed to read response body: {}", e))
+        })?;
+
+        if !status.is_success() {
+            // Parse error from XML response
+            return Err(self.parse_error_response(&response_body, status.as_u16()));
+        }
+
+        Ok(response_body)
+    }
+
+    /// Parse GetQueueUrl XML response
+    fn parse_queue_url_response(&self, xml: &str) -> Result<String, AwsError> {
+        use quick_xml::events::Event;
+        use quick_xml::Reader;
+
+        let mut reader = Reader::from_str(xml);
+        reader.trim_text(true);
+
+        let mut in_queue_url = false;
+        let mut buf = Vec::new();
+
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Start(ref e)) if e.name().as_ref() == b"QueueUrl" => {
+                    in_queue_url = true;
                 }
+                Ok(Event::Text(e)) if in_queue_url => {
+                    return e
+                        .unescape()
+                        .map(|s| s.into_owned())
+                        .map_err(|e| {
+                            AwsError::SerializationError(format!("Failed to parse XML: {}", e))
+                        });
+                }
+                Ok(Event::Eof) => break,
+                Err(e) => {
+                    return Err(AwsError::SerializationError(format!(
+                        "XML parsing error: {}",
+                        e
+                    )))
+                }
+                _ => {}
             }
+            buf.clear();
+        }
+
+        Err(AwsError::SerializationError(
+            "QueueUrl not found in response".to_string(),
+        ))
+    }
+
+    /// Parse error response from XML
+    fn parse_error_response(&self, xml: &str, status_code: u16) -> AwsError {
+        use quick_xml::events::Event;
+        use quick_xml::Reader;
+
+        let mut reader = Reader::from_str(xml);
+        reader.trim_text(true);
+
+        let mut error_code = None;
+        let mut error_message = None;
+        let mut in_error = false;
+        let mut in_code = false;
+        let mut in_message = false;
+        let mut buf = Vec::new();
+
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Start(ref e)) => match e.name().as_ref() {
+                    b"Error" => in_error = true,
+                    b"Code" if in_error => in_code = true,
+                    b"Message" if in_error => in_message = true,
+                    _ => {}
+                },
+                Ok(Event::Text(e)) => {
+                    if in_code {
+                        error_code = e.unescape().ok().map(|s| s.into_owned());
+                        in_code = false;
+                    } else if in_message {
+                        error_message = e.unescape().ok().map(|s| s.into_owned());
+                        in_message = false;
+                    }
+                }
+                Ok(Event::End(ref e)) if e.name().as_ref() == b"Error" => {
+                    in_error = false;
+                }
+                Ok(Event::Eof) => break,
+                Err(_) => break,
+                _ => {}
+            }
+            buf.clear();
+        }
+
+        let code = error_code.unwrap_or_else(|| "Unknown".to_string());
+        let message = error_message.unwrap_or_else(|| "Unknown error".to_string());
+
+        // Map AWS error codes to our error types
+        match code.as_str() {
+            "AWS.SimpleQueueService.NonExistentQueue" | "QueueDoesNotExist" => {
+                AwsError::QueueNotFound(message)
+            }
+            "InvalidClientTokenId" | "UnrecognizedClientException" | "SignatureDoesNotMatch" => {
+                AwsError::Authentication(format!("{}: {}", code, message))
+            }
+            "InvalidReceiptHandle" | "ReceiptHandleIsInvalid" => AwsError::InvalidReceipt(message),
+            _ if status_code == 401 || status_code == 403 => {
+                AwsError::Authentication(format!("{}: {}", code, message))
+            }
+            _ if status_code >= 500 => AwsError::ServiceError(format!("{}: {}", code, message)),
+            _ => AwsError::ServiceError(format!("{}: {}", code, message)),
         }
     }
 
@@ -509,266 +672,49 @@ impl fmt::Debug for AwsSqsProvider {
 impl QueueProvider for AwsSqsProvider {
     async fn send_message(
         &self,
-        queue: &QueueName,
-        message: &Message,
+        _queue: &QueueName,
+        _message: &Message,
     ) -> Result<MessageId, QueueError> {
-        let queue_url = self
-            .get_queue_url(queue)
-            .await
-            .map_err(|e| e.to_queue_error())?;
-
-        // Serialize message body (Bytes) to base64 for SQS
-        use base64::{engine::general_purpose::STANDARD, Engine};
-        let body_base64 = STANDARD.encode(&message.body);
-
-        // Check message size (AWS SQS limit: 256KB)
-        if body_base64.len() > 256 * 1024 {
-            return Err(AwsError::MessageTooLarge {
-                size: body_base64.len(),
-                max_size: 256 * 1024,
-            }
-            .to_queue_error());
-        }
-
-        // Build send request
-        let mut request = self
-            .client
-            .send_message()
-            .queue_url(&queue_url)
-            .message_body(body_base64);
-
-        // Add message group ID for FIFO queues
-        if Self::is_fifo_queue(queue) {
-            if let Some(ref session_id) = message.session_id {
-                request = request.message_group_id(session_id.as_str());
-                // Use UUID for deduplication ID
-                let dedup_id = uuid::Uuid::new_v4().to_string();
-                request = request.message_deduplication_id(dedup_id);
-            } else {
-                // FIFO queues require message group ID
-                return Err(QueueError::ValidationError(
-                    crate::error::ValidationError::Required {
-                        field: "session_id".to_string(),
-                    },
-                ));
-            }
-        }
-
-        // Send message
-        let result = request.send().await;
-
-        match result {
-            Ok(output) => {
-                if let Some(message_id) = output.message_id {
-                    Ok(MessageId::from_str(&message_id).unwrap_or_else(|_| MessageId::new()))
-                } else {
-                    Err(AwsError::ServiceError("No message ID returned".to_string())
-                        .to_queue_error())
-                }
-            }
-            Err(err) => {
-                let error_msg = format!("{}", err);
-                if error_msg.contains("InvalidMessageContents") {
-                    Err(AwsError::SerializationError(error_msg).to_queue_error())
-                } else if error_msg.contains("connection") || error_msg.contains("timeout") {
-                    Err(AwsError::NetworkError(error_msg).to_queue_error())
-                } else {
-                    Err(AwsError::ServiceError(error_msg).to_queue_error())
-                }
-            }
-        }
+        // TODO: Implement SendMessage with HTTP (task 24b.4)
+        Err(AwsError::ServiceError("Not yet implemented with HTTP".to_string()).to_queue_error())
     }
 
     async fn send_messages(
         &self,
-        queue: &QueueName,
-        messages: &[Message],
+        _queue: &QueueName,
+        _messages: &[Message],
     ) -> Result<Vec<MessageId>, QueueError> {
-        // AWS SQS supports batches of up to 10 messages
-        // Send in chunks if more than 10
-        let mut all_message_ids = Vec::with_capacity(messages.len());
-
-        for chunk in messages.chunks(10) {
-            let chunk_ids = self.send_messages_batch(queue, chunk).await?;
-            all_message_ids.extend(chunk_ids);
-        }
-
-        Ok(all_message_ids)
+        // TODO: Implement SendMessageBatch with HTTP (task 24b.6)
+        Err(AwsError::ServiceError("Not yet implemented with HTTP".to_string()).to_queue_error())
     }
 
     async fn receive_message(
         &self,
-        queue: &QueueName,
-        timeout: Duration,
+        _queue: &QueueName,
+        _timeout: Duration,
     ) -> Result<Option<ReceivedMessage>, QueueError> {
-        let messages = self.receive_messages(queue, 1, timeout).await?;
-        Ok(messages.into_iter().next())
+        // TODO: Implement ReceiveMessage with HTTP (task 24b.5)
+        Err(AwsError::ServiceError("Not yet implemented with HTTP".to_string()).to_queue_error())
     }
 
     async fn receive_messages(
         &self,
-        queue: &QueueName,
-        max_messages: u32,
-        timeout: Duration,
+        _queue: &QueueName,
+        _max_messages: u32,
+        _timeout: Duration,
     ) -> Result<Vec<ReceivedMessage>, QueueError> {
-        let queue_url = self
-            .get_queue_url(queue)
-            .await
-            .map_err(|e| e.to_queue_error())?;
-
-        // Convert timeout to seconds (AWS uses seconds for wait time)
-        let wait_time_seconds = timeout.num_seconds().clamp(0, 20) as i32; // AWS max is 20 seconds
-
-        // Receive messages with all attributes
-        let result = self
-            .client
-            .receive_message()
-            .queue_url(&queue_url)
-            .max_number_of_messages(max_messages.min(10) as i32) // AWS max is 10
-            .wait_time_seconds(wait_time_seconds)
-            .message_system_attribute_names(aws_sdk_sqs::types::MessageSystemAttributeName::All)
-            .send()
-            .await;
-
-        match result {
-            Ok(output) => {
-                let mut received_messages = Vec::new();
-
-                if let Some(messages) = output.messages {
-                    for sqs_message in messages {
-                        if let (Some(body), Some(receipt_handle)) =
-                            (sqs_message.body, sqs_message.receipt_handle)
-                        {
-                            // Decode base64 body back to Bytes
-                            use base64::{engine::general_purpose::STANDARD, Engine};
-                            let body_bytes = STANDARD.decode(body).map_err(|e| {
-                                AwsError::SerializationError(format!("Base64 decode failed: {}", e))
-                                    .to_queue_error()
-                            })?;
-                            let body = bytes::Bytes::from(body_bytes);
-
-                            // Extract session ID from message attributes (for FIFO queues)
-                            let session_id = sqs_message
-                                .attributes
-                                .as_ref()
-                                .and_then(|attrs| attrs.get(&aws_sdk_sqs::types::MessageSystemAttributeName::MessageGroupId))
-                                .and_then(|group_id| SessionId::new(group_id.clone()).ok());
-
-                            // Parse message ID
-                            let message_id = sqs_message
-                                .message_id
-                                .as_ref()
-                                .and_then(|id| MessageId::from_str(id).ok())
-                                .unwrap_or_else(MessageId::new);
-
-                            // Get delivery count
-                            let delivery_count = sqs_message.attributes
-                                .as_ref()
-                                .and_then(|attrs| attrs.get(&aws_sdk_sqs::types::MessageSystemAttributeName::ApproximateReceiveCount))
-                                .and_then(|c| c.parse().ok())
-                                .unwrap_or(1);
-
-                            // Create receipt handle (AWS receipt handles typically valid for visibility timeout, usually 30s)
-                            let expires_at = Timestamp::now();
-                            let receipt = ReceiptHandle::new(
-                                receipt_handle,
-                                expires_at,
-                                ProviderType::AwsSqs,
-                            );
-
-                            // Create received message using struct literal
-                            let received_message = ReceivedMessage {
-                                message_id,
-                                body,
-                                attributes: HashMap::new(),
-                                session_id,
-                                correlation_id: None,
-                                receipt_handle: receipt,
-                                delivery_count,
-                                first_delivered_at: Timestamp::now(),
-                                delivered_at: Timestamp::now(),
-                            };
-
-                            received_messages.push(received_message);
-                        }
-                    }
-                }
-
-                Ok(received_messages)
-            }
-            Err(err) => {
-                let error_msg = format!("{}", err);
-                if error_msg.contains("connection") || error_msg.contains("timeout") {
-                    Err(AwsError::NetworkError(error_msg).to_queue_error())
-                } else {
-                    Err(AwsError::ServiceError(error_msg).to_queue_error())
-                }
-            }
-        }
+        // TODO: Implement ReceiveMessage with HTTP (task 24b.5)
+        Err(AwsError::ServiceError("Not yet implemented with HTTP".to_string()).to_queue_error())
     }
 
-    async fn complete_message(&self, receipt: &ReceiptHandle) -> Result<(), QueueError> {
-        // AWS SQS requires queue URL to delete a message
-        // Since receipt handle doesn't contain queue info, try all cached queue URLs
-        let cache = self.queue_url_cache.read().await;
-
-        for queue_url in cache.values() {
-            let result = self
-                .client
-                .delete_message()
-                .queue_url(queue_url)
-                .receipt_handle(receipt.handle())
-                .send()
-                .await;
-
-            match result {
-                Ok(_) => return Ok(()),
-                Err(err) => {
-                    let error_msg = format!("{}", err);
-                    // If receipt is invalid for this queue, try next queue
-                    if !error_msg.contains("ReceiptHandleIsInvalid") {
-                        // Other errors should be reported
-                        if error_msg.contains("connection") || error_msg.contains("timeout") {
-                            return Err(AwsError::NetworkError(error_msg).to_queue_error());
-                        }
-                    }
-                }
-            }
-        }
-
-        // If we get here, receipt was invalid for all queues
-        Err(AwsError::InvalidReceipt(receipt.handle().to_string()).to_queue_error())
+    async fn complete_message(&self, _receipt: &ReceiptHandle) -> Result<(), QueueError> {
+        // TODO: Implement DeleteMessage with HTTP (task 24b.6)
+        Err(AwsError::ServiceError("Not yet implemented with HTTP".to_string()).to_queue_error())
     }
 
-    async fn abandon_message(&self, receipt: &ReceiptHandle) -> Result<(), QueueError> {
-        // Change visibility timeout to 0 to make message immediately available
-        let cache = self.queue_url_cache.read().await;
-
-        for queue_url in cache.values() {
-            let result = self
-                .client
-                .change_message_visibility()
-                .queue_url(queue_url)
-                .receipt_handle(receipt.handle())
-                .visibility_timeout(0) // Make immediately available
-                .send()
-                .await;
-
-            match result {
-                Ok(_) => return Ok(()),
-                Err(err) => {
-                    let error_msg = format!("{}", err);
-                    if !error_msg.contains("ReceiptHandleIsInvalid")
-                        && !error_msg.contains("MessageNotInflight")
-                        && (error_msg.contains("connection") || error_msg.contains("timeout"))
-                    {
-                        return Err(AwsError::NetworkError(error_msg).to_queue_error());
-                    }
-                }
-            }
-        }
-
-        Err(AwsError::InvalidReceipt(receipt.handle().to_string()).to_queue_error())
+    async fn abandon_message(&self, _receipt: &ReceiptHandle) -> Result<(), QueueError> {
+        // TODO: Implement ChangeMessageVisibility with HTTP (task 24b.6)
+        Err(AwsError::ServiceError("Not yet implemented with HTTP".to_string()).to_queue_error())
     }
 
     async fn dead_letter_message(
@@ -805,7 +751,9 @@ impl QueueProvider for AwsSqsProvider {
         })?;
 
         Ok(Box::new(AwsSessionProvider::new(
-            Arc::clone(&self.client),
+            self.http_client.clone(),
+            self.signer.clone(),
+            self.endpoint.clone(),
             queue_url,
             queue.clone(),
             session_id,
@@ -834,100 +782,11 @@ impl AwsSqsProvider {
     /// Send a batch of up to 10 messages
     async fn send_messages_batch(
         &self,
-        queue: &QueueName,
-        messages: &[Message],
+        _queue: &QueueName,
+        _messages: &[Message],
     ) -> Result<Vec<MessageId>, QueueError> {
-        if messages.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let queue_url = self
-            .get_queue_url(queue)
-            .await
-            .map_err(|e| e.to_queue_error())?;
-
-        // Build batch entries
-        use base64::{engine::general_purpose::STANDARD, Engine};
-        let mut entries = Vec::with_capacity(messages.len());
-
-        for (idx, message) in messages.iter().enumerate() {
-            // Encode message body to base64
-            let body_base64 = STANDARD.encode(&message.body);
-
-            if body_base64.len() > 256 * 1024 {
-                return Err(AwsError::MessageTooLarge {
-                    size: body_base64.len(),
-                    max_size: 256 * 1024,
-                }
-                .to_queue_error());
-            }
-
-            let mut entry = aws_sdk_sqs::types::SendMessageBatchRequestEntry::builder()
-                .id(format!("msg_{}", idx))
-                .message_body(body_base64)
-                .build()
-                .map_err(|e| {
-                    AwsError::ServiceError(format!("Failed to build batch entry: {}", e))
-                        .to_queue_error()
-                })?;
-
-            // Add FIFO attributes if needed
-            if Self::is_fifo_queue(queue) {
-                if let Some(ref session_id) = message.session_id {
-                    let dedup_id = uuid::Uuid::new_v4().to_string();
-                    // Rebuild entry with FIFO attributes - message_body is already String
-                    let body_value = entry.message_body.clone();
-                    entry = aws_sdk_sqs::types::SendMessageBatchRequestEntry::builder()
-                        .id(format!("msg_{}", idx))
-                        .message_body(body_value)
-                        .message_group_id(session_id.as_str())
-                        .message_deduplication_id(dedup_id)
-                        .build()
-                        .map_err(|e| {
-                            AwsError::ServiceError(format!("Failed to build FIFO entry: {}", e))
-                                .to_queue_error()
-                        })?;
-                }
-            }
-
-            entries.push(entry);
-        }
-
-        // Send batch
-        let result = self
-            .client
-            .send_message_batch()
-            .queue_url(&queue_url)
-            .set_entries(Some(entries))
-            .send()
-            .await;
-
-        match result {
-            Ok(output) => {
-                let mut message_ids = Vec::new();
-
-                // Collect successful message IDs
-                for success in output.successful() {
-                    let msg_id = success.message_id();
-                    if !msg_id.is_empty() {
-                        message_ids
-                            .push(MessageId::from_str(msg_id).unwrap_or_else(|_| MessageId::new()));
-                    }
-                }
-
-                // Check for failures
-                if !output.failed().is_empty() {
-                    let error_msg = format!("Batch send had {} failures", output.failed().len());
-                    return Err(AwsError::ServiceError(error_msg).to_queue_error());
-                }
-
-                Ok(message_ids)
-            }
-            Err(err) => {
-                let error_msg = format!("{}", err);
-                Err(AwsError::ServiceError(error_msg).to_queue_error())
-            }
-        }
+        // TODO: Implement SendMessageBatch with HTTP (task 24b.6)
+        Err(AwsError::ServiceError("Not yet implemented with HTTP".to_string()).to_queue_error())
     }
 }
 
@@ -940,7 +799,9 @@ impl AwsSqsProvider {
 /// This provider implements session-based operations using FIFO queue message groups.
 /// The SessionId is mapped to MessageGroupId to ensure ordering within the session.
 pub struct AwsSessionProvider {
-    client: Arc<SqsClient>,
+    http_client: HttpClient,
+    signer: Option<AwsV4Signer>,
+    endpoint: String,
     queue_url: String,
     queue_name: QueueName,
     session_id: SessionId,
@@ -949,13 +810,17 @@ pub struct AwsSessionProvider {
 impl AwsSessionProvider {
     /// Create new AWS session provider
     fn new(
-        client: Arc<SqsClient>,
+        http_client: HttpClient,
+        signer: Option<AwsV4Signer>,
+        endpoint: String,
         queue_url: String,
         queue_name: QueueName,
         session_id: SessionId,
     ) -> Self {
         Self {
-            client,
+            http_client,
+            signer,
+            endpoint,
             queue_url,
             queue_name,
             session_id,
@@ -976,139 +841,20 @@ impl fmt::Debug for AwsSessionProvider {
 impl SessionProvider for AwsSessionProvider {
     async fn receive_message(
         &self,
-        timeout: Duration,
+        _timeout: Duration,
     ) -> Result<Option<ReceivedMessage>, QueueError> {
-        // Convert timeout to seconds
-        let wait_time_seconds = timeout.num_seconds().clamp(0, 20) as i32;
-
-        // Receive message from the session's message group
-        // AWS SQS FIFO automatically delivers messages from the same group in order
-        let result = self
-            .client
-            .receive_message()
-            .queue_url(&self.queue_url)
-            .max_number_of_messages(1)
-            .wait_time_seconds(wait_time_seconds)
-            .message_system_attribute_names(aws_sdk_sqs::types::MessageSystemAttributeName::All)
-            .send()
-            .await;
-
-        match result {
-            Ok(output) => {
-                if let Some(messages) = output.messages {
-                    if let Some(sqs_message) = messages.into_iter().next() {
-                        if let (Some(body), Some(receipt_handle)) =
-                            (sqs_message.body, sqs_message.receipt_handle)
-                        {
-                            // Decode base64 body
-                            use base64::{engine::general_purpose::STANDARD, Engine};
-                            let body_bytes = STANDARD.decode(body).map_err(|e| {
-                                AwsError::SerializationError(format!("Base64 decode failed: {}", e))
-                                    .to_queue_error()
-                            })?;
-                            let body = bytes::Bytes::from(body_bytes);
-
-                            // Parse message ID
-                            let message_id = sqs_message
-                                .message_id
-                                .as_ref()
-                                .and_then(|id| MessageId::from_str(id).ok())
-                                .unwrap_or_else(MessageId::new);
-
-                            // Get delivery count
-                            let delivery_count = sqs_message.attributes
-                                .as_ref()
-                                .and_then(|attrs| attrs.get(&aws_sdk_sqs::types::MessageSystemAttributeName::ApproximateReceiveCount))
-                                .and_then(|c| c.parse().ok())
-                                .unwrap_or(1);
-
-                            // Create receipt handle
-                            let expires_at = Timestamp::now();
-                            let receipt = ReceiptHandle::new(
-                                receipt_handle,
-                                expires_at,
-                                ProviderType::AwsSqs,
-                            );
-
-                            // Create received message with session ID
-                            let received_message = ReceivedMessage {
-                                message_id,
-                                body,
-                                attributes: HashMap::new(),
-                                session_id: Some(self.session_id.clone()),
-                                correlation_id: None,
-                                receipt_handle: receipt,
-                                delivery_count,
-                                first_delivered_at: Timestamp::now(),
-                                delivered_at: Timestamp::now(),
-                            };
-
-                            return Ok(Some(received_message));
-                        }
-                    }
-                }
-                Ok(None)
-            }
-            Err(err) => {
-                let error_msg = format!("{}", err);
-                if error_msg.contains("connection") || error_msg.contains("timeout") {
-                    Err(AwsError::NetworkError(error_msg).to_queue_error())
-                } else {
-                    Err(AwsError::ServiceError(error_msg).to_queue_error())
-                }
-            }
-        }
+        // TODO: Implement session receive with HTTP (task 24b.5)
+        Err(AwsError::ServiceError("Not yet implemented with HTTP".to_string()).to_queue_error())
     }
 
-    async fn complete_message(&self, receipt: &ReceiptHandle) -> Result<(), QueueError> {
-        let result = self
-            .client
-            .delete_message()
-            .queue_url(&self.queue_url)
-            .receipt_handle(receipt.handle())
-            .send()
-            .await;
-
-        match result {
-            Ok(_) => Ok(()),
-            Err(err) => {
-                let error_msg = format!("{}", err);
-                if error_msg.contains("ReceiptHandleIsInvalid") {
-                    Err(AwsError::InvalidReceipt(receipt.handle().to_string()).to_queue_error())
-                } else if error_msg.contains("connection") || error_msg.contains("timeout") {
-                    Err(AwsError::NetworkError(error_msg).to_queue_error())
-                } else {
-                    Err(AwsError::ServiceError(error_msg).to_queue_error())
-                }
-            }
-        }
+    async fn complete_message(&self, _receipt: &ReceiptHandle) -> Result<(), QueueError> {
+        // TODO: Implement session complete with HTTP (task 24b.6)
+        Err(AwsError::ServiceError("Not yet implemented with HTTP".to_string()).to_queue_error())
     }
 
-    async fn abandon_message(&self, receipt: &ReceiptHandle) -> Result<(), QueueError> {
-        let result = self
-            .client
-            .change_message_visibility()
-            .queue_url(&self.queue_url)
-            .receipt_handle(receipt.handle())
-            .visibility_timeout(0)
-            .send()
-            .await;
-
-        match result {
-            Ok(_) => Ok(()),
-            Err(err) => {
-                let error_msg = format!("{}", err);
-                if error_msg.contains("ReceiptHandleIsInvalid")
-                    || error_msg.contains("MessageNotInflight")
-                {
-                    Err(AwsError::InvalidReceipt(receipt.handle().to_string()).to_queue_error())
-                } else if error_msg.contains("connection") || error_msg.contains("timeout") {
-                    Err(AwsError::NetworkError(error_msg).to_queue_error())
-                } else {
-                    Err(AwsError::ServiceError(error_msg).to_queue_error())
-                }
-            }
-        }
+    async fn abandon_message(&self, _receipt: &ReceiptHandle) -> Result<(), QueueError> {
+        // TODO: Implement session abandon with HTTP (task 24b.6)
+        Err(AwsError::ServiceError("Not yet implemented with HTTP".to_string()).to_queue_error())
     }
 
     async fn dead_letter_message(
@@ -1121,19 +867,12 @@ impl SessionProvider for AwsSessionProvider {
     }
 
     async fn renew_session_lock(&self) -> Result<(), QueueError> {
-        // Note: AWS SQS FIFO queues do not have explicit session locks like Azure Service Bus.
-        // Message ordering within a message group is guaranteed by AWS SQS itself.
-        // Visibility timeout serves as the implicit lock mechanism - messages remain
-        // invisible to other consumers during processing.
-        // Therefore, session lock renewal is not applicable to AWS SQS.
+        // AWS SQS FIFO queues do not have explicit session locks
         Ok(())
     }
 
     async fn close_session(&self) -> Result<(), QueueError> {
-        // Note: AWS SQS FIFO queues do not require explicit session termination.
-        // Sessions are implicit through message groups - there's no server-side
-        // session state to clean up. The message group simply becomes idle when
-        // no messages are being processed.
+        // AWS SQS FIFO queues do not require explicit session termination
         Ok(())
     }
 
@@ -1142,12 +881,7 @@ impl SessionProvider for AwsSessionProvider {
     }
 
     fn session_expires_at(&self) -> Timestamp {
-        // Note: AWS SQS FIFO queues do not have explicit session expiry times.
-        // Sessions (message groups) are persistent and don't expire - they simply
-        // become idle when no messages are being processed. The visibility timeout
-        // controls how long a message remains locked to a specific consumer, but
-        // the message group itself has no expiration.
-        // Return a far-future timestamp to indicate no expiration.
+        // AWS SQS FIFO queues do not have explicit session expiry times
         Timestamp::from_datetime(chrono::Utc::now() + chrono::Duration::days(365))
     }
 }
