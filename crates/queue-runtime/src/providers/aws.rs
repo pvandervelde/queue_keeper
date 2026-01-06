@@ -510,7 +510,8 @@ impl AwsSqsProvider {
                 config.region.clone(),
             ))
         } else {
-            // TODO: Support IAM roles via instance metadata
+            // Without explicit credentials, signature-based auth is not available
+            // Future enhancement: Support IAM roles via EC2 instance metadata or ECS task roles
             None
         };
 
@@ -1018,11 +1019,24 @@ impl QueueProvider for AwsSqsProvider {
 
     async fn send_messages(
         &self,
-        _queue: &QueueName,
-        _messages: &[Message],
+        queue: &QueueName,
+        messages: &[Message],
     ) -> Result<Vec<MessageId>, QueueError> {
-        // TODO: Implement SendMessageBatch with HTTP (task 24b.6)
-        Err(AwsError::ServiceError("Not yet implemented with HTTP".to_string()).to_queue_error())
+        if messages.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // AWS SQS supports up to 10 messages per batch
+        let max_batch = self.max_batch_size() as usize;
+        let mut all_message_ids = Vec::new();
+
+        // Process messages in chunks of 10
+        for chunk in messages.chunks(max_batch) {
+            let message_ids = self.send_messages_batch(queue, chunk).await?;
+            all_message_ids.extend(message_ids);
+        }
+
+        Ok(all_message_ids)
     }
 
     async fn receive_message(
@@ -1404,6 +1418,278 @@ impl AwsSessionProvider {
             session_id,
         }
     }
+
+    /// Get the cached queue URL
+    async fn get_queue_url(&self) -> Result<String, AwsError> {
+        Ok(self.queue_url.clone())
+    }
+
+    /// Make an HTTP request to AWS SQS
+    async fn make_request(
+        &self,
+        method: &str,
+        path: &str,
+        params: &HashMap<String, String>,
+        body: &str,
+    ) -> Result<String, AwsError> {
+        use reqwest::header;
+
+        // Build query string from parameters
+        let query_string = if params.is_empty() {
+            String::new()
+        } else {
+            let mut pairs: Vec<String> = params
+                .iter()
+                .map(|(k, v)| format!("{}={}", urlencoding::encode(k), urlencoding::encode(v)))
+                .collect();
+            pairs.sort();
+            pairs.join("&")
+        };
+
+        let url = if query_string.is_empty() {
+            format!("{}{}", self.endpoint, path)
+        } else {
+            format!("{}{}?{}", self.endpoint, path, query_string)
+        };
+
+        // Build request
+        let mut request_builder = self.http_client.request(
+            method.parse().map_err(|e| {
+                AwsError::NetworkError(format!("Invalid HTTP method: {}", e))
+            })?,
+            &url,
+        );
+
+        // Add signature if available
+        if let Some(ref signer) = self.signer {
+            let timestamp = Utc::now();
+            let host = self.endpoint.trim_start_matches("https://").trim_start_matches("http://");
+            let signed_headers = signer.sign_request(method, host, path, params, body, &timestamp);
+            for (key, value) in signed_headers {
+                request_builder = request_builder.header(key, value);
+            }
+        }
+
+        // Add body if present
+        if !body.is_empty() {
+            request_builder = request_builder.header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(body.to_string());
+        }
+
+        // Send request
+        let response = request_builder.send().await.map_err(|e| {
+            AwsError::NetworkError(format!("HTTP request failed: {}", e))
+        })?;
+
+        let status = response.status();
+        let response_text = response.text().await.map_err(|e| {
+            AwsError::NetworkError(format!("Failed to read response: {}", e))
+        })?;
+
+        // Check for errors
+        if !status.is_success() {
+            return Err(self.parse_error_response(&response_text, status.as_u16()));
+        }
+
+        Ok(response_text)
+    }
+
+    /// Parse error response XML
+    fn parse_error_response(&self, xml: &str, status_code: u16) -> AwsError {
+        use quick_xml::events::Event;
+        use quick_xml::Reader;
+
+        let mut reader = Reader::from_str(xml);
+        reader.trim_text(true);
+
+        let mut error_code = None;
+        let mut error_message = None;
+        let mut in_error = false;
+        let mut in_code = false;
+        let mut in_message = false;
+        let mut buf = Vec::new();
+
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Start(ref e)) => match e.name().as_ref() {
+                    b"Error" => in_error = true,
+                    b"Code" if in_error => in_code = true,
+                    b"Message" if in_error => in_message = true,
+                    _ => {}
+                },
+                Ok(Event::Text(e)) => {
+                    if in_code {
+                        error_code = e.unescape().ok().map(|s| s.into_owned());
+                        in_code = false;
+                    } else if in_message {
+                        error_message = e.unescape().ok().map(|s| s.into_owned());
+                        in_message = false;
+                    }
+                }
+                Ok(Event::Eof) => break,
+                Err(_) => break,
+                _ => {}
+            }
+            buf.clear();
+        }
+
+        // Map AWS error codes to our error types
+        match error_code.as_deref() {
+            Some("InvalidParameterValue") | Some("MissingParameter") => {
+                AwsError::ServiceError(error_message.unwrap_or_else(|| "Invalid parameter".to_string()))
+            }
+            Some("AccessDenied") | Some("InvalidClientTokenId") | Some("SignatureDoesNotMatch") => {
+                AwsError::Authentication(error_message.unwrap_or_else(|| "Authentication failed".to_string()))
+            }
+            Some("AWS.SimpleQueueService.NonExistentQueue") | Some("QueueDoesNotExist") => {
+                AwsError::QueueNotFound(error_message.unwrap_or_else(|| "Queue not found".to_string()))
+            }
+            _ => {
+                if status_code >= 500 {
+                    AwsError::ServiceError(error_message.unwrap_or_else(|| "Service error".to_string()))
+                } else {
+                    AwsError::ServiceError(error_message.unwrap_or_else(|| format!("HTTP {}", status_code)))
+                }
+            }
+        }
+    }
+
+    /// Parse ReceiveMessage XML response
+    fn parse_receive_message_response(
+        &self,
+        xml: &str,
+        queue: &QueueName,
+    ) -> Result<Vec<ReceivedMessage>, AwsError> {
+        use quick_xml::events::Event;
+        use quick_xml::Reader;
+
+        let mut reader = Reader::from_str(xml);
+        reader.trim_text(true);
+
+        let mut messages = Vec::new();
+        let mut in_message = false;
+        let mut current_message_id: Option<String> = None;
+        let mut current_receipt_handle: Option<String> = None;
+        let mut current_body: Option<String> = None;
+        let mut current_session_id: Option<String> = None;
+        let mut current_delivery_count: u32 = 1;
+
+        let mut in_message_id = false;
+        let mut in_receipt_handle = false;
+        let mut in_body = false;
+        let mut in_attribute_name = false;
+        let mut in_attribute_value = false;
+        let mut current_attribute_name: Option<String> = None;
+
+        let mut buf = Vec::new();
+
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Start(ref e)) => match e.name().as_ref() {
+                    b"Message" => {
+                        in_message = true;
+                        current_message_id = None;
+                        current_receipt_handle = None;
+                        current_body = None;
+                        current_session_id = None;
+                        current_delivery_count = 1;
+                    }
+                    b"MessageId" if in_message => in_message_id = true,
+                    b"ReceiptHandle" if in_message => in_receipt_handle = true,
+                    b"Body" if in_message => in_body = true,
+                    b"Name" if in_message => in_attribute_name = true,
+                    b"Value" if in_message => in_attribute_value = true,
+                    _ => {}
+                },
+                Ok(Event::Text(e)) => {
+                    let text = e.unescape().ok().map(|s| s.into_owned());
+                    if in_message_id {
+                        current_message_id = text;
+                        in_message_id = false;
+                    } else if in_receipt_handle {
+                        current_receipt_handle = text;
+                        in_receipt_handle = false;
+                    } else if in_body {
+                        current_body = text;
+                        in_body = false;
+                    } else if in_attribute_name {
+                        current_attribute_name = text;
+                        in_attribute_name = false;
+                    } else if in_attribute_value {
+                        if let Some(ref attr_name) = current_attribute_name {
+                            match attr_name.as_str() {
+                                "MessageGroupId" => current_session_id = text,
+                                "ApproximateReceiveCount" => {
+                                    if let Some(count_str) = text {
+                                        current_delivery_count = count_str.parse().unwrap_or(1);
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                        in_attribute_value = false;
+                        current_attribute_name = None;
+                    }
+                }
+                Ok(Event::End(ref e)) if e.name().as_ref() == b"Message" => {
+                    in_message = false;
+
+                    if let (Some(body_base64), Some(receipt_handle)) =
+                        (current_body.as_ref(), current_receipt_handle.as_ref())
+                    {
+                        use base64::{engine::general_purpose::STANDARD, Engine};
+                        let body_bytes = STANDARD.decode(body_base64).map_err(|e| {
+                            AwsError::SerializationError(format!("Base64 decode failed: {}", e))
+                        })?;
+                        let body = bytes::Bytes::from(body_bytes);
+
+                        use std::str::FromStr;
+                        let message_id = current_message_id
+                            .as_ref()
+                            .and_then(|id| MessageId::from_str(id).ok())
+                            .unwrap_or_else(MessageId::new);
+
+                        let session_id = current_session_id
+                            .as_ref()
+                            .and_then(|id| SessionId::new(id.clone()).ok());
+
+                        let handle_with_queue = format!("{}|{}", queue.as_str(), receipt_handle);
+                        let expires_at = Timestamp::now();
+                        let receipt = ReceiptHandle::new(
+                            handle_with_queue,
+                            expires_at,
+                            ProviderType::AwsSqs,
+                        );
+
+                        let received_message = ReceivedMessage {
+                            message_id,
+                            body,
+                            attributes: HashMap::new(),
+                            session_id,
+                            correlation_id: None,
+                            receipt_handle: receipt,
+                            delivery_count: current_delivery_count,
+                            first_delivered_at: Timestamp::now(),
+                            delivered_at: Timestamp::now(),
+                        };
+
+                        messages.push(received_message);
+                    }
+                }
+                Ok(Event::Eof) => break,
+                Err(e) => {
+                    return Err(AwsError::SerializationError(format!(
+                        "XML parsing error: {}",
+                        e
+                    )))
+                }
+                _ => {}
+            }
+            buf.clear();
+        }
+
+        Ok(messages)
+    }
 }
 
 impl fmt::Debug for AwsSessionProvider {
@@ -1419,20 +1705,98 @@ impl fmt::Debug for AwsSessionProvider {
 impl SessionProvider for AwsSessionProvider {
     async fn receive_message(
         &self,
-        _timeout: Duration,
+        timeout: Duration,
     ) -> Result<Option<ReceivedMessage>, QueueError> {
-        // TODO: Implement session receive with HTTP (task 24b.5)
-        Err(AwsError::ServiceError("Not yet implemented with HTTP".to_string()).to_queue_error())
+        // For FIFO queues, receive with session filtering
+        // AWS SQS handles session ordering via MessageGroupId
+        let queue_url = self.get_queue_url().await.map_err(|e| e.to_queue_error())?;
+
+        // Build request parameters for ReceiveMessage with session (MessageGroupId)
+        let mut params = HashMap::new();
+        params.insert("Action".to_string(), "ReceiveMessage".to_string());
+        params.insert("Version".to_string(), "2012-11-05".to_string());
+        params.insert("QueueUrl".to_string(), queue_url);
+        params.insert("MaxNumberOfMessages".to_string(), "1".to_string());
+        params.insert(
+            "WaitTimeSeconds".to_string(),
+            timeout.num_seconds().clamp(0, 20).to_string(),
+        );
+        params.insert("AttributeName.1".to_string(), "All".to_string());
+
+        // Make HTTP request
+        let response = self
+            .make_request("POST", "/", &params, "")
+            .await
+            .map_err(|e| e.to_queue_error())?;
+
+        // Parse XML response
+        let messages = self
+            .parse_receive_message_response(&response, &self.queue_name)
+            .map_err(|e| e.to_queue_error())?;
+
+        // Filter by session ID (messages should already have matching session from MessageGroupId)
+        Ok(messages
+            .into_iter()
+            .find(|msg| msg.session_id.as_ref() == Some(&self.session_id)))
     }
 
-    async fn complete_message(&self, _receipt: &ReceiptHandle) -> Result<(), QueueError> {
-        // TODO: Implement session complete with HTTP (task 24b.6)
-        Err(AwsError::ServiceError("Not yet implemented with HTTP".to_string()).to_queue_error())
+    async fn complete_message(&self, receipt: &ReceiptHandle) -> Result<(), QueueError> {
+        // Parse receipt handle to extract queue name and token
+        let handle_str = receipt.handle();
+        let parts: Vec<&str> = handle_str.split('|').collect();
+
+        if parts.len() != 2 {
+            return Err(QueueError::MessageNotFound {
+                receipt: handle_str.to_string(),
+            });
+        }
+
+        let receipt_token = parts[1];
+        let queue_url = self.get_queue_url().await.map_err(|e| e.to_queue_error())?;
+
+        // Build request parameters for DeleteMessage
+        let mut params = HashMap::new();
+        params.insert("Action".to_string(), "DeleteMessage".to_string());
+        params.insert("Version".to_string(), "2012-11-05".to_string());
+        params.insert("QueueUrl".to_string(), queue_url);
+        params.insert("ReceiptHandle".to_string(), receipt_token.to_string());
+
+        // Make HTTP request
+        self.make_request("POST", "/", &params, "")
+            .await
+            .map_err(|e| e.to_queue_error())?;
+
+        Ok(())
     }
 
-    async fn abandon_message(&self, _receipt: &ReceiptHandle) -> Result<(), QueueError> {
-        // TODO: Implement session abandon with HTTP (task 24b.6)
-        Err(AwsError::ServiceError("Not yet implemented with HTTP".to_string()).to_queue_error())
+    async fn abandon_message(&self, receipt: &ReceiptHandle) -> Result<(), QueueError> {
+        // Parse receipt handle to extract queue name and token
+        let handle_str = receipt.handle();
+        let parts: Vec<&str> = handle_str.split('|').collect();
+
+        if parts.len() != 2 {
+            return Err(QueueError::MessageNotFound {
+                receipt: handle_str.to_string(),
+            });
+        }
+
+        let receipt_token = parts[1];
+        let queue_url = self.get_queue_url().await.map_err(|e| e.to_queue_error())?;
+
+        // Build request parameters for ChangeMessageVisibility
+        let mut params = HashMap::new();
+        params.insert("Action".to_string(), "ChangeMessageVisibility".to_string());
+        params.insert("Version".to_string(), "2012-11-05".to_string());
+        params.insert("QueueUrl".to_string(), queue_url);
+        params.insert("ReceiptHandle".to_string(), receipt_token.to_string());
+        params.insert("VisibilityTimeout".to_string(), "0".to_string());
+
+        // Make HTTP request
+        self.make_request("POST", "/", &params, "")
+            .await
+            .map_err(|e| e.to_queue_error())?;
+
+        Ok(())
     }
 
     async fn dead_letter_message(
