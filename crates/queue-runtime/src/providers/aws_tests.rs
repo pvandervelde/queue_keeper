@@ -117,12 +117,9 @@ mod signature_tests {
         let config = create_test_provider_config(false);
         let provider = AwsSqsProvider::new(config).await.unwrap();
 
-        // Test that signature generation completes without panicking
-        // Actual signature verification would require mocking HTTP calls
-        assert!(
-            provider.signer.is_some(),
-            "Signer should be initialized with credentials"
-        );
+        // Test that provider initialization succeeds
+        // Credentials will be fetched when making requests
+        assert_eq!(provider.provider_type(), ProviderType::AwsSqs);
     }
 
     /// Verify canonical request formation

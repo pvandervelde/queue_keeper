@@ -18,9 +18,14 @@
 //!
 //! ## Authentication
 //!
-//! Implements AWS Signature Version 4 signing for request authentication:
-//! - **Access Keys**: Explicit access_key_id and secret_access_key
-//! - **IAM Roles**: Via environment variables or instance metadata (future)
+//! Implements AWS Signature Version 4 signing with automatic credential chain:
+//!
+//! 1. **Explicit Credentials**: Access key and secret key from configuration
+//! 2. **Environment Variables**: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN
+//! 3. **ECS Task Metadata**: Via AWS_CONTAINER_CREDENTIALS_RELATIVE_URI (for ECS/Fargate)
+//! 4. **EC2 Instance Metadata**: Via IMDSv2 at 169.254.169.254 (for EC2 instances)
+//!
+//! Temporary credentials are automatically cached and refreshed before expiration.
 //!
 //! ## Queue Types
 //!
@@ -109,13 +114,15 @@
 //!
 //! ## Example
 //!
+//! ### Using Explicit Credentials
+//!
 //! ```no_run
 //! use queue_runtime::{QueueClientFactory, QueueConfig, ProviderConfig, AwsSqsConfig};
 //! use queue_runtime::{Message, QueueName};
 //! use bytes::Bytes;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! // Configure AWS SQS provider
+//! // Configure AWS SQS provider with explicit credentials
 //! let config = QueueConfig {
 //!     provider: ProviderConfig::AwsSqs(AwsSqsConfig {
 //!         region: "us-east-1".to_string(),
@@ -133,8 +140,42 @@
 //! let queue = QueueName::new("my-queue".to_string())?;
 //! let message = Message::new(Bytes::from("Hello, SQS!"));
 //! let message_id = client.send_message(&queue, message).await?;
-//! println!("Sent message: {:?}", message_id);
+//! # Ok(())
+//! # }
+//! ```
 //!
+//! ### Using IAM Roles (EC2/ECS)
+//!
+//! ```no_run
+//! use queue_runtime::{QueueClientFactory, QueueConfig, ProviderConfig, AwsSqsConfig};
+//!
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! // No explicit credentials needed - will use instance/task role
+//! let config = QueueConfig {
+//!     provider: ProviderConfig::AwsSqs(AwsSqsConfig {
+//!         region: "us-east-1".to_string(),
+//!         access_key_id: None,
+//!         secret_access_key: None,
+//!         use_fifo_queues: false,
+//!     }),
+//!     ..Default::default()
+//! };
+//!
+//! let client = QueueClientFactory::create_client(config).await?;
+//! // Credentials will be fetched automatically from instance/task metadata
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## Additional Examples
+//!
+//! ```no_run
+//! # use queue_runtime::{QueueClientFactory, QueueConfig, ProviderConfig, AwsSqsConfig};
+//! # use queue_runtime::{Message, QueueName};
+//! # use bytes::Bytes;
+//! # async fn receive_example() -> Result<(), Box<dyn std::error::Error>> {
+//! # let client = QueueClientFactory::create_client(QueueConfig::default()).await?;
+//! # let queue = QueueName::new("my-queue".to_string())?;
 //! // Receive messages
 //! use chrono::Duration;
 //! if let Some(received) = client.receive_message(&queue, Duration::seconds(10)).await? {
@@ -434,6 +475,282 @@ impl AwsV4Signer {
 }
 
 // ============================================================================
+// AWS Credential Provider
+// ============================================================================
+
+/// Temporary AWS credentials
+#[derive(Debug, Clone)]
+struct AwsCredentials {
+    access_key_id: String,
+    secret_access_key: String,
+    session_token: Option<String>,
+    expiration: DateTime<Utc>,
+}
+
+impl AwsCredentials {
+    /// Check if credentials are expired or will expire soon (within 5 minutes)
+    fn is_expired(&self) -> bool {
+        let now = Utc::now();
+        let buffer = Duration::minutes(5);
+        self.expiration - buffer <= now
+    }
+}
+
+/// AWS credential provider that implements the credential chain
+///
+/// Attempts to load credentials in the following order:
+/// 1. Explicit credentials from configuration
+/// 2. Environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN)
+/// 3. EC2 instance metadata service (IMDSv2)
+/// 4. ECS task metadata (via AWS_CONTAINER_CREDENTIALS_RELATIVE_URI)
+///
+/// Credentials are cached and automatically refreshed before expiration.
+struct AwsCredentialProvider {
+    http_client: HttpClient,
+    cached_credentials: Arc<RwLock<Option<AwsCredentials>>>,
+    explicit_config: Option<(String, String)>, // (access_key_id, secret_access_key)
+}
+
+impl AwsCredentialProvider {
+    /// Create new credential provider
+    fn new(
+        http_client: HttpClient,
+        access_key_id: Option<String>,
+        secret_access_key: Option<String>,
+    ) -> Self {
+        let explicit_config = match (access_key_id, secret_access_key) {
+            (Some(key_id), Some(secret)) => Some((key_id, secret)),
+            _ => None,
+        };
+
+        Self {
+            http_client,
+            cached_credentials: Arc::new(RwLock::new(None)),
+            explicit_config,
+        }
+    }
+
+    /// Get credentials, refreshing if necessary
+    async fn get_credentials(&self) -> Result<AwsCredentials, AwsError> {
+        // Check cache first
+        {
+            let cache = self.cached_credentials.read().await;
+            if let Some(creds) = cache.as_ref() {
+                if !creds.is_expired() {
+                    return Ok(creds.clone());
+                }
+            }
+        }
+
+        // Refresh credentials
+        let creds = self.fetch_credentials().await?;
+
+        // Update cache
+        {
+            let mut cache = self.cached_credentials.write().await;
+            *cache = Some(creds.clone());
+        }
+
+        Ok(creds)
+    }
+
+    /// Fetch credentials from the credential chain
+    async fn fetch_credentials(&self) -> Result<AwsCredentials, AwsError> {
+        // 1. Try explicit configuration
+        if let Some((key_id, secret)) = &self.explicit_config {
+            return Ok(AwsCredentials {
+                access_key_id: key_id.clone(),
+                secret_access_key: secret.clone(),
+                session_token: None,
+                expiration: Utc::now() + Duration::days(365), // Static credentials don't expire
+            });
+        }
+
+        // 2. Try environment variables
+        if let Ok(creds) = self.fetch_from_environment() {
+            return Ok(creds);
+        }
+
+        // 3. Try ECS task metadata
+        if let Ok(creds) = self.fetch_from_ecs_metadata().await {
+            return Ok(creds);
+        }
+
+        // 4. Try EC2 instance metadata
+        if let Ok(creds) = self.fetch_from_ec2_metadata().await {
+            return Ok(creds);
+        }
+
+        Err(AwsError::Authentication(
+            "No credentials found in credential chain".to_string(),
+        ))
+    }
+
+    /// Fetch credentials from environment variables
+    fn fetch_from_environment(&self) -> Result<AwsCredentials, AwsError> {
+        let access_key_id = std::env::var("AWS_ACCESS_KEY_ID")
+            .map_err(|_| AwsError::Authentication("AWS_ACCESS_KEY_ID not set".to_string()))?;
+
+        let secret_access_key = std::env::var("AWS_SECRET_ACCESS_KEY").map_err(|_| {
+            AwsError::Authentication("AWS_SECRET_ACCESS_KEY not set".to_string())
+        })?;
+
+        let session_token = std::env::var("AWS_SESSION_TOKEN").ok();
+
+        Ok(AwsCredentials {
+            access_key_id,
+            secret_access_key,
+            session_token,
+            expiration: Utc::now() + Duration::days(365), // Environment creds don't expire
+        })
+    }
+
+    /// Fetch credentials from ECS task metadata
+    async fn fetch_from_ecs_metadata(&self) -> Result<AwsCredentials, AwsError> {
+        let relative_uri = std::env::var("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI").map_err(
+            |_| {
+                AwsError::Authentication(
+                    "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI not set".to_string(),
+                )
+            },
+        )?;
+
+        let endpoint = format!("http://169.254.170.2{}", relative_uri);
+
+        let response = self
+            .http_client
+            .get(&endpoint)
+            .timeout(std::time::Duration::from_secs(2))
+            .send()
+            .await
+            .map_err(|e| {
+                AwsError::Authentication(format!("Failed to fetch ECS credentials: {}", e))
+            })?;
+
+        if !response.status().is_success() {
+            return Err(AwsError::Authentication(format!(
+                "ECS metadata returned error: {}",
+                response.status()
+            )));
+        }
+
+        let body = response.text().await.map_err(|e| {
+            AwsError::Authentication(format!("Failed to read ECS metadata: {}", e))
+        })?;
+
+        self.parse_credentials_json(&body)
+    }
+
+    /// Fetch credentials from EC2 instance metadata (IMDSv2)
+    async fn fetch_from_ec2_metadata(&self) -> Result<AwsCredentials, AwsError> {
+        // Step 1: Get IMDSv2 token
+        let token = self
+            .http_client
+            .put("http://169.254.169.254/latest/api/token")
+            .header("X-aws-ec2-metadata-token-ttl-seconds", "21600")
+            .timeout(std::time::Duration::from_secs(2))
+            .send()
+            .await
+            .map_err(|e| {
+                AwsError::Authentication(format!("Failed to get IMDSv2 token: {}", e))
+            })?
+            .text()
+            .await
+            .map_err(|e| {
+                AwsError::Authentication(format!("Failed to read IMDSv2 token: {}", e))
+            })?;
+
+        // Step 2: Get role name
+        let role_name = self
+            .http_client
+            .get("http://169.254.169.254/latest/meta-data/iam/security-credentials/")
+            .header("X-aws-ec2-metadata-token", &token)
+            .timeout(std::time::Duration::from_secs(2))
+            .send()
+            .await
+            .map_err(|e| {
+                AwsError::Authentication(format!("Failed to fetch IAM role name: {}", e))
+            })?
+            .text()
+            .await
+            .map_err(|e| {
+                AwsError::Authentication(format!("Failed to read IAM role name: {}", e))
+            })?;
+
+        // Step 3: Get credentials
+        let credentials_url = format!(
+            "http://169.254.169.254/latest/meta-data/iam/security-credentials/{}",
+            role_name.trim()
+        );
+
+        let response = self
+            .http_client
+            .get(&credentials_url)
+            .header("X-aws-ec2-metadata-token", &token)
+            .timeout(std::time::Duration::from_secs(2))
+            .send()
+            .await
+            .map_err(|e| {
+                AwsError::Authentication(format!("Failed to fetch EC2 credentials: {}", e))
+            })?;
+
+        if !response.status().is_success() {
+            return Err(AwsError::Authentication(format!(
+                "EC2 metadata returned error: {}",
+                response.status()
+            )));
+        }
+
+        let body = response.text().await.map_err(|e| {
+            AwsError::Authentication(format!("Failed to read EC2 metadata: {}", e))
+        })?;
+
+        self.parse_credentials_json(&body)
+    }
+
+    /// Parse credentials from JSON response
+    fn parse_credentials_json(&self, json: &str) -> Result<AwsCredentials, AwsError> {
+        // Parse JSON manually to avoid adding serde_json dependency
+        let access_key_id = Self::extract_json_field(json, "AccessKeyId")?;
+        let secret_access_key = Self::extract_json_field(json, "SecretAccessKey")?;
+        let session_token = Self::extract_json_field(json, "Token").ok();
+        let expiration_str = Self::extract_json_field(json, "Expiration")?;
+
+        // Parse ISO 8601 timestamp
+        let expiration = DateTime::parse_from_rfc3339(&expiration_str)
+            .map_err(|e| {
+                AwsError::Authentication(format!("Invalid expiration timestamp: {}", e))
+            })?
+            .with_timezone(&Utc);
+
+        Ok(AwsCredentials {
+            access_key_id,
+            secret_access_key,
+            session_token,
+            expiration,
+        })
+    }
+
+    /// Extract a field value from JSON (simple parser, no dependencies)
+    fn extract_json_field(json: &str, field: &str) -> Result<String, AwsError> {
+        let pattern = format!("\"{}\": \"", field);
+        let start = json.find(&pattern).ok_or_else(|| {
+            AwsError::Authentication(format!("Field '{}' not found in JSON", field))
+        })?;
+
+        let value_start = start + pattern.len();
+        let value_end = json[value_start..]
+            .find('"')
+            .ok_or_else(|| {
+                AwsError::Authentication(format!("Malformed JSON for field '{}'", field))
+            })?
+            + value_start;
+
+        Ok(json[value_start..value_end].to_string())
+    }
+}
+
+// ============================================================================
 // AWS SQS Provider
 // ============================================================================
 
@@ -454,7 +771,7 @@ impl AwsV4Signer {
 /// Internal state (queue URL cache) is protected by `RwLock`.
 pub struct AwsSqsProvider {
     http_client: HttpClient,
-    signer: Option<AwsV4Signer>,
+    credential_provider: AwsCredentialProvider,
     config: AwsSqsConfig,
     endpoint: String,
     queue_url_cache: Arc<RwLock<HashMap<QueueName, String>>>,
@@ -500,21 +817,6 @@ impl AwsSqsProvider {
             ));
         }
 
-        // Setup signer if credentials provided
-        let signer = if let (Some(access_key), Some(secret_key)) =
-            (&config.access_key_id, &config.secret_access_key)
-        {
-            Some(AwsV4Signer::new(
-                access_key.clone(),
-                secret_key.clone(),
-                config.region.clone(),
-            ))
-        } else {
-            // Without explicit credentials, signature-based auth is not available
-            // Future enhancement: Support IAM roles via EC2 instance metadata or ECS task roles
-            None
-        };
-
         // Build endpoint URL
         let endpoint = format!("https://sqs.{}.amazonaws.com", config.region);
 
@@ -524,9 +826,16 @@ impl AwsSqsProvider {
             .build()
             .map_err(|e| AwsError::NetworkError(format!("Failed to create HTTP client: {}", e)))?;
 
+        // Create credential provider
+        let credential_provider = AwsCredentialProvider::new(
+            http_client.clone(),
+            config.access_key_id.clone(),
+            config.secret_access_key.clone(),
+        );
+
         Ok(Self {
             http_client,
-            signer,
+            credential_provider,
             config,
             endpoint,
             queue_url_cache: Arc::new(RwLock::new(HashMap::new())),
@@ -578,10 +887,15 @@ impl AwsSqsProvider {
         query_params: &HashMap<String, String>,
         body: &str,
     ) -> Result<String, AwsError> {
-        let signer = self
-            .signer
-            .as_ref()
-            .ok_or_else(|| AwsError::Authentication("No credentials configured".to_string()))?;
+        // Get current credentials
+        let credentials = self.credential_provider.get_credentials().await?;
+
+        // Create signer with current credentials
+        let signer = AwsV4Signer::new(
+            credentials.access_key_id.clone(),
+            credentials.secret_access_key.clone(),
+            self.config.region.clone(),
+        );
 
         // Parse host from endpoint
         let host = self
@@ -593,7 +907,12 @@ impl AwsSqsProvider {
         let timestamp = Utc::now();
 
         // Sign request
-        let auth_headers = signer.sign_request(method, host, path, query_params, body, &timestamp);
+        let mut auth_headers = signer.sign_request(method, host, path, query_params, body, &timestamp);
+
+        // Add session token header if present (for temporary credentials)
+        if let Some(session_token) = &credentials.session_token {
+            auth_headers.insert("X-Amz-Security-Token".to_string(), session_token.clone());
+        }
 
         // Build URL with query parameters
         let mut url = format!("{}{}", self.endpoint, path);
@@ -1207,7 +1526,12 @@ impl QueueProvider for AwsSqsProvider {
 
         Ok(Box::new(AwsSessionProvider::new(
             self.http_client.clone(),
-            self.signer.clone(),
+            AwsCredentialProvider::new(
+                self.http_client.clone(),
+                self.config.access_key_id.clone(),
+                self.config.secret_access_key.clone(),
+            ),
+            self.config.region.clone(),
             self.endpoint.clone(),
             queue_url,
             queue.clone(),
@@ -1392,7 +1716,8 @@ impl AwsSqsProvider {
 /// The SessionId is mapped to MessageGroupId to ensure ordering within the session.
 pub struct AwsSessionProvider {
     http_client: HttpClient,
-    signer: Option<AwsV4Signer>,
+    credential_provider: AwsCredentialProvider,
+    region: String,
     endpoint: String,
     queue_url: String,
     queue_name: QueueName,
@@ -1403,7 +1728,8 @@ impl AwsSessionProvider {
     /// Create new AWS session provider
     fn new(
         http_client: HttpClient,
-        signer: Option<AwsV4Signer>,
+        credential_provider: AwsCredentialProvider,
+        region: String,
         endpoint: String,
         queue_url: String,
         queue_name: QueueName,
@@ -1411,7 +1737,8 @@ impl AwsSessionProvider {
     ) -> Self {
         Self {
             http_client,
-            signer,
+            credential_provider,
+            region,
             endpoint,
             queue_url,
             queue_name,
@@ -1433,6 +1760,16 @@ impl AwsSessionProvider {
         body: &str,
     ) -> Result<String, AwsError> {
         use reqwest::header;
+
+        // Get current credentials
+        let credentials = self.credential_provider.get_credentials().await?;
+
+        // Create signer with current credentials
+        let signer = AwsV4Signer::new(
+            credentials.access_key_id.clone(),
+            credentials.secret_access_key.clone(),
+            self.region.clone(),
+        );
 
         // Build query string from parameters
         let query_string = if params.is_empty() {
@@ -1460,14 +1797,18 @@ impl AwsSessionProvider {
             &url,
         );
 
-        // Add signature if available
-        if let Some(ref signer) = self.signer {
-            let timestamp = Utc::now();
-            let host = self.endpoint.trim_start_matches("https://").trim_start_matches("http://");
-            let signed_headers = signer.sign_request(method, host, path, params, body, &timestamp);
-            for (key, value) in signed_headers {
-                request_builder = request_builder.header(key, value);
-            }
+        // Add signature
+        let timestamp = Utc::now();
+        let host = self.endpoint.trim_start_matches("https://").trim_start_matches("http://");
+        let mut signed_headers = signer.sign_request(method, host, path, params, body, &timestamp);
+
+        // Add session token header if present (for temporary credentials)
+        if let Some(session_token) = &credentials.session_token {
+            signed_headers.insert("X-Amz-Security-Token".to_string(), session_token.clone());
+        }
+
+        for (key, value) in signed_headers {
+            request_builder = request_builder.header(key, value);
         }
 
         // Add body if present
