@@ -84,7 +84,8 @@
 //! The HTTP-based approach enables comprehensive unit testing:
 //!
 //! ```rust
-//! use queue_runtime::{AwsSqsProvider, AwsSqsConfig};
+//! use queue_runtime::providers::AwsSqsProvider;
+//! use queue_runtime::AwsSqsConfig;
 //!
 //! # async fn test_example() {
 //! // Create provider with test credentials
