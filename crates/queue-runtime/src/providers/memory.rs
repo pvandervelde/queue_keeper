@@ -625,9 +625,7 @@ impl QueueProvider for InMemoryProvider {
             .or_insert_with(SessionState::new);
 
         if session_state.is_locked() {
-            let locked_until = session_state
-                .lock_expires_at
-                .unwrap_or_else(Timestamp::now);
+            let locked_until = session_state.lock_expires_at.unwrap_or_else(Timestamp::now);
             return Err(QueueError::SessionLocked {
                 session_id: target_session_id.as_str().to_string(),
                 locked_until,
@@ -914,7 +912,6 @@ impl SessionProvider for InMemorySessionProvider {
                             session_id: self.session_id.as_str().to_string(),
                             locked_until: session_state
                                 .lock_expires_at
-
                                 .unwrap_or_else(Timestamp::now),
                         });
                     }
@@ -944,9 +941,7 @@ impl SessionProvider for InMemorySessionProvider {
                 if session_state.locked_by.as_ref() != Some(&self.client_id) {
                     return Err(QueueError::SessionLocked {
                         session_id: self.session_id.as_str().to_string(),
-                        locked_until: session_state
-                            .lock_expires_at
-                            .unwrap_or_else(Timestamp::now),
+                        locked_until: session_state.lock_expires_at.unwrap_or_else(Timestamp::now),
                     });
                 }
 

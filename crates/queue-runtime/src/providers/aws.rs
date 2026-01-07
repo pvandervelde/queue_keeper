@@ -592,9 +592,8 @@ impl AwsCredentialProvider {
         let access_key_id = std::env::var("AWS_ACCESS_KEY_ID")
             .map_err(|_| AwsError::Authentication("AWS_ACCESS_KEY_ID not set".to_string()))?;
 
-        let secret_access_key = std::env::var("AWS_SECRET_ACCESS_KEY").map_err(|_| {
-            AwsError::Authentication("AWS_SECRET_ACCESS_KEY not set".to_string())
-        })?;
+        let secret_access_key = std::env::var("AWS_SECRET_ACCESS_KEY")
+            .map_err(|_| AwsError::Authentication("AWS_SECRET_ACCESS_KEY not set".to_string()))?;
 
         let session_token = std::env::var("AWS_SESSION_TOKEN").ok();
 
@@ -608,13 +607,12 @@ impl AwsCredentialProvider {
 
     /// Fetch credentials from ECS task metadata
     async fn fetch_from_ecs_metadata(&self) -> Result<AwsCredentials, AwsError> {
-        let relative_uri = std::env::var("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI").map_err(
-            |_| {
+        let relative_uri =
+            std::env::var("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI").map_err(|_| {
                 AwsError::Authentication(
                     "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI not set".to_string(),
                 )
-            },
-        )?;
+            })?;
 
         let endpoint = format!("http://169.254.170.2{}", relative_uri);
 
@@ -635,9 +633,10 @@ impl AwsCredentialProvider {
             )));
         }
 
-        let body = response.text().await.map_err(|e| {
-            AwsError::Authentication(format!("Failed to read ECS metadata: {}", e))
-        })?;
+        let body = response
+            .text()
+            .await
+            .map_err(|e| AwsError::Authentication(format!("Failed to read ECS metadata: {}", e)))?;
 
         self.parse_credentials_json(&body)
     }
@@ -652,14 +651,10 @@ impl AwsCredentialProvider {
             .timeout(std::time::Duration::from_secs(2))
             .send()
             .await
-            .map_err(|e| {
-                AwsError::Authentication(format!("Failed to get IMDSv2 token: {}", e))
-            })?
+            .map_err(|e| AwsError::Authentication(format!("Failed to get IMDSv2 token: {}", e)))?
             .text()
             .await
-            .map_err(|e| {
-                AwsError::Authentication(format!("Failed to read IMDSv2 token: {}", e))
-            })?;
+            .map_err(|e| AwsError::Authentication(format!("Failed to read IMDSv2 token: {}", e)))?;
 
         // Step 2: Get role name
         let role_name = self
@@ -669,9 +664,7 @@ impl AwsCredentialProvider {
             .timeout(std::time::Duration::from_secs(2))
             .send()
             .await
-            .map_err(|e| {
-                AwsError::Authentication(format!("Failed to fetch IAM role name: {}", e))
-            })?
+            .map_err(|e| AwsError::Authentication(format!("Failed to fetch IAM role name: {}", e)))?
             .text()
             .await
             .map_err(|e| {
@@ -702,9 +695,10 @@ impl AwsCredentialProvider {
             )));
         }
 
-        let body = response.text().await.map_err(|e| {
-            AwsError::Authentication(format!("Failed to read EC2 metadata: {}", e))
-        })?;
+        let body = response
+            .text()
+            .await
+            .map_err(|e| AwsError::Authentication(format!("Failed to read EC2 metadata: {}", e)))?;
 
         self.parse_credentials_json(&body)
     }
@@ -719,9 +713,7 @@ impl AwsCredentialProvider {
 
         // Parse ISO 8601 timestamp
         let expiration = DateTime::parse_from_rfc3339(&expiration_str)
-            .map_err(|e| {
-                AwsError::Authentication(format!("Invalid expiration timestamp: {}", e))
-            })?
+            .map_err(|e| AwsError::Authentication(format!("Invalid expiration timestamp: {}", e)))?
             .with_timezone(&Utc);
 
         Ok(AwsCredentials {
@@ -740,12 +732,9 @@ impl AwsCredentialProvider {
         })?;
 
         let value_start = start + pattern.len();
-        let value_end = json[value_start..]
-            .find('"')
-            .ok_or_else(|| {
-                AwsError::Authentication(format!("Malformed JSON for field '{}'", field))
-            })?
-            + value_start;
+        let value_end = json[value_start..].find('"').ok_or_else(|| {
+            AwsError::Authentication(format!("Malformed JSON for field '{}'", field))
+        })? + value_start;
 
         Ok(json[value_start..value_end].to_string())
     }
@@ -908,7 +897,8 @@ impl AwsSqsProvider {
         let timestamp = Utc::now();
 
         // Sign request
-        let mut auth_headers = signer.sign_request(method, host, path, query_params, body, &timestamp);
+        let mut auth_headers =
+            signer.sign_request(method, host, path, query_params, body, &timestamp);
 
         // Add session token header if present (for temporary credentials)
         if let Some(session_token) = &credentials.session_token {
@@ -1792,15 +1782,18 @@ impl AwsSessionProvider {
 
         // Build request
         let mut request_builder = self.http_client.request(
-            method.parse().map_err(|e| {
-                AwsError::NetworkError(format!("Invalid HTTP method: {}", e))
-            })?,
+            method
+                .parse()
+                .map_err(|e| AwsError::NetworkError(format!("Invalid HTTP method: {}", e)))?,
             &url,
         );
 
         // Add signature
         let timestamp = Utc::now();
-        let host = self.endpoint.trim_start_matches("https://").trim_start_matches("http://");
+        let host = self
+            .endpoint
+            .trim_start_matches("https://")
+            .trim_start_matches("http://");
         let mut signed_headers = signer.sign_request(method, host, path, params, body, &timestamp);
 
         // Add session token header if present (for temporary credentials)
@@ -1814,19 +1807,22 @@ impl AwsSessionProvider {
 
         // Add body if present
         if !body.is_empty() {
-            request_builder = request_builder.header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+            request_builder = request_builder
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                 .body(body.to_string());
         }
 
         // Send request
-        let response = request_builder.send().await.map_err(|e| {
-            AwsError::NetworkError(format!("HTTP request failed: {}", e))
-        })?;
+        let response = request_builder
+            .send()
+            .await
+            .map_err(|e| AwsError::NetworkError(format!("HTTP request failed: {}", e)))?;
 
         let status = response.status();
-        let response_text = response.text().await.map_err(|e| {
-            AwsError::NetworkError(format!("Failed to read response: {}", e))
-        })?;
+        let response_text = response
+            .text()
+            .await
+            .map_err(|e| AwsError::NetworkError(format!("Failed to read response: {}", e)))?;
 
         // Check for errors
         if !status.is_success() {
@@ -1877,20 +1873,28 @@ impl AwsSessionProvider {
 
         // Map AWS error codes to our error types
         match error_code.as_deref() {
-            Some("InvalidParameterValue") | Some("MissingParameter") => {
-                AwsError::ServiceError(error_message.unwrap_or_else(|| "Invalid parameter".to_string()))
-            }
+            Some("InvalidParameterValue") | Some("MissingParameter") => AwsError::ServiceError(
+                error_message.unwrap_or_else(|| "Invalid parameter".to_string()),
+            ),
             Some("AccessDenied") | Some("InvalidClientTokenId") | Some("SignatureDoesNotMatch") => {
-                AwsError::Authentication(error_message.unwrap_or_else(|| "Authentication failed".to_string()))
+                AwsError::Authentication(
+                    error_message.unwrap_or_else(|| "Authentication failed".to_string()),
+                )
             }
             Some("AWS.SimpleQueueService.NonExistentQueue") | Some("QueueDoesNotExist") => {
-                AwsError::QueueNotFound(error_message.unwrap_or_else(|| "Queue not found".to_string()))
+                AwsError::QueueNotFound(
+                    error_message.unwrap_or_else(|| "Queue not found".to_string()),
+                )
             }
             _ => {
                 if status_code >= 500 {
-                    AwsError::ServiceError(error_message.unwrap_or_else(|| "Service error".to_string()))
+                    AwsError::ServiceError(
+                        error_message.unwrap_or_else(|| "Service error".to_string()),
+                    )
                 } else {
-                    AwsError::ServiceError(error_message.unwrap_or_else(|| format!("HTTP {}", status_code)))
+                    AwsError::ServiceError(
+                        error_message.unwrap_or_else(|| format!("HTTP {}", status_code)),
+                    )
                 }
             }
         }
@@ -1997,11 +2001,8 @@ impl AwsSessionProvider {
 
                         let handle_with_queue = format!("{}|{}", queue.as_str(), receipt_handle);
                         let expires_at = Timestamp::now();
-                        let receipt = ReceiptHandle::new(
-                            handle_with_queue,
-                            expires_at,
-                            ProviderType::AwsSqs,
-                        );
+                        let receipt =
+                            ReceiptHandle::new(handle_with_queue, expires_at, ProviderType::AwsSqs);
 
                         let received_message = ReceivedMessage {
                             message_id,
