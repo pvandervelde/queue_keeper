@@ -1,0 +1,260 @@
+name: Create Release PR
+
+on:
+    push:
+        branches:
+            - master
+    workflow_dispatch:
+
+permissions:
+    contents: write
+    pull-requests: write
+
+jobs:
+    create-release-pr:
+        name: Create or update release PR
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
+              with:
+                  # Fetch all history for version calculation and changelog generation
+                  fetch-depth: 0
+
+            - name: Set up Rust toolchain
+              uses: dtolnay/rust-toolchain@stable
+
+            - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+
+            - name: Install cargo binstall
+              uses: cargo-bins/cargo-binstall@main
+
+            - name: Install Conventional Commits Next Version
+              run: cargo binstall conventional_commits_next_version --no-confirm
+
+            - name: Install git-cliff
+              run: cargo binstall git-cliff --no-confirm
+
+            - name: Configure git
+              run: |
+                  git config user.name "github-actions[bot]"
+                  git config user.email "github-actions[bot]@users.noreply.github.com"
+
+            - name: Calculate next version
+              id: calc_version
+              run: |
+                  # Use Conventional Commits Next Version to calculate the next version
+                  # Check if there are any tags first
+                  if git describe --tags --abbrev=0 >/dev/null 2>&1; then
+                    # There are tags, use the latest tag as starting point
+                    LATEST_TAG=$(git describe --tags --abbrev=0)
+                    LATEST_COMMIT=$(git rev-parse $LATEST_TAG)
+                    NEXT_VERSION=$(conventional_commits_next_version --from-version ${LATEST_TAG} --calculation-mode Batch ${LATEST_COMMIT})
+                  else
+                    # No tags, start from the beginning of the repository
+                    FIRST_COMMIT=$(git rev-list --max-parents=0 HEAD)
+                    NEXT_VERSION=$(conventional_commits_next_version --from-version "0.0.0" --calculation-mode Batch ${FIRST_COMMIT})
+                  fi
+                  echo "NEXT_VERSION=${NEXT_VERSION}" >> $GITHUB_OUTPUT
+                  echo "Next version will be: ${NEXT_VERSION}"
+
+            - name: Check if release branch already exists
+              id: check_branch
+              run: |
+                  NEXT_VERSION="${{ steps.calc_version.outputs.NEXT_VERSION }}"
+                  BRANCH_NAME="release/${NEXT_VERSION}"
+
+                  # Fetch all branches to check for existing release branches
+                  git fetch origin 'refs/heads/release/*:refs/remotes/origin/release/*' || true
+
+                  if git rev-parse --verify --quiet "origin/${BRANCH_NAME}" >/dev/null 2>&1; then
+                    echo "Branch ${BRANCH_NAME} already exists."
+                    echo "exists=true" >> $GITHUB_OUTPUT
+                    echo "branch_name=${BRANCH_NAME}" >> $GITHUB_OUTPUT
+                  else
+                    echo "Branch ${BRANCH_NAME} does not exist."
+                    echo "exists=false" >> $GITHUB_OUTPUT
+                    echo "branch_name=${BRANCH_NAME}" >> $GITHUB_OUTPUT
+                  fi
+
+            - name: Generate changelog
+              id: changelog
+              run: |
+                  NEXT_VERSION="${{ steps.calc_version.outputs.NEXT_VERSION }}"
+
+                  # Generate changelog for the upcoming version
+                  # Use unreleased commits since last tag
+                  git-cliff --tag "${NEXT_VERSION}" --unreleased --strip all > release_notes.md
+
+                  echo "Generated changelog for version ${NEXT_VERSION}"
+
+                  # Check if changelog has content
+                  if [ -s release_notes.md ]; then
+                    echo "has_content=true" >> $GITHUB_OUTPUT
+                    # Store changelog for PR body (escape newlines for GitHub Actions)
+                    {
+                      echo 'changelog<<EOF'
+                      cat release_notes.md
+                      echo EOF
+                    } >> $GITHUB_OUTPUT
+                  else
+                    echo "has_content=false" >> $GITHUB_OUTPUT
+                    echo "changelog=No changes to report" >> $GITHUB_OUTPUT
+                  fi
+
+            - name: Create or checkout release branch
+              run: |
+                  BRANCH_NAME="${{ steps.check_branch.outputs.branch_name }}"
+
+                  if [ "${{ steps.check_branch.outputs.exists }}" = "true" ]; then
+                    echo "Checking out existing branch ${BRANCH_NAME}"
+                    git checkout "${BRANCH_NAME}"
+                    git pull origin "${BRANCH_NAME}" || true
+                  else
+                    echo "Creating new branch ${BRANCH_NAME}"
+                    git checkout -b "${BRANCH_NAME}"
+                  fi
+
+            - name: Update workspace version
+              run: |
+                  NEXT_VERSION="${{ steps.calc_version.outputs.NEXT_VERSION }}"
+
+                  # Update workspace version in root Cargo.toml
+                  sed -i "s/^version = \".*\"/version = \"${NEXT_VERSION}\"/" Cargo.toml
+
+                  echo "Updated workspace version to ${NEXT_VERSION}"
+
+            - name: Update crate versions
+              run: |
+                  NEXT_VERSION="${{ steps.calc_version.outputs.NEXT_VERSION }}"
+
+                  # Update version in all crate Cargo.toml files
+                  for cargo_toml in crates/*/Cargo.toml; do
+                    if [ -f "$cargo_toml" ]; then
+                      sed -i "s/^version = \".*\"/version = \"${NEXT_VERSION}\"/" "$cargo_toml"
+                      echo "Updated version in $cargo_toml"
+                    fi
+                  done
+
+            - name: Update CHANGELOG.md
+              run: |
+                  NEXT_VERSION="${{ steps.calc_version.outputs.NEXT_VERSION }}"
+                  RELEASE_DATE=$(date +%Y-%m-%d)
+
+                  # Create or update CHANGELOG.md
+                  if [ -f CHANGELOG.md ]; then
+                    # Prepend new version section to existing changelog
+                    {
+                      echo "# Changelog"
+                      echo ""
+                      echo "All notable changes to this project will be documented in this file."
+                      echo ""
+                      echo "The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),"
+                      echo "and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)."
+                      echo ""
+                      echo "## [${NEXT_VERSION}] - ${RELEASE_DATE}"
+                      echo ""
+                      cat release_notes.md
+                      echo ""
+                      tail -n +8 CHANGELOG.md
+                    } > CHANGELOG.md.new
+                    mv CHANGELOG.md.new CHANGELOG.md
+                  else
+                    # Create new CHANGELOG.md
+                    {
+                      echo "# Changelog"
+                      echo ""
+                      echo "All notable changes to this project will be documented in this file."
+                      echo ""
+                      echo "The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),"
+                      echo "and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)."
+                      echo ""
+                      echo "## [${NEXT_VERSION}] - ${RELEASE_DATE}"
+                      echo ""
+                      cat release_notes.md
+                    } > CHANGELOG.md
+                  fi
+
+                  echo "Updated CHANGELOG.md with version ${NEXT_VERSION}"
+
+            - name: Commit changes
+              run: |
+                  NEXT_VERSION="${{ steps.calc_version.outputs.NEXT_VERSION }}"
+
+                  # Stage all changes
+                  git add Cargo.toml crates/*/Cargo.toml CHANGELOG.md
+
+                  # Check if there are changes to commit
+                  if git diff --staged --quiet; then
+                    echo "No changes to commit"
+                  else
+                    git commit -m "chore(release): prepare release v${NEXT_VERSION}"
+                    echo "Committed changes for version ${NEXT_VERSION}"
+                  fi
+
+            - name: Push release branch
+              run: |
+                  BRANCH_NAME="${{ steps.check_branch.outputs.branch_name }}"
+
+                  # Force push to ensure idempotency
+                  git push origin "${BRANCH_NAME}" --force
+
+            - name: Create or update pull request
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  NEXT_VERSION="${{ steps.calc_version.outputs.NEXT_VERSION }}"
+                  BRANCH_NAME="${{ steps.check_branch.outputs.branch_name }}"
+
+                  # Create PR body with changelog
+                  PR_BODY=$(cat <<EOF
+                  ## Release v${NEXT_VERSION}
+
+                  This PR was automatically generated to prepare for the v${NEXT_VERSION} release.
+
+                  ### Changes
+
+                  ${{ steps.changelog.outputs.changelog }}
+
+                  ### Release Process
+
+                  1. Review the version bump and changelog
+                  2. To suggest a different version bump, comment: \`/version <bump-type>\` where bump-type is \`minor\` or \`major\`
+                  3. Once approved, merge this PR to trigger the release workflow
+                  4. The release workflow will create a Git tag, GitHub release, and publish artifacts
+
+                  ### Modified Files
+
+                  - \`Cargo.toml\` - Updated workspace version
+                  - \`crates/*/Cargo.toml\` - Updated all crate versions
+                  - \`CHANGELOG.md\` - Added changelog for this version
+                  EOF
+                  )
+
+                  # Check if PR already exists
+                  EXISTING_PR=$(gh pr list --head "${BRANCH_NAME}" --json number --jq '.[0].number // empty')
+
+                  if [ -n "$EXISTING_PR" ]; then
+                    echo "Updating existing PR #${EXISTING_PR}"
+                    gh pr edit "$EXISTING_PR" \
+                      --title "Release v${NEXT_VERSION}" \
+                      --body "$PR_BODY"
+                    echo "Updated PR #${EXISTING_PR}"
+                  else
+                    echo "Creating new PR for branch ${BRANCH_NAME}"
+                    gh pr create \
+                      --title "Release v${NEXT_VERSION}" \
+                      --body "$PR_BODY" \
+                      --base master \
+                      --head "${BRANCH_NAME}" \
+                      --label "release"
+                    echo "Created new release PR"
+                  fi
+
+            - name: Summary
+              run: |
+                  NEXT_VERSION="${{ steps.calc_version.outputs.NEXT_VERSION }}"
+                  echo "✅ Release PR workflow completed"
+                  echo "   Version: ${NEXT_VERSION}"
+                  echo "   Branch: ${{ steps.check_branch.outputs.branch_name }}"
+                  echo "   Changelog: ${{ steps.changelog.outputs.has_content == 'true' && 'Generated' || 'Empty' }}"
