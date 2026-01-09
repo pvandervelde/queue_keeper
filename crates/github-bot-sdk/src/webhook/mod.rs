@@ -31,9 +31,11 @@
 //! # }
 //! ```
 
+pub mod handler;
 pub mod validation;
 
 // Re-export main types
+pub use handler::WebhookHandler;
 pub use validation::SignatureValidator;
 
 #[cfg(test)]
