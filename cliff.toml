@@ -56,10 +56,6 @@ commit_parsers = [
     { message = "^style", group = "Styling" },
     { body = ".*security", group = "Security" },
 ]
-# Protect breaking changes from being skipped by commit parsers
-protect_breaking_commits = true
-# Filter commits by regex (skip commits matching these patterns)
-filter_commits = true
 commit_preprocessors = []
 # Regex for matching git tags
 tag_pattern = "v?[0-9].*"
