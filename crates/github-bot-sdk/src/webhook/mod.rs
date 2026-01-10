@@ -77,8 +77,8 @@
 //!     ("x-github-delivery".to_string(), "12345-67890".to_string()),
 //!     ("x-hub-signature-256".to_string(), "sha256=abc...".to_string()),
 //! ]);
-//! let body = b"{\"action\":\"opened\",\"number\":1}".to_vec();
-//! let request = WebhookRequest::new(headers, body.into());
+//! let body = bytes::Bytes::from_static(b"{\"action\":\"opened\",\"number\":1}");
+//! let request = WebhookRequest::new(headers, body);
 //!
 //! let response = receiver.receive_webhook(request).await;
 //! println!("Response status: {}", response.status_code());
