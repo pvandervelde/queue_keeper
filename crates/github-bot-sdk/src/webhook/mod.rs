@@ -32,10 +32,12 @@
 //! ```
 
 pub mod handler;
+pub mod receiver;
 pub mod validation;
 
 // Re-export main types
 pub use handler::WebhookHandler;
+pub use receiver::{WebhookReceiver, WebhookRequest, WebhookResponse};
 pub use validation::SignatureValidator;
 
 #[cfg(test)]
