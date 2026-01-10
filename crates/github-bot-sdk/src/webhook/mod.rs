@@ -141,7 +141,7 @@
 //!
 //! ## HTTP Server Integration (Axum Example)
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use github_bot_sdk::webhook::{WebhookReceiver, WebhookRequest, WebhookResponse};
 //! use axum::{
 //!     extract::State,

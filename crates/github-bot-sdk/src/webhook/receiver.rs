@@ -25,7 +25,7 @@
 //! use std::sync::Arc;
 //! use std::collections::HashMap;
 //!
-//! # async fn example(secret_provider: Arc<dyn SecretProvider>) -> Result<(), Box<dyn std::error::Error>> {
+//! # async fn example(secret_provider: Arc<dyn SecretProvider>) {
 //! // Create receiver with dependencies
 //! let processor = EventProcessor::new(ProcessorConfig::default());
 //! let receiver = WebhookReceiver::new(secret_provider, processor);
@@ -42,9 +42,8 @@
 //! let body = b"{\"action\":\"opened\"}".to_vec();
 //! let request = WebhookRequest::new(headers, body.into());
 //!
-//! let response = receiver.receive_webhook(request).await?;
+//! let response = receiver.receive_webhook(request).await;
 //! println!("Status: {}", response.status_code());
-//! # Ok(())
 //! # }
 //! ```
 
