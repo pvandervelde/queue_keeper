@@ -3,7 +3,7 @@
 use super::*;
 use crate::auth::{GitHubAppId, PrivateKey};
 use crate::error::SecretError;
-use crate::events::ProcessorConfig;
+use crate::events::{EventEnvelope, ProcessorConfig};
 use async_trait::async_trait;
 use chrono::Duration;
 use tokio::sync::Mutex;
@@ -76,10 +76,6 @@ impl MockHandler {
 
     async fn call_count(&self) -> usize {
         self.calls.lock().await.len()
-    }
-
-    async fn was_called_with_event_type(&self, event_type: &str) -> bool {
-        self.calls.lock().await.contains(&event_type.to_string())
     }
 }
 

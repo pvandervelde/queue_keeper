@@ -49,7 +49,7 @@
 //! ```
 
 use crate::auth::SecretProvider;
-use crate::events::{EventEnvelope, EventProcessor};
+use crate::events::EventProcessor;
 use crate::webhook::handler::WebhookHandler;
 use crate::webhook::validation::SignatureValidator;
 use bytes::Bytes;

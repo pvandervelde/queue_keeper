@@ -1,8 +1,8 @@
 //! Tests for WebhookHandler trait.
 
 use super::*;
-use crate::client::{Repository, RepositoryOwner, OwnerType};
-use crate::events::{EventId, EventMetadata, EventPayload, EventSource, EntityType};
+use crate::client::{OwnerType, Repository, RepositoryOwner};
+use crate::events::{EntityType, EventId, EventMetadata, EventPayload, EventSource};
 use chrono::Utc;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -126,7 +126,11 @@ async fn test_handler_receives_event_envelope() {
 
     // Assert
     assert!(result.is_ok(), "Handler should succeed");
-    assert_eq!(handler.call_count().await, 1, "Handler should be called once");
+    assert_eq!(
+        handler.call_count().await,
+        1,
+        "Handler should be called once"
+    );
     assert!(
         handler.was_called_with(&event_id).await,
         "Handler should be called with correct event ID"
@@ -176,7 +180,10 @@ async fn test_handler_can_access_event_metadata() {
 
     // Assert
     assert!(result.is_ok(), "Handler should succeed");
-    assert!(*verified.lock().await, "Handler should verify metadata access");
+    assert!(
+        *verified.lock().await,
+        "Handler should verify metadata access"
+    );
 }
 
 // ============================================================================
@@ -288,10 +295,10 @@ async fn test_handler_supports_concurrent_execution() {
     let mut tasks = vec![];
 
     // Act - Spawn multiple concurrent handler executions
-    for i in 0..10 {
+    for _i in 0..10 {
         let handler_clone = handler.clone();
         let envelope = create_test_envelope("pull_request");
-        
+
         tasks.push(tokio::spawn(async move {
             handler_clone.handle_event(&envelope).await
         }));
@@ -305,11 +312,7 @@ async fn test_handler_supports_concurrent_execution() {
 
     // Assert
     for (i, result) in results.iter().enumerate() {
-        assert!(
-            result.is_ok(),
-            "Task {} should complete without panic",
-            i
-        );
+        assert!(result.is_ok(), "Task {} should complete without panic", i);
         assert!(
             result.as_ref().unwrap().is_ok(),
             "Handler {} should succeed",
