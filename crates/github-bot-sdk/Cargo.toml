@@ -38,6 +38,9 @@ anyhow = { workspace = true }
 # Async traits
 async-trait = { workspace = true }
 
+# Bytes
+bytes = { workspace = true }
+
 # Base64 encoding
 base64 = "0.22"
 

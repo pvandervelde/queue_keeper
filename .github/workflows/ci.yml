@@ -100,6 +100,8 @@ jobs:
 
       - name: Generate Changelog Section
         id: generate_changelog
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           NEXT_VERSION="${{ steps.calc_version.outputs.NEXT_VERSION }}"
           # Generate notes for the upcoming version
