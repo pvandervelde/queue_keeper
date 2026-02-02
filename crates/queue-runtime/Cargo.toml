@@ -46,5 +46,5 @@ hex = { workspace = true }
 quick-xml = "0.31"
 
 [dev-dependencies]
-tempfile = "=3.23.0"
+tempfile = "=3.24.0"
 tokio-test = "=0.4.4"
