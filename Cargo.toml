@@ -84,7 +84,7 @@ aws-sdk-secretsmanager = "1.0"
 # Utilities
 uuid = { version = "1.6", features = ["v4", "serde"] }
 ulid = "1.2"
-bytes = "1.5"
+bytes = "1.11"
 url = "2.5"
 rand = "0.9"
 hex = "0.4"
