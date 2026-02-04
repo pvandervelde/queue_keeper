@@ -13,7 +13,7 @@ path = "src/lib.rs"
 [dependencies]
 # Core dependencies
 queue-keeper-core = { path = "../queue-keeper-core", version = "0.1.0" }
-queue-runtime = { path = "../queue-runtime", version = "0.1.0" }
+queue-runtime = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true }
