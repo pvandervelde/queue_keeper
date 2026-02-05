@@ -66,10 +66,12 @@ bots:
     events: [string]          # Required: GitHub event types to subscribe to
     ordered: boolean          # Required: Whether to use session-based ordering
     repository_filter:        # Optional: Filter events by repository
-      owner: string           # Repository owner (organization or user)
-      name: string            # Repository name
+      exact:                  # Use exact match for specific repository
+        owner: string         # Repository owner (organization or user)
+        name: string          # Repository name
     config:                   # Optional: Bot-specific configuration
-      key: value              # Custom key-value pairs passed to bot
+      settings:               # Required wrapper for bot configuration
+        key: value            # Custom key-value pairs passed to bot
 ```
 
 ### Required Fields
@@ -78,13 +80,16 @@ bots:
 
 - Unique identifier for the bot
 - Used in logging, metrics, and debugging
-- Must be 1-50 characters
-- Allowed characters: letters, numbers, hyphens, underscores
+- Must be 1-64 characters
+- Allowed characters: letters, numbers, hyphens
+- Must not start or end with hyphen
+- Must not contain consecutive hyphens (`--`)
 - Example: `"task-tactician"`, `"merge-warden"`
 
 #### `queue` (string)
 
 - Target Azure Service Bus queue name where events will be sent
+- Must start with `queue-keeper-` prefix
 - Must follow Azure Service Bus naming conventions:
   - 1-260 characters
   - Only letters, numbers, periods (.), hyphens (-), underscores (_)
@@ -114,7 +119,7 @@ Filter events to only specific repositories. Supports multiple filter types:
 
 ```yaml
 repository_filter:
-  Exact:
+  exact:
     owner: "myorg"
     name: "myrepo"
 ```
@@ -123,14 +128,14 @@ repository_filter:
 
 ```yaml
 repository_filter:
-  AnyOf:
-    - Exact:
+  any_of:
+    - exact:
         owner: "myorg"
         name: "repo1"
-    - Exact:
+    - exact:
         owner: "myorg"
         name: "repo2"
-    - Exact:
+    - exact:
         owner: "anotherorg"
         name: "repo3"
 ```
@@ -139,23 +144,23 @@ repository_filter:
 
 ```yaml
 repository_filter:
-  Owner: "myorg"
+  owner: "myorg"
 ```
 
 **Pattern Matching:**
 
 ```yaml
 repository_filter:
-  NamePattern: "^prod-.*"  # Regex: repositories starting with "prod-"
+  name_pattern: "^prod-.*"  # Regex: repositories starting with "prod-"
 ```
 
 **Complex Filters (AND logic):**
 
 ```yaml
 repository_filter:
-  AllOf:
-    - Owner: "myorg"
-    - NamePattern: ".*-service$"  # Repos ending with "-service"
+  all_of:
+    - owner: "myorg"
+    - name_pattern: ".*-service$"  # Repos ending with "-service"
 ```
 
 When specified, only events from matching repositories will be routed to this bot.
@@ -166,9 +171,10 @@ Bot-specific configuration passed along with each event:
 
 ```yaml
 config:
-  priority: "high"
-  timeout_seconds: 300
-  custom_setting: "value"
+  settings:
+    priority: "high"
+    timeout_seconds: 300
+    custom_setting: "value"
 ```
 
 These key-value pairs are included in the event envelope and available to the bot for custom behavior.
@@ -203,6 +209,16 @@ events:
 ```
 
 Matches any of the specified patterns.
+
+### Exclusion Pattern
+
+```yaml
+events:
+  - "issues.*"           # All issue events
+  - "!issues.deleted"    # Except deletions
+```
+
+Excludes specific event types by prefixing with `!`. Useful for subscribing to broad patterns while excluding specific events. Exclusions are processed after inclusions.
 
 ### All Events
 
@@ -263,9 +279,11 @@ See [GitHub Webhook Events](https://docs.github.com/en/webhooks/webhook-events-a
 When `ordered: true`:
 
 1. **Session ID Generation**: Queue-Keeper generates a session ID based on the entity:
-   - For issues: `{owner}/{repo}/issues/{issue_number}`
+   - For issues: `{owner}/{repo}/issue/{issue_number}`
    - For PRs: `{owner}/{repo}/pull_request/{pr_number}`
-   - For repository events: `{owner}/{repo}/repository`
+   - For repository events: `{owner}/{repo}/repository/repository`
+   - For branch events: `{owner}/{repo}/branch/{branch_name}`
+   - For release events: `{owner}/{repo}/release/{tag}`
 
 2. **Session-Based Delivery**: Events with the same session ID are delivered in order
 3. **Concurrent Processing**: Different sessions can be processed in parallel
@@ -279,9 +297,6 @@ bots:
     queue: "queue-keeper-state-tracker"
     events: ["issues.*", "pull_request.*"]
     ordered: true
-    config:
-      max_concurrent_sessions: 50  # Process up to 50 entities concurrently
-      session_timeout_seconds: 3600  # 1 hour session timeout
 
   - name: "notification-bot"
     queue: "queue-keeper-notifications"
@@ -303,6 +318,7 @@ Queue-Keeper validates configuration at startup and fails fast if errors are det
 
 **Queue Names:**
 
+- Must start with `queue-keeper-` prefix
 - Must follow Azure Service Bus naming rules
 - 1-260 characters
 - Valid characters: letters, numbers, `.`, `-`, `_`
@@ -310,14 +326,14 @@ Queue-Keeper validates configuration at startup and fails fast if errors are det
 
 **Event Patterns:**
 
-- Must match valid GitHub webhook event types
+- Should match GitHub webhook event types (not enforced at startup)
 - Wildcards allowed with `*`
 - At least one event pattern per bot
 
 **Ordering Consistency:**
 
 - Bots with `ordered: true` must have valid session configuration
-- Repository filters must specify both owner and name
+- Repository filters with `exact` variant must specify both owner and name
 
 ### Validation Errors
 
@@ -371,7 +387,7 @@ bots:
     events: ["push"]
     ordered: true
     repository_filter:
-      Exact:
+      exact:
         owner: "myorg"
         name: "production-app"
 ```
@@ -385,14 +401,14 @@ bots:
     events: ["pull_request.*", "push"]
     ordered: true
     repository_filter:
-      AnyOf:
-        - Exact:
+      any_of:
+        - exact:
             owner: "myorg"
             name: "production-app"
-        - Exact:
+        - exact:
             owner: "myorg"
             name: "customer-api"
-        - Exact:
+        - exact:
             owner: "myorg"
             name: "payment-service"
 ```
@@ -406,7 +422,7 @@ bots:
     events: ["issues.*"]
     ordered: false
     repository_filter:
-      Owner: "myorg"  # All repos owned by "myorg"
+      owner: "myorg"  # All repos owned by "myorg"
 ```
 
 **Pattern-Based Filtering:**
@@ -418,9 +434,9 @@ bots:
     events: ["deployment.*"]
     ordered: true
     repository_filter:
-      AllOf:
-        - Owner: "myorg"
-        - NamePattern: ".*-service$"  # Only repos ending with "-service"
+      all_of:
+        - owner: "myorg"
+        - name_pattern: ".*-service$"  # Only repos ending with "-service"
 ```
 
 **No Filter (All Repositories):**
@@ -445,14 +461,15 @@ bots:
     events: ["issues.*"]
     ordered: true
     config:
-      priority: "high"
-      retry_limit: 5
-      timeout_ms: 30000
-      labels_to_watch: ["bug", "critical"]
-      assignee_required: true
+      settings:
+        priority: "high"
+        retry_limit: 5
+        timeout_ms: 30000
+        labels_to_watch: ["bug", "critical"]
+        assignee_required: true
 ```
 
-The `config` object is included in the event envelope payload sent to the bot's queue.
+The `config.settings` object is included in the event envelope payload sent to the bot's queue.
 
 ## Environment Variables
 
@@ -464,6 +481,31 @@ The `config` object is included in the event envelope payload sent to the bot's 
 | `BOT_CONFIGURATION` | JSON configuration string | `'{"bots": [...]}` |
 
 If both are set, `BOT_CONFIG_PATH` takes precedence.
+
+### Global Settings
+
+Queue-Keeper supports top-level configuration settings that control global behavior:
+
+```yaml
+settings:
+  max_bots: 50                    # Maximum concurrent bot subscriptions
+  default_message_ttl: 86400      # Default message TTL in seconds (24 hours)
+  validate_on_startup: true       # Validate configuration at startup
+  log_configuration: true         # Log configuration details on startup
+
+bots:
+  - name: "my-bot"
+    # ... bot configuration
+```
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `max_bots` | 50 | Maximum number of bot subscriptions allowed |
+| `default_message_ttl` | 86400 | Default time-to-live for queue messages in seconds |
+| `validate_on_startup` | true | Whether to validate configuration at startup |
+| `log_configuration` | true | Whether to log configuration details at startup |
+
+All settings are optional and use the default values shown if not specified.
 
 ### Service Configuration
 
@@ -560,7 +602,7 @@ az containerapp create \
 Since configuration is immutable at runtime:
 
 1. **Update Configuration File**: Edit your `bot-config.yaml`
-2. **Validate Changes**: Test with `--dry-run` flag (if available)
+2. **Validate Changes**: Review validation errors from startup logs
 3. **Update ConfigMap**: `kubectl apply -f configmap.yaml`
 4. **Restart Service**: Rolling restart to load new configuration
 5. **Verify**: Check logs for successful configuration load
@@ -670,19 +712,20 @@ bots:
       - "pull_request.review_requested"
     ordered: true
     repository_filter:
-      AnyOf:
-        - Exact:
+      any_of:
+        - exact:
             owner: "myorg"
             name: "backend-api"
-        - Exact:
+        - exact:
             owner: "myorg"
             name: "frontend-app"
-        - Exact:
+        - exact:
             owner: "myorg"
             name: "mobile-app"
     config:
-      auto_assign_reviewers: true
-      require_tests: true
+      settings:
+        auto_assign_reviewers: true
+        require_tests: true
 ```
 
 ### Complete Production Configuration
@@ -703,9 +746,8 @@ bots:
       - "issues.assigned"
     ordered: true
     config:
-      max_concurrent_sessions: 100
-      session_timeout_seconds: 3600
-      priority: "high"
+      settings:
+        priority: "high"
 
   # PR management bot - handles merge workflows
   - name: "merge-warden"
@@ -716,9 +758,6 @@ bots:
       - "pull_request.closed"
       - "pull_request.review_requested"
     ordered: true
-    config:
-      max_concurrent_sessions: 200
-      session_timeout_seconds: 7200
 
   # Specification validator - checks PR changes
   - name: "spec-sentinel"
@@ -739,11 +778,13 @@ bots:
       - "deployment_status.created"
     ordered: true
     repository_filter:
-      owner: "myorg"
-      name: "production-app"
+      exact:
+        owner: "myorg"
+        name: "production-app"
     config:
-      priority: "critical"
-      alert_on_failure: true
+      settings:
+        priority: "critical"
+        alert_on_failure: true
 
   # General notification bot - all events, no ordering
   - name: "notification-hub"
@@ -751,8 +792,9 @@ bots:
     events: ["*"]
     ordered: false
     config:
-      channels: ["slack", "email"]
-      priority: "low"
+      settings:
+        channels: ["slack", "email"]
+        priority: "low"
 ```
 
 ## Additional Resources
