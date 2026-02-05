@@ -1,0 +1,772 @@
+# Queue-Keeper Configuration Guide
+
+## Overview
+
+Queue-Keeper uses static YAML configuration files to define bot subscriptions and event routing rules. Configuration is loaded at startup and remains immutable at runtime, requiring a container restart for any changes. This approach ensures configuration consistency and simplifies deployment.
+
+## Quick Start
+
+### Minimal Configuration Example
+
+Create a `bot-config.yaml` file:
+
+```yaml
+bots:
+  - name: "task-tactician"
+    queue: "queue-keeper-task-tactician"
+    events: ["issues.opened", "issues.closed", "issues.labeled"]
+    ordered: true
+
+  - name: "merge-warden"
+    queue: "queue-keeper-merge-warden"
+    events: ["pull_request.opened", "pull_request.synchronize"]
+    ordered: true
+
+  - name: "notification-bot"
+    queue: "queue-keeper-notifications"
+    events: ["*"]  # All events
+    ordered: false
+```
+
+### Loading Configuration
+
+**From File:**
+
+```bash
+export BOT_CONFIG_PATH=/path/to/bot-config.yaml
+cargo run --package queue-keeper-service
+```
+
+**From Environment Variable:**
+
+```bash
+export BOT_CONFIGURATION='{"bots": [{"name": "my-bot", "queue": "my-queue", "events": ["issues.*"], "ordered": true}]}'
+cargo run --package queue-keeper-service
+```
+
+**In Container:**
+
+```bash
+docker run -p 8080:8080 \
+  -v $(pwd)/bot-config.yaml:/config/bot-config.yaml:ro \
+  -e BOT_CONFIG_PATH=/config/bot-config.yaml \
+  ghcr.io/pvandervelde/queue-keeper:latest
+```
+
+## Configuration Schema
+
+### Bot Subscription Structure
+
+Each bot subscription defines how events should be routed to a specific downstream service.
+
+```yaml
+bots:
+  - name: string              # Required: Unique bot identifier
+    queue: string             # Required: Target Azure Service Bus queue name
+    events: [string]          # Required: GitHub event types to subscribe to
+    ordered: boolean          # Required: Whether to use session-based ordering
+    repository_filter:        # Optional: Filter events by repository
+      owner: string           # Repository owner (organization or user)
+      name: string            # Repository name
+    config:                   # Optional: Bot-specific configuration
+      key: value              # Custom key-value pairs passed to bot
+```
+
+### Required Fields
+
+#### `name` (string)
+
+- Unique identifier for the bot
+- Used in logging, metrics, and debugging
+- Must be 1-50 characters
+- Allowed characters: letters, numbers, hyphens, underscores
+- Example: `"task-tactician"`, `"merge-warden"`
+
+#### `queue` (string)
+
+- Target Azure Service Bus queue name where events will be sent
+- Must follow Azure Service Bus naming conventions:
+  - 1-260 characters
+  - Only letters, numbers, periods (.), hyphens (-), underscores (_)
+  - Must begin and end with letter or number
+- Example: `"queue-keeper-task-tactician"`
+
+#### `events` (array of strings)
+
+- List of GitHub event types this bot subscribes to
+- Supports multiple pattern formats (see Event Pattern Syntax below)
+- At least one event pattern required
+- Example: `["issues.opened", "issues.closed"]`
+
+#### `ordered` (boolean)
+
+- `true`: Events delivered with session-based ordering (FIFO)
+- `false`: Events delivered in parallel without ordering guarantees
+- See Ordering and Sessions section for details
+
+### Optional Fields
+
+#### `repository_filter` (object)
+
+Filter events to only specific repositories. Supports multiple filter types:
+
+**Single Repository:**
+
+```yaml
+repository_filter:
+  Exact:
+    owner: "myorg"
+    name: "myrepo"
+```
+
+**Multiple Repositories (OR logic):**
+
+```yaml
+repository_filter:
+  AnyOf:
+    - Exact:
+        owner: "myorg"
+        name: "repo1"
+    - Exact:
+        owner: "myorg"
+        name: "repo2"
+    - Exact:
+        owner: "anotherorg"
+        name: "repo3"
+```
+
+**All Repositories from Organization:**
+
+```yaml
+repository_filter:
+  Owner: "myorg"
+```
+
+**Pattern Matching:**
+
+```yaml
+repository_filter:
+  NamePattern: "^prod-.*"  # Regex: repositories starting with "prod-"
+```
+
+**Complex Filters (AND logic):**
+
+```yaml
+repository_filter:
+  AllOf:
+    - Owner: "myorg"
+    - NamePattern: ".*-service$"  # Repos ending with "-service"
+```
+
+When specified, only events from matching repositories will be routed to this bot.
+
+#### `config` (object)
+
+Bot-specific configuration passed along with each event:
+
+```yaml
+config:
+  priority: "high"
+  timeout_seconds: 300
+  custom_setting: "value"
+```
+
+These key-value pairs are included in the event envelope and available to the bot for custom behavior.
+
+## Event Pattern Syntax
+
+Queue-Keeper supports flexible event matching patterns:
+
+### Exact Match
+
+```yaml
+events: ["issues.opened"]
+```
+
+Matches only `issues.opened` events.
+
+### Wildcard Match
+
+```yaml
+events: ["issues.*"]
+```
+
+Matches all issue-related events: `issues.opened`, `issues.closed`, `issues.labeled`, etc.
+
+### Multiple Patterns
+
+```yaml
+events:
+  - "issues.opened"
+  - "issues.closed"
+  - "pull_request.*"
+```
+
+Matches any of the specified patterns.
+
+### All Events
+
+```yaml
+events: ["*"]
+```
+
+Matches all GitHub webhook events. Use cautiously as this includes high-volume events.
+
+### Event Type Reference
+
+Common GitHub webhook event types:
+
+**Issues:**
+
+- `issues.opened`, `issues.closed`, `issues.reopened`
+- `issues.labeled`, `issues.unlabeled`
+- `issues.assigned`, `issues.unassigned`
+- `issues.edited`, `issues.deleted`
+
+**Pull Requests:**
+
+- `pull_request.opened`, `pull_request.closed`, `pull_request.reopened`
+- `pull_request.synchronize` (new commits pushed)
+- `pull_request.labeled`, `pull_request.unlabeled`
+- `pull_request.assigned`, `pull_request.review_requested`
+- `pull_request.edited`
+
+**Other Common Events:**
+
+- `push` (commits pushed to branch)
+- `release.published`, `release.created`
+- `workflow_run.completed`
+- `deployment.created`, `deployment_status.created`
+
+See [GitHub Webhook Events](https://docs.github.com/en/webhooks/webhook-events-and-payloads) for complete list.
+
+## Ordering and Sessions
+
+### When to Use Ordering
+
+**Use `ordered: true` when:**
+
+- Bot maintains state for entities (issues, PRs)
+- Processing order affects correctness
+- Events must be processed sequentially per entity
+- Example: Task management bot tracking issue lifecycle
+
+**Use `ordered: false` when:**
+
+- Bot is stateless (notifications, logging)
+- Events can be processed independently
+- Maximum throughput is priority
+- Example: Notification bot, metrics collector
+
+### How Ordering Works
+
+When `ordered: true`:
+
+1. **Session ID Generation**: Queue-Keeper generates a session ID based on the entity:
+   - For issues: `{owner}/{repo}/issues/{issue_number}`
+   - For PRs: `{owner}/{repo}/pull_request/{pr_number}`
+   - For repository events: `{owner}/{repo}/repository`
+
+2. **Session-Based Delivery**: Events with the same session ID are delivered in order
+3. **Concurrent Processing**: Different sessions can be processed in parallel
+4. **Maximum Sessions**: Configure `max_concurrent_sessions` to control concurrency
+
+### Ordering Configuration Example
+
+```yaml
+bots:
+  - name: "state-tracking-bot"
+    queue: "queue-keeper-state-tracker"
+    events: ["issues.*", "pull_request.*"]
+    ordered: true
+    config:
+      max_concurrent_sessions: 50  # Process up to 50 entities concurrently
+      session_timeout_seconds: 3600  # 1 hour session timeout
+
+  - name: "notification-bot"
+    queue: "queue-keeper-notifications"
+    events: ["*"]
+    ordered: false  # No ordering needed, maximize throughput
+```
+
+## Validation
+
+Queue-Keeper validates configuration at startup and fails fast if errors are detected.
+
+### Validation Rules
+
+**Bot Names:**
+
+- Must be unique across all bots
+- 1-50 characters
+- Only letters, numbers, hyphens, underscores
+
+**Queue Names:**
+
+- Must follow Azure Service Bus naming rules
+- 1-260 characters
+- Valid characters: letters, numbers, `.`, `-`, `_`
+- Must start and end with letter or number
+
+**Event Patterns:**
+
+- Must match valid GitHub webhook event types
+- Wildcards allowed with `*`
+- At least one event pattern per bot
+
+**Ordering Consistency:**
+
+- Bots with `ordered: true` must have valid session configuration
+- Repository filters must specify both owner and name
+
+### Validation Errors
+
+Example validation error output:
+
+```
+Configuration validation failed:
+  - Bot "task-tactician": Invalid queue name "invalid/queue" (contains invalid character '/')
+  - Bot "merge-warden": Duplicate bot name
+  - Bot "notification-bot": Invalid event pattern "invalid_event" (unknown event type)
+```
+
+Fix errors and restart the service to apply corrected configuration.
+
+## Advanced Configuration
+
+### Multiple Bots for Same Events
+
+Multiple bots can subscribe to the same events (fan-out pattern):
+
+```yaml
+bots:
+  - name: "task-manager"
+    queue: "queue-keeper-task-manager"
+    events: ["issues.opened"]
+    ordered: true
+
+  - name: "notifier"
+    queue: "queue-keeper-notifications"
+    events: ["issues.opened"]
+    ordered: false
+
+  - name: "metrics"
+    queue: "queue-keeper-metrics"
+    events: ["issues.opened"]
+    ordered: false
+```
+
+When an `issues.opened` event arrives, Queue-Keeper delivers it to all three queues.
+
+### Repository-Specific Bots
+
+Route events from specific repositories to dedicated bots:
+
+**Single Repository:**
+
+```yaml
+bots:
+  - name: "production-watcher"
+    queue: "queue-keeper-prod-watcher"
+    events: ["push"]
+    ordered: true
+    repository_filter:
+      Exact:
+        owner: "myorg"
+        name: "production-app"
+```
+
+**Multiple Repositories:**
+
+```yaml
+bots:
+  - name: "critical-repos-monitor"
+    queue: "queue-keeper-critical-monitor"
+    events: ["pull_request.*", "push"]
+    ordered: true
+    repository_filter:
+      AnyOf:
+        - Exact:
+            owner: "myorg"
+            name: "production-app"
+        - Exact:
+            owner: "myorg"
+            name: "customer-api"
+        - Exact:
+            owner: "myorg"
+            name: "payment-service"
+```
+
+**All Repositories from Organization:**
+
+```yaml
+bots:
+  - name: "org-wide-monitor"
+    queue: "queue-keeper-org-monitor"
+    events: ["issues.*"]
+    ordered: false
+    repository_filter:
+      Owner: "myorg"  # All repos owned by "myorg"
+```
+
+**Pattern-Based Filtering:**
+
+```yaml
+bots:
+  - name: "service-repos-monitor"
+    queue: "queue-keeper-services"
+    events: ["deployment.*"]
+    ordered: true
+    repository_filter:
+      AllOf:
+        - Owner: "myorg"
+        - NamePattern: ".*-service$"  # Only repos ending with "-service"
+```
+
+**No Filter (All Repositories):**
+
+```yaml
+bots:
+  - name: "general-monitor"
+    queue: "queue-keeper-monitor"
+    events: ["push"]
+    ordered: false
+    # No repository_filter - receives push events from all repositories
+```
+
+### Bot-Specific Configuration
+
+Pass custom configuration to bots:
+
+```yaml
+bots:
+  - name: "custom-bot"
+    queue: "queue-keeper-custom"
+    events: ["issues.*"]
+    ordered: true
+    config:
+      priority: "high"
+      retry_limit: 5
+      timeout_ms: 30000
+      labels_to_watch: ["bug", "critical"]
+      assignee_required: true
+```
+
+The `config` object is included in the event envelope payload sent to the bot's queue.
+
+## Environment Variables
+
+### Configuration Loading
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `BOT_CONFIG_PATH` | Path to YAML configuration file | `/config/bot-config.yaml` |
+| `BOT_CONFIGURATION` | JSON configuration string | `'{"bots": [...]}` |
+
+If both are set, `BOT_CONFIG_PATH` takes precedence.
+
+### Service Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `QUEUE_KEEPER_LOG_LEVEL` | `info` | Log level (trace, debug, info, warn, error) |
+| `QUEUE_KEEPER_PORT` | `8080` | HTTP server port |
+| `QUEUE_KEEPER_HOST` | `0.0.0.0` | HTTP server bind address |
+
+### Azure Integration
+
+| Variable | Description |
+|----------|-------------|
+| `AZURE_SERVICE_BUS_NAMESPACE` | Azure Service Bus namespace |
+| `AZURE_CLIENT_ID` | Managed Identity client ID |
+| `AZURE_TENANT_ID` | Azure AD tenant ID |
+| `GITHUB_WEBHOOK_SECRET` | GitHub webhook HMAC secret |
+
+In production, secrets should be retrieved from Azure Key Vault automatically via Managed Identity.
+
+## Container Deployment
+
+### Kubernetes ConfigMap
+
+Define configuration as a ConfigMap:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: queue-keeper-config
+  namespace: automation
+data:
+  bot-config.yaml: |
+    bots:
+      - name: "task-tactician"
+        queue: "queue-keeper-task-tactician"
+        events: ["issues.*"]
+        ordered: true
+      - name: "merge-warden"
+        queue: "queue-keeper-merge-warden"
+        events: ["pull_request.*"]
+        ordered: true
+```
+
+Mount in deployment:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: queue-keeper
+spec:
+  template:
+    spec:
+      containers:
+      - name: queue-keeper
+        image: ghcr.io/pvandervelde/queue-keeper:latest
+        env:
+        - name: BOT_CONFIG_PATH
+          value: /config/bot-config.yaml
+        volumeMounts:
+        - name: config
+          mountPath: /config
+          readOnly: true
+      volumes:
+      - name: config
+        configMap:
+          name: queue-keeper-config
+```
+
+### Azure Container Apps
+
+Use Azure Container Apps environment variables and file mounts:
+
+```bash
+az containerapp create \
+  --name queue-keeper \
+  --resource-group mygroup \
+  --environment myenv \
+  --image ghcr.io/pvandervelde/queue-keeper:latest \
+  --target-port 8080 \
+  --env-vars \
+    BOT_CONFIG_PATH=/config/bot-config.yaml \
+    QUEUE_KEEPER_LOG_LEVEL=info \
+  --cpu 0.5 \
+  --memory 1Gi
+```
+
+## Configuration Updates
+
+### Update Process
+
+Since configuration is immutable at runtime:
+
+1. **Update Configuration File**: Edit your `bot-config.yaml`
+2. **Validate Changes**: Test with `--dry-run` flag (if available)
+3. **Update ConfigMap**: `kubectl apply -f configmap.yaml`
+4. **Restart Service**: Rolling restart to load new configuration
+5. **Verify**: Check logs for successful configuration load
+
+### Zero-Downtime Updates
+
+For production systems:
+
+1. **Blue-Green Deployment**: Deploy new version with updated config
+2. **Canary Testing**: Route small percentage of traffic to new config
+3. **Health Checks**: Verify new configuration validates successfully
+4. **Gradual Rollout**: Shift traffic to new version
+5. **Rollback**: Keep previous version available for quick rollback
+
+## Troubleshooting
+
+### Configuration Not Loading
+
+**Check file path:**
+
+```bash
+docker exec queue-keeper ls -la /config/bot-config.yaml
+```
+
+**Check environment variable:**
+
+```bash
+docker exec queue-keeper env | grep BOT_CONFIG
+```
+
+**Check logs:**
+
+```bash
+docker logs queue-keeper 2>&1 | grep -i config
+```
+
+### Validation Failures
+
+**Common errors:**
+
+1. **Duplicate bot names**: Ensure all bot names are unique
+2. **Invalid queue names**: Check Azure Service Bus naming rules
+3. **Unknown event types**: Verify against GitHub webhook documentation
+4. **Malformed YAML**: Use YAML validator (yamllint)
+
+**Validate YAML syntax:**
+
+```bash
+yamllint bot-config.yaml
+```
+
+### Events Not Routing
+
+**Check configuration:**
+
+- Verify event patterns match incoming webhook event types
+- Check repository filters aren't excluding events
+- Confirm queue names match actual Service Bus queues
+
+**Check logs:**
+
+```bash
+# Look for routing decisions
+docker logs queue-keeper 2>&1 | grep -i routing
+
+# Check for delivery errors
+docker logs queue-keeper 2>&1 | grep -i "delivery failed"
+```
+
+## Best Practices
+
+### Configuration Management
+
+1. **Version Control**: Store configuration in Git
+2. **Environment Separation**: Separate configs for dev/staging/prod
+3. **Secret Management**: Never store secrets in configuration files
+4. **Validation**: Always validate before deploying
+5. **Documentation**: Comment complex routing rules
+
+### Event Subscription Design
+
+1. **Be Specific**: Subscribe to specific events, not wildcards, when possible
+2. **Use Filtering**: Apply repository filters to reduce noise
+3. **Order When Needed**: Only use `ordered: true` when necessary
+4. **Monitor Volume**: Track event volume per bot for capacity planning
+
+### Performance Tuning
+
+1. **Concurrent Sessions**: Tune `max_concurrent_sessions` for ordered bots
+2. **Unordered for High Volume**: Use `ordered: false` for metrics/logging
+3. **Repository Filters**: Reduce processing overhead with specific filters
+4. **Multiple Instances**: Scale horizontally for high webhook volumes
+
+## Examples
+
+### Pull Requests for Multiple Repositories
+
+Monitor pull request events for a specific set of repositories:
+
+```yaml
+bots:
+  - name: "pr-reviewer-bot"
+    queue: "queue-keeper-pr-reviewer"
+    events:
+      - "pull_request.opened"
+      - "pull_request.synchronize"
+      - "pull_request.review_requested"
+    ordered: true
+    repository_filter:
+      AnyOf:
+        - Exact:
+            owner: "myorg"
+            name: "backend-api"
+        - Exact:
+            owner: "myorg"
+            name: "frontend-app"
+        - Exact:
+            owner: "myorg"
+            name: "mobile-app"
+    config:
+      auto_assign_reviewers: true
+      require_tests: true
+```
+
+### Complete Production Configuration
+
+```yaml
+# Production bot configuration
+# Version: 1.0
+# Last updated: 2026-02-05
+
+bots:
+  # Task management bot - tracks issue lifecycle
+  - name: "task-tactician"
+    queue: "queue-keeper-task-tactician"
+    events:
+      - "issues.opened"
+      - "issues.closed"
+      - "issues.labeled"
+      - "issues.assigned"
+    ordered: true
+    config:
+      max_concurrent_sessions: 100
+      session_timeout_seconds: 3600
+      priority: "high"
+
+  # PR management bot - handles merge workflows
+  - name: "merge-warden"
+    queue: "queue-keeper-merge-warden"
+    events:
+      - "pull_request.opened"
+      - "pull_request.synchronize"
+      - "pull_request.closed"
+      - "pull_request.review_requested"
+    ordered: true
+    config:
+      max_concurrent_sessions: 200
+      session_timeout_seconds: 7200
+
+  # Specification validator - checks PR changes
+  - name: "spec-sentinel"
+    queue: "queue-keeper-spec-sentinel"
+    events:
+      - "pull_request.opened"
+      - "pull_request.synchronize"
+    ordered: false
+    config:
+      validate_on_push: true
+
+  # Production deployment monitor - critical repositories only
+  - name: "prod-deploy-monitor"
+    queue: "queue-keeper-prod-monitor"
+    events:
+      - "push"
+      - "deployment.created"
+      - "deployment_status.created"
+    ordered: true
+    repository_filter:
+      owner: "myorg"
+      name: "production-app"
+    config:
+      priority: "critical"
+      alert_on_failure: true
+
+  # General notification bot - all events, no ordering
+  - name: "notification-hub"
+    queue: "queue-keeper-notifications"
+    events: ["*"]
+    ordered: false
+    config:
+      channels: ["slack", "email"]
+      priority: "low"
+```
+
+## Additional Resources
+
+- [Architecture Documentation](../specs/README.md) - System design and architecture
+- [Container Usage Guide](./container-usage.md) - Container deployment details
+- [API Documentation](https://docs.rs/queue-keeper-core) - Rustdoc API reference
+- [GitHub Webhooks](https://docs.github.com/en/webhooks) - GitHub webhook documentation
+- [Azure Service Bus](https://learn.microsoft.com/azure/service-bus-messaging/) - Queue provider documentation
+
+## Support
+
+For issues or questions:
+
+- Open an issue: [GitHub Issues](https://github.com/pvandervelde/queue_keeper/issues)
+- Review specifications: `specs/` directory
+- Check examples: `examples/` directory (if available)
