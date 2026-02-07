@@ -15,6 +15,32 @@ Queue-Keeper is a Rust-based webhook intake and routing service that serves as t
 - **Reliability** - Implement retries, dead letter queues, and replay mechanisms
 - **Observability** - Comprehensive logging, metrics, and distributed tracing
 
+## Configuration
+
+Queue-Keeper uses YAML configuration files to define bot subscriptions and event routing rules. Each bot specifies which GitHub events it wants to receive and whether ordered delivery is required.
+
+### Quick Configuration Example
+
+```yaml
+bots:
+  - name: "task-tactician"
+    queue: "queue-keeper-task-tactician"
+    events: ["issues.opened", "issues.closed", "issues.labeled"]
+    ordered: true
+    
+  - name: "merge-warden"
+    queue: "queue-keeper-merge-warden"
+    events: ["pull_request.*"]
+    ordered: true
+```
+
+See **[Configuration Guide](docs/configuration.md)** for complete documentation including:
+- Event pattern syntax and examples
+- Ordering vs. unordered delivery
+- Repository filtering
+- Bot-specific configuration
+- Kubernetes and Azure deployment
+
 ## Quick Start
 
 ### Using Docker
@@ -23,9 +49,10 @@ Queue-Keeper is a Rust-based webhook intake and routing service that serves as t
 # Pull the latest image
 docker pull ghcr.io/pvandervelde/queue-keeper:latest
 
-# Run the container
+# Run the container with configuration
 docker run -p 8080:8080 \
-  -e QUEUE_KEEPER_PORT=8080 \
+  -v $(pwd)/bot-config.yaml:/config/bot-config.yaml:ro \
+  -e BOT_CONFIG_PATH=/config/bot-config.yaml \
   -e GITHUB_WEBHOOK_SECRET=your-secret \
   ghcr.io/pvandervelde/queue-keeper:latest
 ```
@@ -57,18 +84,27 @@ queue-runtime = "0.1.0"
 
 ## Documentation
 
+- **[Configuration Guide](docs/configuration.md)** - Bot subscriptions, event routing, and deployment
+- **[Container Usage](docs/container-usage.md)** - Building, running, and testing containers
 - **[Contributing Guide](CONTRIBUTING.md)** - Development setup, commit conventions, and release process
 - **[Architecture](specs/README.md)** - System design and component interactions
 - **[API Documentation](https://docs.rs/queue-keeper-core)** - Rustdoc for all public APIs
 
 ## Project Structure
 
+This repository contains the Queue-Keeper service and supporting crates:
+
 - `queue-keeper-core` - Core domain logic and traits
 - `queue-keeper-service` - HTTP service implementation
 - `queue-keeper-cli` - Command-line administrative interface
 - `queue-keeper-api` - API types and handlers
-- `github-bot-sdk` - GitHub API client library
-- `queue-runtime` - Queue provider abstraction layer
+
+### External Dependencies
+
+Queue-Keeper uses these external libraries (developed in separate repositories):
+
+- [`github-bot-sdk`](https://github.com/pvandervelde/github-bot-sdk) - GitHub API client library
+- [`queue-runtime`](https://github.com/pvandervelde/queue-runtime) - Queue provider abstraction layer
 
 ## Contributing
 
