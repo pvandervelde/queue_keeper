@@ -65,10 +65,10 @@ bots:
     queue: string             # Required: Target Azure Service Bus queue name
     events: [string]          # Required: GitHub event types to subscribe to
     ordered: boolean          # Required: Whether to use session-based ordering
-    repository_filter:        # Optional: Filter events by repository
-      exact:                  # Use exact match for specific repository
-        owner: string         # Repository owner (organization or user)
-        name: string          # Repository name
+    repository_filter:        # Optional: Filter events by repository (YAML tag format)
+      !exact                  # Use !exact tag for specific repository
+      owner: string           # Repository owner (organization or user)
+      name: string            # Repository name
     config:                   # Optional: Bot-specific configuration
       settings:               # Required wrapper for bot configuration
         key: value            # Custom key-value pairs passed to bot
@@ -119,48 +119,46 @@ Filter events to only specific repositories. Supports multiple filter types:
 
 ```yaml
 repository_filter:
-  exact:
-    owner: "myorg"
-    name: "myrepo"
+  !exact
+  owner: "myorg"
+  name: "myrepo"
 ```
 
 **Multiple Repositories (OR logic):**
 
 ```yaml
 repository_filter:
-  any_of:
-    - exact:
-        owner: "myorg"
-        name: "repo1"
-    - exact:
-        owner: "myorg"
-        name: "repo2"
-    - exact:
-        owner: "anotherorg"
-        name: "repo3"
+  !any_of
+  - !exact
+    owner: "myorg"
+    name: "repo1"
+  - !exact
+    owner: "myorg"
+    name: "repo2"
+  - !exact
+    owner: "anotherorg"
+    name: "repo3"
 ```
 
 **All Repositories from Organization:**
 
 ```yaml
-repository_filter:
-  owner: "myorg"
+repository_filter: !owner myorg
 ```
 
 **Pattern Matching:**
 
 ```yaml
-repository_filter:
-  name_pattern: "^prod-.*"  # Regex: repositories starting with "prod-"
+repository_filter: !name_pattern ^prod-.*  # Regex: repositories starting with "prod-"
 ```
 
 **Complex Filters (AND logic):**
 
 ```yaml
 repository_filter:
-  all_of:
-    - owner: "myorg"
-    - name_pattern: ".*-service$"  # Repos ending with "-service"
+  !all_of
+  - !owner myorg
+  - !name_pattern .*-service$  # Repos ending with "-service"
 ```
 
 When specified, only events from matching repositories will be routed to this bot.
@@ -333,7 +331,7 @@ Queue-Keeper validates configuration at startup and fails fast if errors are det
 **Ordering Consistency:**
 
 - Bots with `ordered: true` must have valid session configuration
-- Repository filters with `exact` variant must specify both owner and name
+- Repository filters with `!exact` tag must specify both owner and name
 
 ### Validation Errors
 
@@ -387,9 +385,9 @@ bots:
     events: ["push"]
     ordered: true
     repository_filter:
-      exact:
-        owner: "myorg"
-        name: "production-app"
+      !exact
+      owner: "myorg"
+      name: "production-app"
 ```
 
 **Multiple Repositories:**
@@ -401,16 +399,16 @@ bots:
     events: ["pull_request.*", "push"]
     ordered: true
     repository_filter:
-      any_of:
-        - exact:
-            owner: "myorg"
-            name: "production-app"
-        - exact:
-            owner: "myorg"
-            name: "customer-api"
-        - exact:
-            owner: "myorg"
-            name: "payment-service"
+      !any_of
+      - !exact
+        owner: "myorg"
+        name: "production-app"
+      - !exact
+        owner: "myorg"
+        name: "customer-api"
+      - !exact
+        owner: "myorg"
+        name: "payment-service"
 ```
 
 **All Repositories from Organization:**
@@ -421,8 +419,7 @@ bots:
     queue: "queue-keeper-org-monitor"
     events: ["issues.*"]
     ordered: false
-    repository_filter:
-      owner: "myorg"  # All repos owned by "myorg"
+    repository_filter: !owner myorg  # All repos owned by "myorg"
 ```
 
 **Pattern-Based Filtering:**
@@ -434,9 +431,9 @@ bots:
     events: ["deployment.*"]
     ordered: true
     repository_filter:
-      all_of:
-        - owner: "myorg"
-        - name_pattern: ".*-service$"  # Only repos ending with "-service"
+      !all_of
+      - !owner myorg
+      - !name_pattern .*-service$  # Only repos ending with "-service"
 ```
 
 **No Filter (All Repositories):**
@@ -712,16 +709,16 @@ bots:
       - "pull_request.review_requested"
     ordered: true
     repository_filter:
-      any_of:
-        - exact:
-            owner: "myorg"
-            name: "backend-api"
-        - exact:
-            owner: "myorg"
-            name: "frontend-app"
-        - exact:
-            owner: "myorg"
-            name: "mobile-app"
+      !any_of
+      - !exact
+        owner: "myorg"
+        name: "backend-api"
+      - !exact
+        owner: "myorg"
+        name: "frontend-app"
+      - !exact
+        owner: "myorg"
+        name: "mobile-app"
     config:
       settings:
         auto_assign_reviewers: true
@@ -778,9 +775,9 @@ bots:
       - "deployment_status.created"
     ordered: true
     repository_filter:
-      exact:
-        owner: "myorg"
-        name: "production-app"
+      !exact
+      owner: "myorg"
+      name: "production-app"
     config:
       settings:
         priority: "critical"
