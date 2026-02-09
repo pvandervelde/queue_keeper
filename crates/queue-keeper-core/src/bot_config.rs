@@ -354,6 +354,7 @@ impl FromStr for EventTypePattern {
 ///
 /// See specs/interfaces/bot-configuration.md
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum RepositoryFilter {
     /// Specific repository (owner/name format)
     Exact { owner: String, name: String },
