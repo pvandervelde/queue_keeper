@@ -93,8 +93,21 @@ jobs:
         if: steps.check_command.outputs.is_command == 'true' && steps.check_pr.outputs.is_release_pr == 'true' && steps.check_permissions.outputs.has_permission == 'true'
         id: get_version
         run: |
-          # Get version from Cargo.toml
-          CURRENT_VERSION=$(grep "^version = " Cargo.toml | head -n 1 | sed 's/version = "\(.*\)"/\1/')
+          # Get version from Cargo.toml using cargo metadata for robustness
+          if command -v cargo &> /dev/null; then
+            CURRENT_VERSION=$(cargo metadata --no-deps --format-version 1 2>/dev/null | jq -r '.packages[0].version' 2>/dev/null || true)
+          fi
+
+          # Fallback to grep if cargo/jq not available or fails
+          if [ -z "${CURRENT_VERSION}" ]; then
+            CURRENT_VERSION=$(grep "^version = " Cargo.toml | head -n 1 | sed 's/version = "\(.*\)"/\1/')
+          fi
+
+          if [ -z "${CURRENT_VERSION}" ]; then
+            echo "Error: Could not extract version from Cargo.toml"
+            exit 1
+          fi
+
           echo "Current version in PR: ${CURRENT_VERSION}"
           echo "CURRENT_VERSION=${CURRENT_VERSION}" >> $GITHUB_OUTPUT
 
@@ -123,53 +136,40 @@ jobs:
           echo "Current version in PR: ${CURRENT}"
           echo "Override requested: ${VERSION_TYPE}"
 
-          # Validate that override makes sense
-          # The override should result in a version greater than the latest tag
+          # Calculate expected version for each override type
+          EXPECTED_MAJOR="$((TAG_MAJOR + 1)).0.0"
+          EXPECTED_MINOR="${TAG_MAJOR}.$((TAG_MINOR + 1)).0"
+          EXPECTED_PATCH="${TAG_MAJOR}.${TAG_MINOR}.$((TAG_PATCH + 1))"
+
+          echo "Expected versions - MAJOR: ${EXPECTED_MAJOR}, MINOR: ${EXPECTED_MINOR}, PATCH: ${EXPECTED_PATCH}"
+
+          # Validate that current version matches the expected version for the override type
           case "${VERSION_TYPE}" in
             major)
-              # Ensure the current version hasn't already moved past what major would be
-              # and that it would be greater than the latest tag
-              if [ ${MAJOR} -lt ${TAG_MAJOR} ]; then
-                echo "is_valid=false" >> $GITHUB_OUTPUT
-                echo "reason=Cannot use MAJOR override: current version (${CURRENT}) is behind latest tag (${LATEST_TAG})" >> $GITHUB_OUTPUT
-              elif [ ${MAJOR} -gt $((TAG_MAJOR + 1)) ]; then
-                echo "is_valid=false" >> $GITHUB_OUTPUT
-                echo "reason=Current version (${CURRENT}) already exceeds next MAJOR version" >> $GITHUB_OUTPUT
-              else
+              if [ "${CURRENT}" = "${EXPECTED_MAJOR}" ]; then
                 echo "is_valid=true" >> $GITHUB_OUTPUT
-                echo "reason=Valid MAJOR version override" >> $GITHUB_OUTPUT
+                echo "reason=Current version matches expected MAJOR bump" >> $GITHUB_OUTPUT
+              else
+                echo "is_valid=false" >> $GITHUB_OUTPUT
+                echo "reason=Current version (${CURRENT}) does not match expected MAJOR version (${EXPECTED_MAJOR}) from tag ${LATEST_TAG}" >> $GITHUB_OUTPUT
               fi
               ;;
             minor)
-              # MINOR override is valid if we're on the same major version as tag
-              if [ ${MAJOR} -lt ${TAG_MAJOR} ] || ([ ${MAJOR} -eq ${TAG_MAJOR} ] && [ ${MINOR} -lt ${TAG_MINOR} ]); then
-                echo "is_valid=false" >> $GITHUB_OUTPUT
-                echo "reason=Cannot use MINOR override: current version (${CURRENT}) is behind latest tag (${LATEST_TAG})" >> $GITHUB_OUTPUT
-              elif [ ${MAJOR} -gt ${TAG_MAJOR} ]; then
-                echo "is_valid=false" >> $GITHUB_OUTPUT
-                echo "reason=Cannot downgrade to MINOR: MAJOR version already increased (${MAJOR} > ${TAG_MAJOR})" >> $GITHUB_OUTPUT
-              elif [ ${MAJOR} -eq ${TAG_MAJOR} ] && [ ${MINOR} -gt $((TAG_MINOR + 1)) ]; then
-                echo "is_valid=false" >> $GITHUB_OUTPUT
-                echo "reason=Current version (${CURRENT}) already exceeds next MINOR version" >> $GITHUB_OUTPUT
-              else
+              if [ "${CURRENT}" = "${EXPECTED_MINOR}" ]; then
                 echo "is_valid=true" >> $GITHUB_OUTPUT
-                echo "reason=Valid MINOR version override" >> $GITHUB_OUTPUT
+                echo "reason=Current version matches expected MINOR bump" >> $GITHUB_OUTPUT
+              else
+                echo "is_valid=false" >> $GITHUB_OUTPUT
+                echo "reason=Current version (${CURRENT}) does not match expected MINOR version (${EXPECTED_MINOR}) from tag ${LATEST_TAG}" >> $GITHUB_OUTPUT
               fi
               ;;
             patch)
-              # PATCH override is valid only if major and minor match the tag
-              if [ ${MAJOR} -lt ${TAG_MAJOR} ] || ([ ${MAJOR} -eq ${TAG_MAJOR} ] && [ ${MINOR} -lt ${TAG_MINOR} ]) || ([ ${MAJOR} -eq ${TAG_MAJOR} ] && [ ${MINOR} -eq ${TAG_MINOR} ] && [ ${PATCH} -lt ${TAG_PATCH} ]); then
-                echo "is_valid=false" >> $GITHUB_OUTPUT
-                echo "reason=Cannot use PATCH override: current version (${CURRENT}) is behind latest tag (${LATEST_TAG})" >> $GITHUB_OUTPUT
-              elif [ ${MAJOR} -ne ${TAG_MAJOR} ] || [ ${MINOR} -ne ${TAG_MINOR} ]; then
-                echo "is_valid=false" >> $GITHUB_OUTPUT
-                echo "reason=Cannot downgrade to PATCH: MAJOR or MINOR version already increased" >> $GITHUB_OUTPUT
-              elif [ ${MAJOR} -eq ${TAG_MAJOR} ] && [ ${MINOR} -eq ${TAG_MINOR} ] && [ ${PATCH} -gt $((TAG_PATCH + 1)) ]; then
-                echo "is_valid=false" >> $GITHUB_OUTPUT
-                echo "reason=Current version (${CURRENT}) already exceeds next PATCH version" >> $GITHUB_OUTPUT
-              else
+              if [ "${CURRENT}" = "${EXPECTED_PATCH}" ]; then
                 echo "is_valid=true" >> $GITHUB_OUTPUT
-                echo "reason=Valid PATCH version override" >> $GITHUB_OUTPUT
+                echo "reason=Current version matches expected PATCH bump" >> $GITHUB_OUTPUT
+              else
+                echo "is_valid=false" >> $GITHUB_OUTPUT
+                echo "reason=Current version (${CURRENT}) does not match expected PATCH version (${EXPECTED_PATCH}) from tag ${LATEST_TAG}" >> $GITHUB_OUTPUT
               fi
               ;;
           esac

@@ -150,10 +150,11 @@ Queue-Keeper uses an automated release workflow based on conventional commits. T
    - Summary of changes grouped by type (Features, Bug Fixes, etc.)
 
 3. **Adjust Version (Optional)** → If you need a different version bump:
-   - Comment on the release PR with: `/version <bump-type>`
+   - Comment on the release PR with: `/release <bump-type>`
    - Valid bump types:
-     - `/version minor` - Upgrade from patch to minor (e.g., 0.1.1 → 0.2.0)
-     - `/version major` - Upgrade from minor to major (e.g., 0.2.0 → 1.0.0)
+     - `/release patch` - Force a patch bump (e.g., 0.1.1 → 0.1.2)
+     - `/release minor` - Force a minor bump (e.g., 0.1.1 → 0.2.0)
+     - `/release major` - Force a major bump (e.g., 0.2.0 → 1.0.0)
    - The bot will validate and apply the version change
    - ✅ reaction = valid suggestion applied
    - ❌ reaction = invalid suggestion (downgrade or same level)

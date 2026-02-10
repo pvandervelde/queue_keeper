@@ -64,12 +64,22 @@ jobs:
             # Calculate next version from commits since last tag
             CALCULATED_VERSION=$(conventional_commits_next_version --from-version ${LATEST_TAG} --calculation-mode Batch ${LATEST_COMMIT})
             echo "Calculated version: ${CALCULATED_VERSION}"
+            
+            if [ -z "${CALCULATED_VERSION}" ]; then
+              echo "Error: Failed to calculate version from commits"
+              exit 1
+            fi
           else
             # No tags, start from the beginning of the repository
             echo "No tags found, starting from 0.0.0"
             FIRST_COMMIT=$(git rev-list --max-parents=0 HEAD)
             CALCULATED_VERSION=$(conventional_commits_next_version --from-version "0.0.0" --calculation-mode Batch ${FIRST_COMMIT})
             echo "Calculated version: ${CALCULATED_VERSION}"
+            
+            if [ -z "${CALCULATED_VERSION}" ]; then
+              echo "Error: Failed to calculate initial version"
+              exit 1
+            fi
           fi
 
           # Apply version override if provided
@@ -216,7 +226,11 @@ jobs:
 
               # Delete stale branch
               echo "Deleting stale branch ${branch}"
-              git push origin --delete "${branch}" || echo "Failed to delete ${branch}"
+              if ! git push origin --delete "${branch}" 2>&1; then
+                echo "Warning: Failed to delete ${branch}, it may have been already deleted or protected"
+              else
+                echo "Successfully deleted ${branch}"
+              fi
             fi
           done
 
@@ -249,7 +263,8 @@ jobs:
           fi
 
           # Force push to update existing branch or create new one
-          git push origin "${BRANCH_NAME}" --force
+          # Use --force-with-lease to prevent overwriting concurrent changes
+          git push origin "${BRANCH_NAME}" --force-with-lease
 
       - name: Create or update release PR
         if: steps.check_changes.outputs.has_changes == 'true' && steps.create_branch.outputs.committed == 'true'
