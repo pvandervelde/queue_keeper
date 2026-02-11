@@ -47,6 +47,7 @@ allow = [
     "Zlib",
     "MPL-2.0",
     "CDLA-Permissive-2.0",
+    "OpenSSL",
 ]
 
 # License clarity requirements
@@ -56,7 +57,9 @@ confidence-threshold = 0.8
 # Lint level for when multiple versions of the same crate are detected
 multiple-versions = "allow"
 # Wildcards (*) are not allowed in version requirements
+# Exception: workspace git dependencies are allowed as wildcards since they're pinned by commit
 wildcards = "deny"
+allow-wildcard-paths = true
 # Highlight crates with specific issues
 highlight = "all"
 
@@ -70,6 +73,9 @@ skip = [
     { name = "windows-sys" },
     { name = "windows-targets" },
 ]
+
+# Allow wildcards for these git dependencies (pinned by commit hash in workspace)
+skip-tree = [{ name = "github-bot-sdk" }, { name = "queue-runtime" }]
 
 # Specific crate bans (if any)
 deny = [
