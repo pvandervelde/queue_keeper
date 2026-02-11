@@ -25,20 +25,14 @@ COPY Cargo.toml Cargo.lock ./
 COPY crates/queue-keeper-core/Cargo.toml ./crates/queue-keeper-core/
 COPY crates/queue-keeper-service/Cargo.toml ./crates/queue-keeper-service/
 COPY crates/queue-keeper-cli/Cargo.toml ./crates/queue-keeper-cli/
-COPY crates/github-bot-sdk/Cargo.toml ./crates/github-bot-sdk/
-COPY crates/queue-runtime/Cargo.toml ./crates/queue-runtime/
 
 # Create dummy source files to cache dependencies
 RUN mkdir -p crates/queue-keeper-core/src \
     crates/queue-keeper-service/src \
-    crates/queue-keeper-cli/src \
-    crates/github-bot-sdk/src \
-    crates/queue-runtime/src && \
+    crates/queue-keeper-cli/src && \
     echo "fn main() {}" > crates/queue-keeper-service/src/main.rs && \
     echo "fn main() {}" > crates/queue-keeper-cli/src/main.rs && \
-    echo "pub fn dummy() {}" > crates/queue-keeper-core/src/lib.rs && \
-    echo "pub fn dummy() {}" > crates/github-bot-sdk/src/lib.rs && \
-    echo "pub fn dummy() {}" > crates/queue-runtime/src/lib.rs
+    echo "pub fn dummy() {}" > crates/queue-keeper-core/src/lib.rs
 
 # Build dependencies only (this layer will be cached)
 # Note: This will fail to link but will cache all external dependencies
@@ -46,9 +40,7 @@ RUN cargo build --release --package queue-keeper-service || true
 
 # Remove dummy source files and build artifacts to force clean rebuild
 RUN rm -rf crates/*/src && \
-    rm -rf target/release/.fingerprint/queue-keeper-* && \
-    rm -rf target/release/.fingerprint/queue-runtime-* && \
-    rm -rf target/release/.fingerprint/github-bot-sdk-*
+    rm -rf target/release/.fingerprint/queue-keeper-*
 
 # Copy actual source code
 COPY crates/ ./crates/
