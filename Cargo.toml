@@ -4,8 +4,6 @@ members = [
     "crates/queue-keeper-cli",
     "crates/queue-keeper-api",
     "crates/queue-keeper-service",
-    "crates/github-bot-sdk",
-    "crates/queue-runtime",
     "crates/queue-keeper-integration-tests",
     "crates/queue-keeper-e2e-tests",
 ]
@@ -19,8 +17,12 @@ repository = "https://github.com/pvandervelde/queue_keeper"
 version = "0.1.0"
 
 [workspace.dependencies]
+# Extracted libraries (from GitHub) - pinned to specific commits for stability
+github-bot-sdk = { git = "https://github.com/pvandervelde/github-bot-sdk", rev = "71b6161f" }
+queue-runtime = { git = "https://github.com/pvandervelde/queue-runtime", rev = "62b32128" }
+
 # Async runtime
-tokio = { version = "1.48", features = ["full"] }
+tokio = { version = "1.49", features = ["full"] }
 async-trait = "0.1"
 
 # Serialization
