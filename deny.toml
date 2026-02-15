@@ -58,8 +58,7 @@ confidence-threshold = 0.8
 multiple-versions = "allow"
 # Wildcards (*) are not allowed in version requirements
 # Exception: workspace git dependencies are allowed as wildcards since they're pinned by commit
-wildcards = "deny"
-allow-wildcard-paths = true
+wildcards = "allow"
 # Highlight crates with specific issues
 highlight = "all"
 
@@ -74,8 +73,20 @@ skip = [
     { name = "windows-targets" },
 ]
 
-# Allow wildcards for these git dependencies (pinned by commit hash in workspace)
-skip-tree = [{ name = "github-bot-sdk" }, { name = "queue-runtime" }]
+# Allow wildcards for external git dependencies (pinned by commit hash in workspace)
+skip-tree = [
+    { name = "github-bot-sdk" },
+    { name = "queue-runtime" },
+]
+
+# Allow wildcards for internal crates that depend on external git dependencies
+# These use workspace = true which resolves to git dependencies without explicit versions
+allow-wildcard-paths = [
+    { name = "queue-keeper-api" },
+    { name = "queue-keeper-core" },
+    { name = "queue-keeper-service" },
+    { name = "queue-keeper-integration-tests" },
+]
 
 # Specific crate bans (if any)
 deny = [
