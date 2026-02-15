@@ -79,15 +79,6 @@ skip-tree = [
     { name = "queue-runtime" },
 ]
 
-# Allow wildcards for internal crates that depend on external git dependencies
-# These use workspace = true which resolves to git dependencies without explicit versions
-allow-wildcard-paths = [
-    { name = "queue-keeper-api" },
-    { name = "queue-keeper-core" },
-    { name = "queue-keeper-service" },
-    { name = "queue-keeper-integration-tests" },
-]
-
 # Specific crate bans (if any)
 deny = [
     # Deny old openssl versions
