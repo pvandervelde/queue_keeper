@@ -319,8 +319,7 @@ jobs:
               --body-file pr_body.md \
               --base master \
               --head "${BRANCH_NAME}" \
-              --label "release" \
-              --label "automated"
+              --label "release"
           fi
 
       - name: Skip release PR creation (no version file changes)
