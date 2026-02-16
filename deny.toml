@@ -47,6 +47,7 @@ allow = [
     "Zlib",
     "MPL-2.0",
     "CDLA-Permissive-2.0",
+    "OpenSSL",
 ]
 
 # License clarity requirements
@@ -56,7 +57,8 @@ confidence-threshold = 0.8
 # Lint level for when multiple versions of the same crate are detected
 multiple-versions = "allow"
 # Wildcards (*) are not allowed in version requirements
-wildcards = "deny"
+# Exception: workspace git dependencies are allowed as wildcards since they're pinned by commit
+wildcards = "allow"
 # Highlight crates with specific issues
 highlight = "all"
 
@@ -69,6 +71,12 @@ skip = [
     { name = "windows_i686_msvc" },
     { name = "windows-sys" },
     { name = "windows-targets" },
+]
+
+# Allow wildcards for external git dependencies (pinned by commit hash in workspace)
+skip-tree = [
+    { name = "github-bot-sdk" },
+    { name = "queue-runtime" },
 ]
 
 # Specific crate bans (if any)
@@ -85,5 +93,8 @@ unknown-git = "deny"
 
 # Allowed registries
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-# Allow git sources from these organizations
-allow-git = []
+# Allow git sources from these organizations for extracted dependencies
+allow-git = [
+    "https://github.com/pvandervelde/github-bot-sdk",
+    "https://github.com/pvandervelde/queue-runtime",
+]

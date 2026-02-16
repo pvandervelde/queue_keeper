@@ -44,8 +44,8 @@ azure_identity = { version = "0.21", optional = true }
 azure_core = { version = "0.21", optional = true }
 
 # Dependencies on library crates
-github-bot-sdk = { path = "../github-bot-sdk", version = "0.1.0" }
-queue-runtime = { path = "../queue-runtime", version = "0.1.0" }
+github-bot-sdk = { workspace = true }
+queue-runtime = { workspace = true }
 
 [dev-dependencies]
 mockall = { workspace = true }
