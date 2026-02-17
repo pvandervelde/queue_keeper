@@ -64,7 +64,7 @@ jobs:
             # Calculate next version from commits since last tag
             CALCULATED_VERSION=$(conventional_commits_next_version --from-version ${LATEST_TAG} --calculation-mode Batch ${LATEST_COMMIT})
             echo "Calculated version: ${CALCULATED_VERSION}"
-            
+
             if [ -z "${CALCULATED_VERSION}" ]; then
               echo "Error: Failed to calculate version from commits"
               exit 1
@@ -75,7 +75,7 @@ jobs:
             FIRST_COMMIT=$(git rev-list --max-parents=0 HEAD)
             CALCULATED_VERSION=$(conventional_commits_next_version --from-version "0.0.0" --calculation-mode Batch ${FIRST_COMMIT})
             echo "Calculated version: ${CALCULATED_VERSION}"
-            
+
             if [ -z "${CALCULATED_VERSION}" ]; then
               echo "Error: Failed to calculate initial version"
               exit 1
@@ -145,10 +145,15 @@ jobs:
         run: |
           NEXT_VERSION="${{ steps.calc_version.outputs.NEXT_VERSION }}"
 
-          # Generate changelog for unreleased commits
+          # Generate full changelog for the repository
+          git-cliff --tag "${NEXT_VERSION}" -o CHANGELOG.md
+
+          echo "Generated CHANGELOG.md for ${NEXT_VERSION}"
+
+          # Generate release notes for unreleased commits (for PR description)
           git-cliff --tag "${NEXT_VERSION}" --unreleased --strip all > release_notes.md
 
-          echo "Generated changelog for ${NEXT_VERSION}:"
+          echo "Generated release notes for ${NEXT_VERSION}:"
           cat release_notes.md
 
           # Check if changelog has content
@@ -250,12 +255,12 @@ jobs:
           # Clean up temporary files that shouldn't be committed
           rm -f release_notes.md pr_body.md
 
-          # Add Cargo.toml changes
-          git add Cargo.toml
+          # Add Cargo.toml and CHANGELOG.md changes
+          git add Cargo.toml CHANGELOG.md
 
           # Commit if there are changes, otherwise skip
           if git diff --cached --quiet; then
-            echo "No changes to commit (Cargo.toml already at target version)"
+            echo "No changes to commit (files already at target version)"
             echo "committed=false" >> $GITHUB_OUTPUT
           else
             git commit -m "chore(release): prepare release v${{ steps.calc_version.outputs.NEXT_VERSION }}"
