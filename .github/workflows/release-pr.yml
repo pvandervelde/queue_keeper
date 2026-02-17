@@ -146,12 +146,19 @@ jobs:
           NEXT_VERSION="${{ steps.calc_version.outputs.NEXT_VERSION }}"
 
           # Generate full changelog for the repository
-          git-cliff --tag "${NEXT_VERSION}" -o CHANGELOG.md
+          # Use v prefix to match git tag format (e.g., v0.1.0)
+          if ! git-cliff --tag "v${NEXT_VERSION}" -o CHANGELOG.md; then
+            echo "Error: Failed to generate CHANGELOG.md"
+            exit 1
+          fi
 
           echo "Generated CHANGELOG.md for ${NEXT_VERSION}"
 
           # Generate release notes for unreleased commits (for PR description)
-          git-cliff --tag "${NEXT_VERSION}" --unreleased --strip all > release_notes.md
+          if ! git-cliff --tag "v${NEXT_VERSION}" --unreleased --strip all > release_notes.md; then
+            echo "Error: Failed to generate release notes"
+            exit 1
+          fi
 
           echo "Generated release notes for ${NEXT_VERSION}:"
           cat release_notes.md
@@ -252,8 +259,15 @@ jobs:
           # Create or update release branch
           git checkout -B "${BRANCH_NAME}"
 
-          # Clean up temporary files that shouldn't be committed
+          # Clean up temporary files (release_notes.md and pr_body.md are for PR description only)
+          # Keep CHANGELOG.md as it should be committed to the repository
           rm -f release_notes.md pr_body.md
+
+          # Verify CHANGELOG.md was generated before staging
+          if [ ! -f CHANGELOG.md ]; then
+            echo "Error: CHANGELOG.md was not generated"
+            exit 1
+          fi
 
           # Add Cargo.toml and CHANGELOG.md changes
           git add Cargo.toml CHANGELOG.md
