@@ -57,8 +57,12 @@ jobs:
 
           # Extract the section for this version from CHANGELOG.md
           if [ -f CHANGELOG.md ]; then
-            # Get content between this version header and the next version header
-            awk "/## \[$VERSION\]/,/## \[/" CHANGELOG.md | sed '$d' > release_notes.md
+            # Get content for this version only: start at the matching version
+            # header, stop when a different version header is encountered.
+            # The range-based pattern /start/,/end/ cannot be used here because
+            # the end pattern also matches the start line, causing awk to output
+            # nothing. A flag-based approach is used instead.
+            awk "/^## \[${VERSION}\]/{found=1} found && /^## \[/ && !/^## \[${VERSION}\]/{exit} found{print}" CHANGELOG.md > release_notes.md
 
             # If release notes are empty, use a default message
             if [ ! -s release_notes.md ]; then
@@ -67,6 +71,24 @@ jobs:
           else
             echo "Release $VERSION" > release_notes.md
           fi
+
+          # Append Docker container link
+          {
+            echo ""
+            echo "## Docker Image"
+            echo ""
+            echo "The container image for this release is available on GitHub Packages:"
+            echo ""
+            echo '```'
+            echo "ghcr.io/${{ github.repository_owner }}/queue-keeper:${VERSION}"
+            echo '```'
+            echo ""
+            echo "Pull with:"
+            echo ""
+            echo '```sh'
+            echo "docker pull ghcr.io/${{ github.repository_owner }}/queue-keeper:${VERSION}"
+            echo '```'
+          } >> release_notes.md
 
           echo "Extracted changelog for version $VERSION"
 
