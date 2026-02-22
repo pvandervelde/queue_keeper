@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.1] - 2026-02-22
+
+### Bug Fixes
+
+- Fix changelog extraction and add docker image link to release notes
+- Fix release notes changelog extraction and add docker image link (#152)
+
 ## [0.1.0] - 2026-02-20
 
 ### Bug Fixes
