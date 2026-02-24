@@ -13,7 +13,8 @@
 mod circuit_breaker;
 
 use queue_keeper_api::{
-    start_server, DefaultEventStore, DefaultHealthChecker, ServiceConfig, ServiceError,
+    start_server, DefaultEventStore, DefaultHealthChecker, ProviderId, ProviderRegistry,
+    ServiceConfig, ServiceError,
 };
 use queue_keeper_core::webhook::DefaultWebhookProcessor;
 use std::sync::Arc;
@@ -38,7 +39,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = ServiceConfig::default();
 
     // Create service components
-    let webhook_processor = Arc::new(DefaultWebhookProcessor::new(None, None, None));
+    let github_processor = Arc::new(DefaultWebhookProcessor::new(None, None, None));
+    let mut provider_registry = ProviderRegistry::new();
+    provider_registry.register(
+        ProviderId::new("github").expect("'github' is a valid provider ID"),
+        github_processor,
+    );
+
     let health_checker = Arc::new(DefaultHealthChecker);
     let event_store = Arc::new(DefaultEventStore);
 
@@ -49,7 +56,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // Start the server
-    if let Err(e) = start_server(config, webhook_processor, health_checker, event_store).await {
+    if let Err(e) = start_server(config, provider_registry, health_checker, event_store).await {
         error!("Failed to start server: {}", e);
 
         let exit_code = match e {
