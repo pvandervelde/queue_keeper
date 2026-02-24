@@ -37,7 +37,11 @@ use axum::{
 };
 use bytes::Bytes;
 use prometheus::TextEncoder;
-use queue_keeper_core::{EventId, SessionId, Timestamp};
+use queue_keeper_core::{
+    monitoring::MetricsCollector,
+    webhook::{WebhookHeaders, WebhookRequest},
+    EventId, SessionId, Timestamp,
+};
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 use tower::ServiceBuilder;
 use tower_http::{compression::CompressionLayer, cors::CorsLayer, trace::TraceLayer};
@@ -255,7 +259,7 @@ pub async fn start_server(
 ///
 /// 1. Extract provider name from the URL path.
 /// 2. Look it up in the [`ProviderRegistry`]; return 404 if absent.
-/// 3. Parse GitHub-style webhook headers.
+/// 3. Parse provider-agnostic webhook headers.
 /// 4. Delegate to the provider's [`WebhookProcessor::process_webhook`].
 /// 5. Return `200 OK` with [`WebhookResponse`] on success.
 ///
@@ -272,7 +276,72 @@ pub async fn handle_provider_webhook(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Json<WebhookResponse>, WebhookHandlerError> {
-    unimplemented!("Provider-specific webhook routing not yet implemented")
+    info!(provider = %provider, "Received webhook request");
+
+    // Resolve provider – return 404 for unknown providers before any further work
+    let processor = state
+        .provider_registry
+        .get(&provider)
+        .ok_or_else(|| WebhookHandlerError::ProviderNotFound {
+            provider: provider.clone(),
+        })?;
+
+    // Start timing for metrics
+    let start = std::time::Instant::now();
+
+    // Convert headers to HashMap
+    let header_map: HashMap<String, String> = headers
+        .iter()
+        .map(|(k, v)| {
+            (
+                k.as_str().to_lowercase(),
+                v.to_str().unwrap_or("").to_string(),
+            )
+        })
+        .collect();
+
+    // Parse webhook headers
+    let webhook_headers = match WebhookHeaders::from_http_headers(&header_map) {
+        Ok(h) => h,
+        Err(e) => {
+            let duration = start.elapsed();
+            state.metrics.record_webhook_request(duration, false);
+            state.metrics.record_webhook_validation_failure();
+            return Err(WebhookHandlerError::InvalidHeaders(e));
+        }
+    };
+
+    // Create webhook request
+    let webhook_request = WebhookRequest::new(webhook_headers, body);
+
+    // Delegate to the provider-specific processor
+    let event_envelope = match processor.process_webhook(webhook_request).await {
+        Ok(envelope) => envelope,
+        Err(e) => {
+            let duration = start.elapsed();
+            state.metrics.record_webhook_request(duration, false);
+            return Err(WebhookHandlerError::ProcessingFailed(e));
+        }
+    };
+
+    info!(
+        event_id = %event_envelope.event_id,
+        event_type = %event_envelope.event_type,
+        repository = %event_envelope.repository.full_name,
+        session_id = %event_envelope.session_id,
+        provider = %provider,
+        "Successfully processed webhook - returning immediate response"
+    );
+
+    let duration = start.elapsed();
+    state.metrics.record_webhook_request(duration, true);
+
+    Ok(Json(WebhookResponse {
+        event_id: event_envelope.event_id,
+        session_id: event_envelope.session_id,
+        status: "processed".to_string(),
+        message: "Webhook processed successfully".to_string(),
+    }))
 }
 
 // ============================================================================
