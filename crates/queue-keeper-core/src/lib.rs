@@ -885,7 +885,7 @@ pub use queue_integration::{
     DefaultEventRouter, DeliveryResult, EventRouter, FailedDelivery, QueueDeliveryError,
     SuccessfulDelivery,
 };
-pub use webhook::{EventEntity, EventEnvelope, WebhookError, WebhookProcessor};
+pub use webhook::{EventEntity, EventEnvelope, GithubWebhookProvider, WebhookError, WebhookProcessor};
 
 #[cfg(test)]
 #[path = "lib_tests.rs"]
