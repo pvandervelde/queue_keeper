@@ -198,4 +198,7 @@ pub enum ConfigError {
 
     #[error("Configuration parsing failed: {0}")]
     Parsing(#[from] toml::de::Error),
+
+    #[error("Provider configuration validation failed: {message}")]
+    ProviderValidation { message: String },
 }
