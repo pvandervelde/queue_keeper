@@ -7,7 +7,8 @@
 
 use axum::http::{HeaderMap, HeaderValue};
 use queue_keeper_api::{
-    AppState, EventStore, HealthChecker, ServiceConfig, ServiceMetrics, TelemetryConfig,
+    AppState, EventStore, HealthChecker, ProviderRegistry, ProviderId, ServiceConfig,
+    ServiceMetrics, TelemetryConfig,
 };
 use queue_keeper_core::{
     audit_logging::{
@@ -301,6 +302,9 @@ pub fn create_test_app_state() -> AppState {
 }
 
 /// Create a test AppState with a specific webhook processor
+///
+/// The processor is registered in a [`ProviderRegistry`] under the canonical
+/// `"github"` provider ID so that the `/webhook/github` route resolves it.
 #[allow(dead_code)]
 pub fn create_test_app_state_with_processor(processor: Arc<dyn WebhookProcessor>) -> AppState {
     let config = ServiceConfig::default();
@@ -309,9 +313,12 @@ pub fn create_test_app_state_with_processor(processor: Arc<dyn WebhookProcessor>
     let metrics = Arc::new(ServiceMetrics::default());
     let telemetry_config = Arc::new(TelemetryConfig::default());
 
+    let mut registry = ProviderRegistry::new();
+    registry.register(ProviderId::new("github").unwrap(), processor);
+
     AppState::new(
         config,
-        processor,
+        Arc::new(registry),
         health_checker,
         event_store,
         metrics,

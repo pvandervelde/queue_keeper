@@ -41,7 +41,7 @@ async fn test_router_has_webhook_endpoint() {
 
     let request = Request::builder()
         .method("POST")
-        .uri("/webhook")
+        .uri("/webhook/github")
         .header("x-github-event", "ping")
         .header("x-github-delivery", "12345678-1234-1234-1234-123456789012")
         .header("content-type", "application/json")
@@ -55,7 +55,7 @@ async fn test_router_has_webhook_endpoint() {
     assert_ne!(
         response.status(),
         StatusCode::NOT_FOUND,
-        "Webhook endpoint should exist"
+        "Webhook endpoint should exist for registered provider"
     );
 }
 
@@ -108,9 +108,11 @@ async fn test_webhook_endpoint_rejects_get_requests() {
     let state = create_test_app_state();
     let app = queue_keeper_api::create_router(state);
 
+    // The route is POST /webhook/{provider} — a GET to a known provider
+    // path should be rejected with 405 Method Not Allowed.
     let request = Request::builder()
         .method("GET")
-        .uri("/webhook")
+        .uri("/webhook/github")
         .body(Body::empty())
         .unwrap();
 

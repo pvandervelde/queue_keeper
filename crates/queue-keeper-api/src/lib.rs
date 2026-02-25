@@ -52,7 +52,10 @@ pub use azure_config::{
     AzureBlobStorageConfig, AzureConfigError, AzureKeyVaultConfig, AzureProductionConfig,
     AzureServiceBusConfig, AzureTelemetryConfig,
 };
-pub use config::{LoggingConfig, SecurityConfig, ServerConfig, ServiceConfig, WebhookConfig};
+pub use config::{
+    LoggingConfig, ProviderConfig, ProviderSecretConfig, SecurityConfig, ServerConfig,
+    ServiceConfig, WebhookConfig,
+};
 pub use errors::{ConfigError, ServiceError, WebhookHandlerError};
 pub use metrics::{ServiceMetrics, TelemetryConfig};
 pub use provider_registry::{InvalidProviderIdError, ProviderId, ProviderRegistry};
@@ -167,6 +170,9 @@ pub async fn start_server(
     health_checker: Arc<dyn HealthChecker>,
     event_store: Arc<dyn EventStore>,
 ) -> Result<(), ServiceError> {
+    // Validate configuration before initializing any infrastructure
+    config.validate().map_err(ServiceError::Configuration)?;
+
     // Initialize observability components
     let metrics = ServiceMetrics::new().map_err(|e| {
         ServiceError::Configuration(ConfigError::Invalid {
