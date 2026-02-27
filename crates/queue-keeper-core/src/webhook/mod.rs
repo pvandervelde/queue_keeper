@@ -893,6 +893,10 @@ pub type DefaultWebhookProcessor = WebhookProcessorImpl;
 mod storage_adapter;
 pub use storage_adapter::BlobStorageAdapter;
 
+// GitHub-specific webhook provider
+mod github_provider;
+pub use github_provider::GithubWebhookProvider;
+
 #[cfg(test)]
 #[path = "mod_tests.rs"]
 mod tests;

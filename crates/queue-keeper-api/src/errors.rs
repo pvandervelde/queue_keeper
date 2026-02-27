@@ -88,6 +88,15 @@ pub enum WebhookHandlerError {
     /// Includes retry-after duration in response headers.
     #[error("Rate limit exceeded. Retry after {retry_after_seconds}s")]
     RateLimitExceeded { retry_after_seconds: u64 },
+
+    /// Webhook provider not found in the registry
+    ///
+    /// Maps to: `404 Not Found` (permanent error, the provider is not configured)
+    ///
+    /// Occurs when the `{provider}` URL segment does not match any entry
+    /// in the [`ProviderRegistry`](crate::provider_registry::ProviderRegistry).
+    #[error("Webhook provider not found: {provider}")]
+    ProviderNotFound { provider: String },
 }
 
 impl IntoResponse for WebhookHandlerError {
@@ -134,6 +143,10 @@ impl IntoResponse for WebhookHandlerError {
                     self.to_string(),
                     Some(retry_after_seconds),
                 )
+            }
+            Self::ProviderNotFound { ref provider } => {
+                warn!(provider = %provider, "Webhook provider not found");
+                (StatusCode::NOT_FOUND, self.to_string(), None)
             }
         };
 
@@ -185,4 +198,7 @@ pub enum ConfigError {
 
     #[error("Configuration parsing failed: {0}")]
     Parsing(#[from] toml::de::Error),
+
+    #[error("Provider configuration validation failed: {message}")]
+    ProviderValidation { message: String },
 }

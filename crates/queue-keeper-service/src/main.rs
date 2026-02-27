@@ -13,9 +13,10 @@
 mod circuit_breaker;
 
 use queue_keeper_api::{
-    start_server, DefaultEventStore, DefaultHealthChecker, ServiceConfig, ServiceError,
+    start_server, DefaultEventStore, DefaultHealthChecker, ProviderId, ProviderRegistry,
+    ServiceConfig, ServiceError,
 };
-use queue_keeper_core::webhook::DefaultWebhookProcessor;
+use queue_keeper_core::webhook::GithubWebhookProvider;
 use std::sync::Arc;
 use tracing::{error, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -37,8 +38,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load configuration (TODO: from file/environment)
     let config = ServiceConfig::default();
 
-    // Create service components
-    let webhook_processor = Arc::new(DefaultWebhookProcessor::new(None, None, None));
+    // Build provider registry from configuration.
+    // Each entry in config.providers gets its own webhook processor.
+    // TODO: Wire SignatureValidator from provider_config.secret once Key Vault
+    //       integration is available (see specs/interfaces/key-vault.md).
+    let mut provider_registry = ProviderRegistry::new();
+    for provider_config in &config.providers {
+        match ProviderId::new(&provider_config.id) {
+            Ok(provider_id) => {
+                let processor = Arc::new(GithubWebhookProvider::new(None, None, None));
+                provider_registry.register(provider_id, processor);
+                info!(provider = %provider_config.id, "Registered webhook provider from config");
+            }
+            Err(e) => {
+                error!(
+                    provider = %provider_config.id,
+                    error = %e,
+                    "Skipping provider with invalid ID in configuration"
+                );
+            }
+        }
+    }
+
+    // Ensure the default GitHub provider is always available for backward
+    // compatibility when no explicit provider configuration has been supplied.
+    if !provider_registry.contains(GithubWebhookProvider::PROVIDER_ID) {
+        let github_processor = Arc::new(GithubWebhookProvider::new(None, None, None));
+        provider_registry.register(
+            ProviderId::new(GithubWebhookProvider::PROVIDER_ID)
+                .expect("GithubWebhookProvider::PROVIDER_ID is a valid provider ID"),
+            github_processor,
+        );
+        info!("Registered default GitHub webhook provider (no explicit config entry found)");
+    }
+
     let health_checker = Arc::new(DefaultHealthChecker);
     let event_store = Arc::new(DefaultEventStore);
 
@@ -49,7 +82,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // Start the server
-    if let Err(e) = start_server(config, webhook_processor, health_checker, event_store).await {
+    if let Err(e) = start_server(config, provider_registry, health_checker, event_store).await {
         error!("Failed to start server: {}", e);
 
         let exit_code = match e {

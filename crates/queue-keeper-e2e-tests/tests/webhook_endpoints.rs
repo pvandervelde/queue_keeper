@@ -4,7 +4,7 @@ mod common;
 
 use common::{github_webhook_headers, http_client, sample_webhook_payload, TestContainer};
 
-/// Verify that POST /webhook accepts valid webhook
+/// Verify that POST /webhook/github accepts valid webhook
 #[tokio::test]
 async fn test_webhook_endpoint_accepts_valid_webhook() {
     // Arrange
@@ -14,7 +14,7 @@ async fn test_webhook_endpoint_accepts_valid_webhook() {
     let payload = sample_webhook_payload();
 
     // Act
-    let mut request = client.post(server.url("/webhook"));
+    let mut request = client.post(server.url("/webhook/github"));
     for (key, value) in headers.iter() {
         request = request.header(key, value);
     }
@@ -34,7 +34,7 @@ async fn test_webhook_endpoint_accepts_valid_webhook() {
     );
 }
 
-/// Verify that POST /webhook requires GitHub headers
+/// Verify that POST /webhook/github requires GitHub headers
 #[tokio::test]
 async fn test_webhook_endpoint_requires_github_headers() {
     // Arrange
@@ -44,7 +44,7 @@ async fn test_webhook_endpoint_requires_github_headers() {
 
     // Act - Send without GitHub headers
     let response = client
-        .post(server.url("/webhook"))
+        .post(server.url("/webhook/github"))
         .json(&payload)
         .send()
         .await
@@ -58,7 +58,7 @@ async fn test_webhook_endpoint_requires_github_headers() {
     );
 }
 
-/// Verify that GET /webhook is not allowed
+/// Verify that GET /webhook/github is not allowed
 #[tokio::test]
 async fn test_webhook_endpoint_rejects_get_requests() {
     // Arrange
@@ -67,7 +67,7 @@ async fn test_webhook_endpoint_rejects_get_requests() {
 
     // Act
     let response = client
-        .get(server.url("/webhook"))
+        .get(server.url("/webhook/github"))
         .send()
         .await
         .expect("Failed to send request");
@@ -76,7 +76,7 @@ async fn test_webhook_endpoint_rejects_get_requests() {
     assert_eq!(
         response.status(),
         405,
-        "GET requests to /webhook should return 405 Method Not Allowed"
+        "GET requests to /webhook/github should return 405 Method Not Allowed"
     );
 }
 
@@ -92,7 +92,7 @@ async fn test_webhook_endpoint_responds_quickly() {
     // Act
     let start = std::time::Instant::now();
 
-    let mut request = client.post(server.url("/webhook"));
+    let mut request = client.post(server.url("/webhook/github"));
     for (key, value) in headers.iter() {
         request = request.header(key, value);
     }
@@ -142,7 +142,7 @@ async fn test_webhook_accepts_ping_event() {
     });
 
     // Act
-    let mut request = client.post(server.url("/webhook"));
+    let mut request = client.post(server.url("/webhook/github"));
     for (key, value) in headers.iter() {
         request = request.header(key, value);
     }
@@ -172,7 +172,7 @@ async fn test_webhook_response_includes_json() {
     let payload = sample_webhook_payload();
 
     // Act
-    let mut request = client.post(server.url("/webhook"));
+    let mut request = client.post(server.url("/webhook/github"));
     for (key, value) in headers.iter() {
         request = request.header(key, value);
     }

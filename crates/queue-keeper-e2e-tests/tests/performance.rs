@@ -32,7 +32,7 @@ async fn test_performance_characteristics() {
         payload["number"] = serde_json::json!(i);
 
         let start = std::time::Instant::now();
-        let mut request = client.post(server.url("/webhook"));
+        let mut request = client.post(server.url("/webhook/github"));
         for (key, value) in headers.iter() {
             request = request.header(key, value);
         }
@@ -127,7 +127,7 @@ async fn test_response_time_p95() {
         let payload = sample_webhook_payload();
 
         let start = std::time::Instant::now();
-        let mut request = client.post(server.url("/webhook"));
+        let mut request = client.post(server.url("/webhook/github"));
         for (key, value) in headers.iter() {
             request = request.header(key, value);
         }
@@ -173,7 +173,7 @@ async fn test_concurrent_requests() {
     // Act: Send concurrent requests
     let mut handles = Vec::new();
     for i in 0..num_concurrent {
-        let url = server.url("/webhook");
+        let url = server.url("/webhook/github");
         let handle = tokio::spawn(async move {
             let client = http_client();
             let headers = github_webhook_headers();
@@ -247,7 +247,7 @@ async fn test_large_payload_handling() {
     let headers = github_webhook_headers();
 
     // Act
-    let mut request = client.post(server.url("/webhook"));
+    let mut request = client.post(server.url("/webhook/github"));
     for (key, value) in headers.iter() {
         request = request.header(key, value);
     }
@@ -278,7 +278,7 @@ async fn test_health_check_under_load() {
     let client = http_client();
 
     // Start background load (10 webhook requests)
-    let url = server.url("/webhook");
+    let url = server.url("/webhook/github");
     let _load_handles: Vec<_> = (0..10)
         .map(|_| {
             let url_clone = url.clone();
@@ -370,7 +370,7 @@ async fn test_malformed_payload_resilience() {
     all_payloads.push(large_junk);
 
     for payload in all_payloads {
-        let mut request = client.post(server.url("/webhook"));
+        let mut request = client.post(server.url("/webhook/github"));
         for (key, value) in headers.iter() {
             request = request.header(key, value);
         }
@@ -419,7 +419,7 @@ async fn test_rapid_sequential_requests() {
         let mut payload = sample_webhook_payload();
         payload["number"] = serde_json::json!(i);
 
-        let mut request = client.post(server.url("/webhook"));
+        let mut request = client.post(server.url("/webhook/github"));
         for (key, value) in headers.iter() {
             request = request.header(key, value);
         }

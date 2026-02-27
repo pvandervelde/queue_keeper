@@ -16,6 +16,7 @@ pub mod config;
 pub mod dlq_storage;
 pub mod errors;
 pub mod metrics;
+pub mod provider_registry;
 pub mod queue_delivery;
 pub mod responses;
 pub mod retry;
@@ -38,7 +39,7 @@ use bytes::Bytes;
 use prometheus::TextEncoder;
 use queue_keeper_core::{
     monitoring::MetricsCollector,
-    webhook::{WebhookHeaders, WebhookProcessor, WebhookRequest},
+    webhook::{WebhookHeaders, WebhookRequest},
     EventId, SessionId, Timestamp,
 };
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
@@ -51,9 +52,13 @@ pub use azure_config::{
     AzureBlobStorageConfig, AzureConfigError, AzureKeyVaultConfig, AzureProductionConfig,
     AzureServiceBusConfig, AzureTelemetryConfig,
 };
-pub use config::{LoggingConfig, SecurityConfig, ServerConfig, ServiceConfig, WebhookConfig};
+pub use config::{
+    LoggingConfig, ProviderConfig, ProviderSecretConfig, SecurityConfig, ServerConfig,
+    ServiceConfig, WebhookConfig,
+};
 pub use errors::{ConfigError, ServiceError, WebhookHandlerError};
 pub use metrics::{ServiceMetrics, TelemetryConfig};
+pub use provider_registry::{InvalidProviderIdError, ProviderId, ProviderRegistry};
 pub use responses::*;
 
 // ============================================================================
@@ -66,8 +71,8 @@ pub struct AppState {
     /// Configuration for the service
     pub config: ServiceConfig,
 
-    /// Webhook processor for handling GitHub events
-    pub webhook_processor: Arc<dyn WebhookProcessor>,
+    /// Registry of provider-specific webhook processors
+    pub provider_registry: Arc<ProviderRegistry>,
 
     /// Health checker for system monitoring
     pub health_checker: Arc<dyn HealthChecker>,
@@ -86,7 +91,7 @@ impl AppState {
     /// Create new application state
     pub fn new(
         config: ServiceConfig,
-        webhook_processor: Arc<dyn WebhookProcessor>,
+        provider_registry: Arc<ProviderRegistry>,
         health_checker: Arc<dyn HealthChecker>,
         event_store: Arc<dyn EventStore>,
         metrics: Arc<ServiceMetrics>,
@@ -94,7 +99,7 @@ impl AppState {
     ) -> Self {
         Self {
             config,
-            webhook_processor,
+            provider_registry,
             health_checker,
             event_store,
             metrics,
@@ -109,9 +114,7 @@ impl AppState {
 
 /// Create HTTP router with all endpoints
 pub fn create_router(state: AppState) -> Router {
-    let webhook_routes = Router::new()
-        .route(&state.config.webhooks.endpoint_path, post(handle_webhook))
-        .route("/webhook/test", post(handle_webhook_test));
+    let webhook_routes = Router::new().route("/webhook/{provider}", post(handle_provider_webhook));
 
     let health_routes = Router::new()
         .route("/health", get(handle_health_check))
@@ -162,10 +165,26 @@ pub fn create_router(state: AppState) -> Router {
 /// Start HTTP server
 pub async fn start_server(
     config: ServiceConfig,
-    webhook_processor: Arc<dyn WebhookProcessor>,
+    provider_registry: ProviderRegistry,
     health_checker: Arc<dyn HealthChecker>,
     event_store: Arc<dyn EventStore>,
 ) -> Result<(), ServiceError> {
+    // Validate configuration before initializing any infrastructure
+    config.validate().map_err(ServiceError::Configuration)?;
+
+    // Warn when literal secrets are present — they should only be used in
+    // development or testing, never in production deployments.
+    for provider in &config.providers {
+        if let Some(config::ProviderSecretConfig::Literal { .. }) = &provider.secret {
+            warn!(
+                provider = %provider.id,
+                "Provider is configured with a literal webhook secret. \
+                 Literal secrets are for development and testing only. \
+                 Use a Key Vault secret source for production deployments."
+            );
+        }
+    }
+
     // Initialize observability components
     let metrics = ServiceMetrics::new().map_err(|e| {
         ServiceError::Configuration(ConfigError::Invalid {
@@ -180,7 +199,7 @@ pub async fn start_server(
 
     let state = AppState::new(
         config.clone(),
-        webhook_processor,
+        Arc::new(provider_registry),
         health_checker,
         event_store,
         metrics,
@@ -249,23 +268,39 @@ pub async fn start_server(
 // Webhook Handlers
 // ============================================================================
 
-/// Handle GitHub webhook requests
+/// Handle a webhook for a specific provider.
 ///
-/// This handler implements the immediate response pattern to meet GitHub's 10-second timeout:
-/// 1. Parse and validate webhook headers (fast path)
-/// 2. Process webhook through processor (validation + normalization + blob storage - fast)
-/// 3. Return HTTP 200 OK immediately (target <500ms)
-/// 4. Queue delivery with retry happens asynchronously (TODO: implement when EventRouter is integrated)
+/// Routes `POST /webhook/{provider}` to the processor registered under that
+/// provider name. Returns `404 Not Found` when the provider is unknown.
 ///
-/// This ensures GitHub receives a response within the timeout while allowing
-/// queue delivery to proceed in the background with proper retry logic.
-#[instrument(skip(state, headers, body))]
-pub async fn handle_webhook(
+/// # Request Flow
+///
+/// 1. Extract provider name from the URL path.
+/// 2. Look it up in the [`ProviderRegistry`]; return 404 if absent.
+/// 3. Parse provider-agnostic webhook headers.
+/// 4. Delegate to the provider's [`WebhookProcessor::process_webhook`].
+/// 5. Return `200 OK` with [`WebhookResponse`] on success.
+///
+/// # Errors
+///
+/// - [`WebhookHandlerError::ProviderNotFound`] when the provider is not registered.
+/// - [`WebhookHandlerError::InvalidHeaders`] when required headers are missing or malformed.
+/// - [`WebhookHandlerError::ProcessingFailed`] when the processor pipeline fails.
+#[instrument(skip(state, headers, body), fields(provider = %provider))]
+pub async fn handle_provider_webhook(
     State(state): State<AppState>,
+    Path(provider): Path<String>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Json<WebhookResponse>, WebhookHandlerError> {
-    info!("Received webhook request");
+    info!(provider = %provider, "Received webhook request");
+
+    // Resolve provider – return 404 for unknown providers before any further work
+    let processor = state.provider_registry.get(&provider).ok_or_else(|| {
+        WebhookHandlerError::ProviderNotFound {
+            provider: provider.clone(),
+        }
+    })?;
 
     // Start timing for metrics
     let start = std::time::Instant::now();
@@ -283,7 +318,7 @@ pub async fn handle_webhook(
 
     // Parse webhook headers
     let webhook_headers = match WebhookHeaders::from_http_headers(&header_map) {
-        Ok(headers) => headers,
+        Ok(h) => h,
         Err(e) => {
             let duration = start.elapsed();
             state.metrics.record_webhook_request(duration, false);
@@ -292,16 +327,40 @@ pub async fn handle_webhook(
         }
     };
 
+    // Enforce per-provider allowed_event_types if configured.
+    // An empty list means all event types are accepted.
+    //
+    // Note: require_signature enforcement is delegated to the processor's
+    // SignatureValidator. When a SignatureValidator is wired into the
+    // DefaultWebhookProcessor it will reject requests with an invalid or
+    // missing signature regardless of the ProviderConfig setting.
+    let provider_config = state.config.providers.iter().find(|p| p.id == provider);
+    if let Some(pc) = provider_config {
+        if !pc.allowed_event_types.is_empty()
+            && !pc.allowed_event_types.contains(&webhook_headers.event_type)
+        {
+            let duration = start.elapsed();
+            state.metrics.record_webhook_request(duration, false);
+            state.metrics.record_webhook_validation_failure();
+            return Err(WebhookHandlerError::InvalidHeaders(
+                queue_keeper_core::ValidationError::InvalidFormat {
+                    // Use a provider-neutral field name so non-GitHub providers
+                    // receive a sensible error rather than a GitHub header name.
+                    field: "event-type".to_string(),
+                    message: format!(
+                        "event type '{}' is not in the allowed list for provider '{}'",
+                        webhook_headers.event_type, provider
+                    ),
+                },
+            ));
+        }
+    }
+
     // Create webhook request
     let webhook_request = WebhookRequest::new(webhook_headers, body);
 
-    // Process webhook through processor (validation + normalization + storage)
-    // This is the "fast path" - must complete within ~500ms
-    let event_envelope = match state
-        .webhook_processor
-        .process_webhook(webhook_request)
-        .await
-    {
+    // Delegate to the provider-specific processor
+    let event_envelope = match processor.process_webhook(webhook_request).await {
         Ok(envelope) => envelope,
         Err(e) => {
             let duration = start.elapsed();
@@ -315,104 +374,19 @@ pub async fn handle_webhook(
         event_type = %event_envelope.event_type,
         repository = %event_envelope.repository.full_name,
         session_id = %event_envelope.session_id,
+        provider = %provider,
         "Successfully processed webhook - returning immediate response"
     );
 
-    // Record successful webhook processing metrics
     let duration = start.elapsed();
     state.metrics.record_webhook_request(duration, true);
 
-    // TODO: Task 16.6 - Spawn async task for queue delivery with retry loop
-    // This will be implemented when EventRouter is integrated into AppState:
-    //
-    // tokio::spawn(async move {
-    //     let retry_policy = retry::RetryPolicy::default();
-    //     let mut retry_state = retry::RetryState::new();
-    //
-    //     loop {
-    //         match event_router.route_event(&event_envelope, &bot_config, &queue_client).await {
-    //             Ok(delivery_result) if delivery_result.is_complete_success() => {
-    //                 info!("Successfully delivered event to all queues");
-    //                 break;
-    //             }
-    //             Ok(delivery_result) if !delivery_result.failed.is_empty() => {
-    //                 // Partial failure - retry only failed queues
-    //                 if retry_state.can_retry(&retry_policy) {
-    //                     let delay = retry_state.get_delay(&retry_policy);
-    //                     tokio::time::sleep(delay).await;
-    //                     retry_state.next_attempt();
-    //                     continue;
-    //                 } else {
-    //                     // Max retries exceeded - persist to DLQ
-    //                     persist_to_dlq(&event_envelope, &delivery_result).await;
-    //                     break;
-    //                 }
-    //             }
-    //             Err(error) if error.is_transient() && retry_state.can_retry(&retry_policy) => {
-    //                 let delay = retry_state.get_delay(&retry_policy);
-    //                 tokio::time::sleep(delay).await;
-    //                 retry_state.next_attempt();
-    //             }
-    //             Err(error) => {
-    //                 // Permanent error or max retries exceeded - persist to DLQ
-    //                 persist_to_dlq_with_error(&event_envelope, &error).await;
-    //                 break;
-    //             }
-    //         }
-    //     }
-    // });
-
-    // Return immediate response to GitHub (within 10-second timeout)
     Ok(Json(WebhookResponse {
         event_id: event_envelope.event_id,
         session_id: event_envelope.session_id,
         status: "processed".to_string(),
         message: "Webhook processed successfully".to_string(),
     }))
-}
-
-/// Handle webhook test requests (for GitHub webhook setup)
-#[instrument(skip(state))]
-async fn handle_webhook_test(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Result<Json<WebhookTestResponse>, WebhookHandlerError> {
-    info!("Received webhook test request");
-
-    // For ping events, just validate headers and return success
-    let header_map: HashMap<String, String> = headers
-        .iter()
-        .map(|(k, v)| {
-            (
-                k.as_str().to_lowercase(),
-                v.to_str().unwrap_or("").to_string(),
-            )
-        })
-        .collect();
-
-    let webhook_headers = WebhookHeaders::from_http_headers(&header_map)
-        .map_err(WebhookHandlerError::InvalidHeaders)?;
-
-    if webhook_headers.event_type == "ping" {
-        info!("Processing ping event for webhook setup");
-        return Ok(Json(WebhookTestResponse {
-            status: "success".to_string(),
-            message: "Webhook test successful".to_string(),
-            event_type: "ping".to_string(),
-        }));
-    }
-
-    // For other test events, process normally
-    handle_webhook(State(state), headers, body)
-        .await
-        .map(|_response| {
-            Json(WebhookTestResponse {
-                status: "success".to_string(),
-                message: "Test webhook processed successfully".to_string(),
-                event_type: webhook_headers.event_type,
-            })
-        })
 }
 
 // ============================================================================
@@ -962,3 +936,11 @@ fn normalize_path_for_metrics(path: &str) -> String {
 
     normalized.join("/")
 }
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+#[cfg(test)]
+#[path = "lib_tests.rs"]
+mod tests;

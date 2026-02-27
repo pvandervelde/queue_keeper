@@ -5,7 +5,7 @@
 
 mod common;
 
-use axum::extract::State;
+use axum::extract::{Path, State};
 use bytes::Bytes;
 use common::{
     create_test_app_state_with_processor, create_valid_webhook_headers, MockWebhookProcessor,
@@ -31,7 +31,13 @@ async fn test_webhook_processing_returns_immediately() {
 
     // Act: Measure response time
     let start = std::time::Instant::now();
-    let result = queue_keeper_api::handle_webhook(State(state), headers, body).await;
+    let result = queue_keeper_api::handle_provider_webhook(
+        State(state),
+        Path("github".to_string()),
+        headers,
+        body,
+    )
+    .await;
     let response_time = start.elapsed();
 
     // Assert: Response returned quickly (within 1 second, ideally <500ms)
@@ -66,7 +72,13 @@ async fn test_webhook_processing_returns_error_on_validation_failure() {
     let body = Bytes::from(r#"{"action":"opened"}"#);
 
     // Act
-    let result = queue_keeper_api::handle_webhook(State(state), headers, body).await;
+    let result = queue_keeper_api::handle_provider_webhook(
+        State(state),
+        Path("github".to_string()),
+        headers,
+        body,
+    )
+    .await;
 
     // Assert: Error response returned immediately
     assert!(result.is_err(), "Expected error response");
@@ -86,7 +98,13 @@ async fn test_webhook_response_includes_event_metadata() {
     let body = Bytes::from(r#"{"action":"opened","number":123}"#);
 
     // Act
-    let result = queue_keeper_api::handle_webhook(State(state), headers, body).await;
+    let result = queue_keeper_api::handle_provider_webhook(
+        State(state),
+        Path("github".to_string()),
+        headers,
+        body,
+    )
+    .await;
 
     // Assert
     assert!(result.is_ok(), "Expected successful response");
@@ -127,7 +145,13 @@ async fn test_webhook_rejects_malformed_headers() {
     let body = Bytes::from(r#"{"action":"opened"}"#);
 
     // Act
-    let result = queue_keeper_api::handle_webhook(State(state), headers, body).await;
+    let result = queue_keeper_api::handle_provider_webhook(
+        State(state),
+        Path("github".to_string()),
+        headers,
+        body,
+    )
+    .await;
 
     // Assert: Validation error returned immediately
     assert!(result.is_err(), "Expected error for malformed headers");
@@ -160,7 +184,13 @@ async fn test_webhook_handles_ping_event_immediately() {
 
     // Act
     let start = std::time::Instant::now();
-    let result = queue_keeper_api::handle_webhook(State(state), headers, body).await;
+    let result = queue_keeper_api::handle_provider_webhook(
+        State(state),
+        Path("github".to_string()),
+        headers,
+        body,
+    )
+    .await;
     let response_time = start.elapsed();
 
     // Assert: Response returned very quickly for ping event
@@ -196,7 +226,13 @@ async fn test_webhook_processing_logs_audit_events() {
     let body = Bytes::from(r#"{"action":"opened","number":123}"#);
 
     // Act
-    let result = queue_keeper_api::handle_webhook(State(state), headers, body).await;
+    let result = queue_keeper_api::handle_provider_webhook(
+        State(state),
+        Path("github".to_string()),
+        headers,
+        body,
+    )
+    .await;
 
     // Assert: Request succeeded
     assert!(result.is_ok(), "Expected successful response");
@@ -226,7 +262,13 @@ async fn test_failed_signature_validation_logs_security_event() {
     let body = Bytes::from(r#"{"action":"opened"}"#);
 
     // Act
-    let result = queue_keeper_api::handle_webhook(State(state), headers, body).await;
+    let result = queue_keeper_api::handle_provider_webhook(
+        State(state),
+        Path("github".to_string()),
+        headers,
+        body,
+    )
+    .await;
 
     // Assert: Request failed as expected
     assert!(
