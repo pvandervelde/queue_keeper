@@ -51,7 +51,7 @@ mod provider_secret_config_tests {
         };
         let result = secret.validate("test-provider");
         assert!(result.is_err());
-        matches!(result.unwrap_err(), ConfigError::ProviderValidation { .. });
+        assert!(matches!(result.unwrap_err(), ConfigError::ProviderValidation { .. }));
     }
 
     /// Verify that Debug output for Literal redacts the secret value.
@@ -121,7 +121,7 @@ mod provider_config_tests {
         };
         let result = config.validate();
         assert!(result.is_err());
-        matches!(result.unwrap_err(), ConfigError::ProviderValidation { .. });
+        assert!(matches!(result.unwrap_err(), ConfigError::ProviderValidation { .. }));
     }
 
     /// Verify that an ID with uppercase letters fails validation.
@@ -135,7 +135,7 @@ mod provider_config_tests {
         };
         let result = config.validate();
         assert!(result.is_err());
-        matches!(result.unwrap_err(), ConfigError::ProviderValidation { .. });
+        assert!(matches!(result.unwrap_err(), ConfigError::ProviderValidation { .. }));
     }
 
     /// Verify that an ID with slashes fails validation.

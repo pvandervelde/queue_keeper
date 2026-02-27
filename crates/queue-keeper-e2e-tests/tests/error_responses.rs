@@ -51,9 +51,9 @@ async fn test_invalid_json_returns_400() {
     let server = TestContainer::start().await;
     let client = http_client();
 
-    // Act - Send malformed JSON to webhook endpoint
+    // Act - Send malformed JSON to the github provider webhook endpoint
     let response = client
-        .post(server.url("/webhook"))
+        .post(server.url("/webhook/github"))
         .header("content-type", "application/json")
         .header("x-github-event", "push")
         .header("x-github-delivery", "12345678-1234-1234-1234-123456789012")
@@ -126,7 +126,7 @@ async fn test_large_request_body_handling() {
 
     // Act
     let response = client
-        .post(server.url("/webhook"))
+        .post(server.url("/webhook/github"))
         .header("content-type", "application/json")
         .header("x-github-event", "push")
         .header("x-github-delivery", "12345678-1234-1234-1234-123456789012")

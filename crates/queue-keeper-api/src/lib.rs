@@ -173,6 +173,19 @@ pub async fn start_server(
     // Validate configuration before initializing any infrastructure
     config.validate().map_err(ServiceError::Configuration)?;
 
+    // Warn when literal secrets are present — they should only be used in
+    // development or testing, never in production deployments.
+    for provider in &config.providers {
+        if let Some(config::ProviderSecretConfig::Literal { .. }) = &provider.secret {
+            warn!(
+                provider = %provider.id,
+                "Provider is configured with a literal webhook secret. \
+                 Literal secrets are for development and testing only. \
+                 Use a Key Vault secret source for production deployments."
+            );
+        }
+    }
+
     // Initialize observability components
     let metrics = ServiceMetrics::new().map_err(|e| {
         ServiceError::Configuration(ConfigError::Invalid {
@@ -275,7 +288,6 @@ pub async fn start_server(
 /// - [`WebhookHandlerError::InvalidHeaders`] when required headers are missing or malformed.
 /// - [`WebhookHandlerError::ProcessingFailed`] when the processor pipeline fails.
 #[instrument(skip(state, headers, body), fields(provider = %provider))]
-#[allow(unused_variables)]
 pub async fn handle_provider_webhook(
     State(state): State<AppState>,
     Path(provider): Path<String>,
@@ -316,6 +328,33 @@ pub async fn handle_provider_webhook(
             return Err(WebhookHandlerError::InvalidHeaders(e));
         }
     };
+
+    // Enforce per-provider allowed_event_types if configured.
+    // An empty list means all event types are accepted.
+    //
+    // Note: require_signature enforcement is delegated to the processor's
+    // SignatureValidator. When a SignatureValidator is wired into the
+    // DefaultWebhookProcessor it will reject requests with an invalid or
+    // missing signature regardless of the ProviderConfig setting.
+    let provider_config = state.config.providers.iter().find(|p| p.id == provider);
+    if let Some(pc) = provider_config {
+        if !pc.allowed_event_types.is_empty()
+            && !pc.allowed_event_types.contains(&webhook_headers.event_type)
+        {
+            let duration = start.elapsed();
+            state.metrics.record_webhook_request(duration, false);
+            state.metrics.record_webhook_validation_failure();
+            return Err(WebhookHandlerError::InvalidHeaders(
+                queue_keeper_core::ValidationError::InvalidFormat {
+                    field: "X-GitHub-Event".to_string(),
+                    message: format!(
+                        "event type '{}' is not in the allowed list for provider '{}'",
+                        webhook_headers.event_type, provider
+                    ),
+                },
+            ));
+        }
+    }
 
     // Create webhook request
     let webhook_request = WebhookRequest::new(webhook_headers, body);

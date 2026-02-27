@@ -142,25 +142,14 @@ impl ProviderConfig {
     /// - `require_signature` is `true` but `secret` is `None`
     /// - The `secret` source is internally invalid (e.g. empty Key Vault name)
     pub fn validate(&self) -> Result<(), ConfigError> {
-        // Validate provider ID
-        if self.id.is_empty() {
-            return Err(ConfigError::ProviderValidation {
-                message: "provider ID must not be empty".to_string(),
-            });
-        }
-        if !self
-            .id
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
-        {
-            return Err(ConfigError::ProviderValidation {
-                message: format!(
-                    "provider ID '{}' contains invalid characters; \
-                     use lowercase alphanumeric, hyphens, or underscores",
-                    self.id
-                ),
-            });
-        }
+        // Validate provider ID format by delegating to ProviderId::new().
+        // This ensures a single source of truth for the allowed character set
+        // across both configuration parsing and runtime registry lookups.
+        crate::provider_registry::ProviderId::new(&self.id).map_err(|e| {
+            ConfigError::ProviderValidation {
+                message: format!("invalid provider ID '{}': {}", self.id, e),
+            }
+        })?;
 
         // Signature consistency
         if self.require_signature && self.secret.is_none() {
@@ -189,9 +178,11 @@ impl ProviderConfig {
 /// # Security
 ///
 /// [`ProviderSecretConfig::Literal`] is provided for development and testing
-/// only. Using it in a production deployment will emit a warning at startup.
-/// Never commit literal secrets to source control.
-#[derive(Clone, Serialize, Deserialize)]
+/// only. It emits a `warn!` at startup. Never commit literal secrets to source control.
+///
+/// When serialized (e.g. via `/admin/config`), the `Literal` value is always
+/// replaced with `"<REDACTED>"` to prevent secret leakage in API responses.
+#[derive(Clone, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum ProviderSecretConfig {
     /// Secret stored in Azure Key Vault.
@@ -214,6 +205,29 @@ pub enum ProviderSecretConfig {
         #[serde(rename = "value")]
         value: String,
     },
+}
+
+impl serde::Serialize for ProviderSecretConfig {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        match self {
+            Self::KeyVault { secret_name } => {
+                let mut map = serializer.serialize_map(Some(2))?;
+                map.serialize_entry("type", "key_vault")?;
+                map.serialize_entry("secret_name", secret_name)?;
+                map.end()
+            }
+            Self::Literal { .. } => {
+                // Never serialize the raw secret value — replace with a
+                // redaction placeholder so the /admin/config endpoint does
+                // not leak secrets embedded in the configuration file.
+                let mut map = serializer.serialize_map(Some(2))?;
+                map.serialize_entry("type", "literal")?;
+                map.serialize_entry("value", "<REDACTED>")?;
+                map.end()
+            }
+        }
+    }
 }
 
 impl std::fmt::Debug for ProviderSecretConfig {
@@ -305,19 +319,31 @@ impl Default for ServerConfig {
     }
 }
 
-/// Webhook processing configuration
+/// Global webhook processing configuration.
+///
+/// These settings apply across all providers as service-wide defaults.
+///
+/// # Relationship to [`ProviderConfig`]
+///
+/// [`ProviderConfig`] introduces per-provider overrides for
+/// `require_signature` and `allowed_event_types`. When a matching
+/// [`ProviderConfig`] entry exists, its values take precedence over
+/// the global defaults defined here. [`WebhookConfig`] is retained
+/// for backward compatibility and for settings that do not yet have
+/// a per-provider equivalent (e.g. `store_payloads`, `rate_limit_per_repo`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebhookConfig {
     /// Webhook endpoint path
     pub endpoint_path: String,
 
-    /// Require signature validation
+    /// Require signature validation (global default; overridden per-provider by [`ProviderConfig::require_signature`])
     pub require_signature: bool,
 
     /// Enable payload storage for audit
     pub store_payloads: bool,
 
-    /// Supported event types (empty = all)
+    /// Supported event types — global default (empty = all).
+    /// Per-provider filtering is configured via [`ProviderConfig::allowed_event_types`].
     pub allowed_event_types: Vec<String>,
 
     /// Maximum events per repository per minute

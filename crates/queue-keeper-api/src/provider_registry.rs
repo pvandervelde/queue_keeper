@@ -16,6 +16,7 @@
 
 use queue_keeper_core::webhook::WebhookProcessor;
 use std::{collections::HashMap, sync::Arc};
+use tracing::warn;
 
 // ============================================================================
 // ProviderId
@@ -135,9 +136,18 @@ impl ProviderRegistry {
 
     /// Register a provider with its webhook processor.
     ///
-    /// If a provider with the same ID is already registered it is replaced.
+    /// If a provider with the same ID is already registered it is replaced and
+    /// a `warn!` is emitted. Replacement in a security-sensitive routing table
+    /// may indicate a configuration error and should be investigated.
     /// Returns `&mut Self` to allow method chaining.
     pub fn register(&mut self, id: ProviderId, processor: Arc<dyn WebhookProcessor>) -> &mut Self {
+        if self.processors.contains_key(&id.0) {
+            warn!(
+                provider = %id,
+                "Replacing an already-registered webhook processor; \
+                 check for duplicate provider entries in configuration"
+            );
+        }
         self.processors.insert(id.0, processor);
         self
     }

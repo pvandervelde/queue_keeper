@@ -38,13 +38,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load configuration (TODO: from file/environment)
     let config = ServiceConfig::default();
 
-    // Create service components
-    let github_processor = Arc::new(DefaultWebhookProcessor::new(None, None, None));
+    // Build provider registry from configuration.
+    // Each entry in config.providers gets its own webhook processor.
+    // TODO: Wire SignatureValidator from provider_config.secret once Key Vault
+    //       integration is available (see specs/interfaces/key-vault.md).
     let mut provider_registry = ProviderRegistry::new();
-    provider_registry.register(
-        ProviderId::new("github").expect("'github' is a valid provider ID"),
-        github_processor,
-    );
+    for provider_config in &config.providers {
+        match ProviderId::new(&provider_config.id) {
+            Ok(provider_id) => {
+                let processor = Arc::new(DefaultWebhookProcessor::new(None, None, None));
+                provider_registry.register(provider_id, processor);
+                info!(provider = %provider_config.id, "Registered webhook provider from config");
+            }
+            Err(e) => {
+                error!(
+                    provider = %provider_config.id,
+                    error = %e,
+                    "Skipping provider with invalid ID in configuration"
+                );
+            }
+        }
+    }
+
+    // Ensure the default GitHub provider is always available for backward
+    // compatibility when no explicit provider configuration has been supplied.
+    if !provider_registry.contains("github") {
+        let github_processor = Arc::new(DefaultWebhookProcessor::new(None, None, None));
+        provider_registry.register(
+            ProviderId::new("github").expect("'github' is a valid provider ID"),
+            github_processor,
+        );
+        info!("Registered default GitHub webhook provider (no explicit config entry found)");
+    }
 
     let health_checker = Arc::new(DefaultHealthChecker);
     let event_store = Arc::new(DefaultEventStore);
