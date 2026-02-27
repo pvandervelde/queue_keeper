@@ -77,9 +77,9 @@ async fn test_error_responses_have_consistent_format() {
     let server = TestContainer::start().await;
     let client = http_client();
 
-    // Act - Trigger a validation error
+    // Act - Trigger a validation error (missing required GitHub headers → 400)
     let response = client
-        .post(server.url("/webhook"))
+        .post(server.url("/webhook/github"))
         .header("content-type", "application/json")
         .body(r#"{"test": "data"}"#)
         .send()
