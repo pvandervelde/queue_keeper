@@ -346,7 +346,9 @@ pub async fn handle_provider_webhook(
             state.metrics.record_webhook_validation_failure();
             return Err(WebhookHandlerError::InvalidHeaders(
                 queue_keeper_core::ValidationError::InvalidFormat {
-                    field: "X-GitHub-Event".to_string(),
+                    // Use a provider-neutral field name so non-GitHub providers
+                    // receive a sensible error rather than a GitHub header name.
+                    field: "event-type".to_string(),
                     message: format!(
                         "event type '{}' is not in the allowed list for provider '{}'",
                         webhook_headers.event_type, provider

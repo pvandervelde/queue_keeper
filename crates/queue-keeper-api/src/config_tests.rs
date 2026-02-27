@@ -54,6 +54,32 @@ mod provider_secret_config_tests {
         assert!(matches!(result.unwrap_err(), ConfigError::ProviderValidation { .. }));
     }
 
+    /// Verify that serializing a Literal secret config redacts the value.
+    ///
+    /// This is a security property: the /admin/config endpoint returns
+    /// serialized ServiceConfig, so the raw secret must never appear in the
+    /// JSON output.
+    #[test]
+    fn test_literal_serialize_redacts_value() {
+        let secret = ProviderSecretConfig::Literal {
+            value: "super-sensitive-secret".to_string(),
+        };
+        let json = serde_json::to_string(&secret).expect("serialization must not fail");
+        assert!(
+            !json.contains("super-sensitive-secret"),
+            "serialized output must not contain the raw secret value: {json}"
+        );
+        assert!(
+            json.contains("REDACTED"),
+            "serialized output must contain REDACTED placeholder: {json}"
+        );
+        // Confirm the type tag is still present so the output is valid config JSON
+        assert!(
+            json.contains("literal"),
+            "serialized output must include the type tag: {json}"
+        );
+    }
+
     /// Verify that Debug output for Literal redacts the secret value.
     #[test]
     fn test_literal_debug_redacts_value() {

@@ -16,7 +16,7 @@ use queue_keeper_api::{
     start_server, DefaultEventStore, DefaultHealthChecker, ProviderId, ProviderRegistry,
     ServiceConfig, ServiceError,
 };
-use queue_keeper_core::webhook::DefaultWebhookProcessor;
+use queue_keeper_core::webhook::GithubWebhookProvider;
 use std::sync::Arc;
 use tracing::{error, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -46,7 +46,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for provider_config in &config.providers {
         match ProviderId::new(&provider_config.id) {
             Ok(provider_id) => {
-                let processor = Arc::new(DefaultWebhookProcessor::new(None, None, None));
+                let processor = Arc::new(GithubWebhookProvider::new(None, None, None));
                 provider_registry.register(provider_id, processor);
                 info!(provider = %provider_config.id, "Registered webhook provider from config");
             }
@@ -62,10 +62,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Ensure the default GitHub provider is always available for backward
     // compatibility when no explicit provider configuration has been supplied.
-    if !provider_registry.contains("github") {
-        let github_processor = Arc::new(DefaultWebhookProcessor::new(None, None, None));
+    if !provider_registry.contains(GithubWebhookProvider::PROVIDER_ID) {
+        let github_processor = Arc::new(GithubWebhookProvider::new(None, None, None));
         provider_registry.register(
-            ProviderId::new("github").expect("'github' is a valid provider ID"),
+            ProviderId::new(GithubWebhookProvider::PROVIDER_ID)
+                .expect("GithubWebhookProvider::PROVIDER_ID is a valid provider ID"),
             github_processor,
         );
         info!("Registered default GitHub webhook provider (no explicit config entry found)");
