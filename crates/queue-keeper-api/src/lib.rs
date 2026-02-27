@@ -114,8 +114,7 @@ impl AppState {
 
 /// Create HTTP router with all endpoints
 pub fn create_router(state: AppState) -> Router {
-    let webhook_routes = Router::new()
-        .route("/webhook/{provider}", post(handle_provider_webhook));
+    let webhook_routes = Router::new().route("/webhook/{provider}", post(handle_provider_webhook));
 
     let health_routes = Router::new()
         .route("/health", get(handle_health_check))
@@ -297,12 +296,11 @@ pub async fn handle_provider_webhook(
     info!(provider = %provider, "Received webhook request");
 
     // Resolve provider – return 404 for unknown providers before any further work
-    let processor = state
-        .provider_registry
-        .get(&provider)
-        .ok_or_else(|| WebhookHandlerError::ProviderNotFound {
+    let processor = state.provider_registry.get(&provider).ok_or_else(|| {
+        WebhookHandlerError::ProviderNotFound {
             provider: provider.clone(),
-        })?;
+        }
+    })?;
 
     // Start timing for metrics
     let start = std::time::Instant::now();

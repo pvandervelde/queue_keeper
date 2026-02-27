@@ -7,7 +7,7 @@
 
 use axum::http::{HeaderMap, HeaderValue};
 use queue_keeper_api::{
-    AppState, EventStore, HealthChecker, ProviderRegistry, ProviderId, ServiceConfig,
+    AppState, EventStore, HealthChecker, ProviderId, ProviderRegistry, ServiceConfig,
     ServiceMetrics, TelemetryConfig,
 };
 use queue_keeper_core::{
