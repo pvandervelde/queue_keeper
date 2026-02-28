@@ -316,6 +316,18 @@ pub fn create_test_app_state() -> AppState {
 /// `"github"` provider ID so that the `/webhook/github` route resolves it.
 #[allow(dead_code)]
 pub fn create_test_app_state_with_processor(processor: Arc<dyn WebhookProcessor>) -> AppState {
+    create_test_app_state_with_providers(vec![("github".to_string(), processor)])
+}
+
+/// Create a test AppState with multiple named webhook processors.
+///
+/// Each entry in `providers` is `(provider_id, processor)`.  The registry will have
+/// exactly those providers registered; no default "github" entry is added unless
+/// explicitly included.
+#[allow(dead_code)]
+pub fn create_test_app_state_with_providers(
+    providers: Vec<(String, Arc<dyn WebhookProcessor>)>,
+) -> AppState {
     let config = ServiceConfig::default();
     let health_checker = Arc::new(MockHealthChecker::new());
     let event_store = Arc::new(MockEventStore::new());
@@ -323,7 +335,9 @@ pub fn create_test_app_state_with_processor(processor: Arc<dyn WebhookProcessor>
     let telemetry_config = Arc::new(TelemetryConfig::default());
 
     let mut registry = ProviderRegistry::new();
-    registry.register(ProviderId::new("github").unwrap(), processor);
+    for (id, processor) in providers {
+        registry.register(ProviderId::new(&id).unwrap(), processor);
+    }
 
     AppState::new(
         config,
