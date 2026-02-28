@@ -138,10 +138,7 @@ async fn test_unregistered_provider_returns_not_found() {
         .method("POST")
         .uri("/webhook/jira") // not registered
         .header("x-github-event", "push")
-        .header(
-            "x-github-delivery",
-            "12345678-1234-1234-1234-123456789012",
-        )
+        .header("x-github-delivery", "12345678-1234-1234-1234-123456789012")
         .header("x-hub-signature-256", "sha256=abc123")
         .header("content-type", "application/json")
         .body(Body::from(r#"{"test":"data"}"#))
@@ -165,7 +162,7 @@ async fn test_unregistered_provider_returns_not_found() {
 /// provider-agnostic.
 #[tokio::test]
 async fn test_registered_generic_provider_accepts_webhook() {
-    use common::{MockWebhookProcessor, create_test_app_state_with_providers};
+    use common::{create_test_app_state_with_providers, MockWebhookProcessor};
     use std::sync::Arc;
 
     // Arrange: register both "github" and "slack"
@@ -173,8 +170,14 @@ async fn test_registered_generic_provider_accepts_webhook() {
     let slack_processor = Arc::new(MockWebhookProcessor::new());
 
     let state = create_test_app_state_with_providers(vec![
-        ("github".to_string(), github_processor as Arc<dyn queue_keeper_core::webhook::WebhookProcessor>),
-        ("slack".to_string(), slack_processor as Arc<dyn queue_keeper_core::webhook::WebhookProcessor>),
+        (
+            "github".to_string(),
+            github_processor as Arc<dyn queue_keeper_core::webhook::WebhookProcessor>,
+        ),
+        (
+            "slack".to_string(),
+            slack_processor as Arc<dyn queue_keeper_core::webhook::WebhookProcessor>,
+        ),
     ]);
     let app = queue_keeper_api::create_router(state);
 
@@ -182,10 +185,7 @@ async fn test_registered_generic_provider_accepts_webhook() {
         .method("POST")
         .uri("/webhook/slack")
         .header("x-github-event", "push")
-        .header(
-            "x-github-delivery",
-            "12345678-1234-1234-1234-123456789012",
-        )
+        .header("x-github-delivery", "12345678-1234-1234-1234-123456789012")
         .header("x-hub-signature-256", "sha256=abc123")
         .header("content-type", "application/json")
         .body(Body::from(r#"{"text":"Hello from Slack"}"#))
@@ -214,7 +214,7 @@ async fn test_registered_generic_provider_accepts_webhook() {
 /// `/webhook/github` must invoke only the GitHub processor.
 #[tokio::test]
 async fn test_provider_routing_dispatches_to_correct_processor() {
-    use common::{MockWebhookProcessor, create_test_app_state_with_providers};
+    use common::{create_test_app_state_with_providers, MockWebhookProcessor};
     use std::sync::Arc;
 
     // Arrange: two processors with distinct call counters
@@ -224,8 +224,14 @@ async fn test_provider_routing_dispatches_to_correct_processor() {
     let slack_clone = slack_processor.clone();
 
     let state = create_test_app_state_with_providers(vec![
-        ("github".to_string(), github_processor as Arc<dyn queue_keeper_core::webhook::WebhookProcessor>),
-        ("slack".to_string(), slack_processor as Arc<dyn queue_keeper_core::webhook::WebhookProcessor>),
+        (
+            "github".to_string(),
+            github_processor as Arc<dyn queue_keeper_core::webhook::WebhookProcessor>,
+        ),
+        (
+            "slack".to_string(),
+            slack_processor as Arc<dyn queue_keeper_core::webhook::WebhookProcessor>,
+        ),
     ]);
     let app = queue_keeper_api::create_router(state);
 
@@ -233,10 +239,7 @@ async fn test_provider_routing_dispatches_to_correct_processor() {
         .method("POST")
         .uri("/webhook/slack")
         .header("x-github-event", "push")
-        .header(
-            "x-github-delivery",
-            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
-        )
+        .header("x-github-delivery", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
         .header("x-hub-signature-256", "sha256=abc123")
         .header("content-type", "application/json")
         .body(Body::from(r#"{"text":"Hello"}"#))

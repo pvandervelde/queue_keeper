@@ -56,7 +56,10 @@ mod validate_signature_tests {
             .validate_signature(payload, no_prefix, secret)
             .await;
 
-        assert!(result.is_ok(), "signature without prefix should be accepted");
+        assert!(
+            result.is_ok(),
+            "signature without prefix should be accepted"
+        );
     }
 
     /// The wrong secret must cause validation to fail.

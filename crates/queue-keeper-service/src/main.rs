@@ -204,7 +204,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // Start the server
-    if let Err(e) = start_server(service_config, provider_registry, health_checker, event_store).await {
+    if let Err(e) = start_server(
+        service_config,
+        provider_registry,
+        health_checker,
+        event_store,
+    )
+    .await
+    {
         error!("Failed to start server: {}", e);
 
         let exit_code = match e {
@@ -275,4 +282,3 @@ fn build_validator_from_generic_config(
         }
     }
 }
-

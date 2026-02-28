@@ -732,10 +732,7 @@ mod processor_tests {
     async fn test_wrap_mode_returns_wrapped_output() {
         let provider = wrap_provider();
         let body = r#"{"repo":{"full_name":"owner/repo"},"entity":{"id":42},"action":"opened"}"#;
-        let request = make_request(
-            body,
-            Some(vec![("X-Event-Type", "pull_request")]),
-        );
+        let request = make_request(body, Some(vec![("X-Event-Type", "pull_request")]));
 
         let result = provider.process_webhook(request).await;
         assert!(result.is_ok(), "expected OK, got: {:?}", result);
@@ -853,7 +850,10 @@ mod processor_tests {
         // Request is missing "x-signature-256" header — should fail before validation
         let request = make_request(r#"{"test":true}"#, None);
         let result = provider.process_webhook(request).await;
-        assert!(result.is_err(), "expected error for missing signature header");
+        assert!(
+            result.is_err(),
+            "expected error for missing signature header"
+        );
     }
 
     // ── store_raw_payload ────────────────────────────────────────────────────
@@ -952,4 +952,3 @@ mod processor_tests {
         assert!(result.unwrap().is_direct());
     }
 }
-

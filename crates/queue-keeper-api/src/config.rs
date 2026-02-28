@@ -1,7 +1,9 @@
 //! Configuration types for the HTTP service
 
 use crate::errors::ConfigError;
-use queue_keeper_core::webhook::generic_provider::{GenericProviderConfig, GenericProviderConfigError};
+use queue_keeper_core::webhook::generic_provider::{
+    GenericProviderConfig, GenericProviderConfigError,
+};
 use serde::{Deserialize, Serialize};
 
 /// Service configuration

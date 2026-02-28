@@ -5,9 +5,7 @@
 // for debugging, recovery, and testing scenarios with proper ordering
 // and idempotency guarantees.
 
-use crate::{
-    webhook::WrappedEvent, BotName, EventId, QueueName, Repository, SessionId, Timestamp,
-};
+use crate::{webhook::WrappedEvent, BotName, EventId, QueueName, Repository, SessionId, Timestamp};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt, str::FromStr, time::Duration};

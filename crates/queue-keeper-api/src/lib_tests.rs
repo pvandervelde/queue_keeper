@@ -9,8 +9,8 @@ use axum::{
 use provider_registry::{ProviderId, ProviderRegistry};
 use queue_keeper_core::{
     webhook::{
-        NormalizationError, ProcessingOutput, StorageError, StorageReference,
-        ValidationStatus, WebhookError, WebhookProcessor, WebhookRequest, WrappedEvent,
+        NormalizationError, ProcessingOutput, StorageError, StorageReference, ValidationStatus,
+        WebhookError, WebhookProcessor, WebhookRequest, WrappedEvent,
     },
     Timestamp, ValidationError,
 };

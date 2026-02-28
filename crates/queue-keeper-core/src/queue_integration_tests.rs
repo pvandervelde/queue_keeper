@@ -162,7 +162,12 @@ fn create_test_event() -> WrappedEvent {
         "github".to_string(),
         "pull_request".to_string(),
         Some("opened".to_string()),
-        Some(crate::SessionId::from_parts("owner", "test-repo", "pull_request", "1")),
+        Some(crate::SessionId::from_parts(
+            "owner",
+            "test-repo",
+            "pull_request",
+            "1",
+        )),
         serde_json::json!({
             "action": "opened",
             "pull_request": {"number": 1},

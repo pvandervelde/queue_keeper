@@ -46,9 +46,9 @@
 use crate::{
     audit_logging::AuditLogger,
     webhook::{
-        DirectQueueMetadata, NormalizationError, ProcessingOutput, SignatureValidator, StorageError,
-        StorageReference, ValidationStatus, WebhookError, WebhookProcessor, WebhookRequest,
-        WrappedEvent,
+        DirectQueueMetadata, NormalizationError, ProcessingOutput, SignatureValidator,
+        StorageError, StorageReference, ValidationStatus, WebhookError, WebhookProcessor,
+        WebhookRequest, WrappedEvent,
     },
     ValidationError,
 };
@@ -749,10 +749,12 @@ impl GenericWebhookProvider {
 /// Traverse a dot-separated JSON path and return a reference to the value.
 ///
 /// Example: `resolve_json_path(&json, "project.id")` returns `&json["project"]["id"]`.
-fn resolve_json_path<'a>(value: &'a serde_json::Value, path: &str) -> Option<&'a serde_json::Value> {
-    path.split('.').fold(Some(value), |current, key| {
-        current.and_then(|v| v.get(key))
-    })
+fn resolve_json_path<'a>(
+    value: &'a serde_json::Value,
+    path: &str,
+) -> Option<&'a serde_json::Value> {
+    path.split('.')
+        .fold(Some(value), |current, key| current.and_then(|v| v.get(key)))
 }
 
 /// Resolve a [`FieldSource`] against the current request's raw headers and parsed body.
@@ -852,9 +854,12 @@ impl WebhookProcessor for GenericWebhookProvider {
         // 2. Parse the body as JSON (needed for event_type extraction in both modes and
         //    for field extraction in wrap mode). In direct mode we retain the original bytes.
         let payload: serde_json::Value = if self.config.processing_mode == ProcessingMode::Wrap
-            || self.config.event_type_source.as_ref().map_or(false, |s| {
-                matches!(s, FieldSource::JsonPath { .. })
-            }) {
+            || self
+                .config
+                .event_type_source
+                .as_ref()
+                .map_or(false, |s| matches!(s, FieldSource::JsonPath { .. }))
+        {
             serde_json::from_slice(&request.body).unwrap_or(serde_json::Value::Null)
         } else {
             serde_json::Value::Null
@@ -870,9 +875,7 @@ impl WebhookProcessor for GenericWebhookProvider {
 
         // 4. Dispatch by processing mode.
         match self.config.processing_mode {
-            ProcessingMode::Wrap => {
-                self.process_wrap_mode(request, payload, &event_type).await
-            }
+            ProcessingMode::Wrap => self.process_wrap_mode(request, payload, &event_type).await,
             ProcessingMode::Direct => self.process_direct_mode(request, &event_type).await,
         }
     }
@@ -934,15 +937,17 @@ impl WebhookProcessor for GenericWebhookProvider {
                 mac.update(payload);
 
                 let hex_sig = signature.strip_prefix("sha256=").unwrap_or(signature);
-                let sig_bytes = hex::decode(hex_sig).map_err(|_| ValidationError::InvalidFormat {
-                    field: "signature".to_string(),
-                    message: "invalid hex encoding in HMAC-SHA256 signature".to_string(),
-                })?;
+                let sig_bytes =
+                    hex::decode(hex_sig).map_err(|_| ValidationError::InvalidFormat {
+                        field: "signature".to_string(),
+                        message: "invalid hex encoding in HMAC-SHA256 signature".to_string(),
+                    })?;
 
-                mac.verify_slice(&sig_bytes).map_err(|_| ValidationError::InvalidFormat {
-                    field: "signature".to_string(),
-                    message: "HMAC-SHA256 signature mismatch".to_string(),
-                })?;
+                mac.verify_slice(&sig_bytes)
+                    .map_err(|_| ValidationError::InvalidFormat {
+                        field: "signature".to_string(),
+                        message: "HMAC-SHA256 signature mismatch".to_string(),
+                    })?;
             }
 
             SignatureAlgorithm::HmacSha1 => {
@@ -959,15 +964,17 @@ impl WebhookProcessor for GenericWebhookProvider {
                 mac.update(payload);
 
                 let hex_sig = signature.strip_prefix("sha1=").unwrap_or(signature);
-                let sig_bytes = hex::decode(hex_sig).map_err(|_| ValidationError::InvalidFormat {
-                    field: "signature".to_string(),
-                    message: "invalid hex encoding in HMAC-SHA1 signature".to_string(),
-                })?;
+                let sig_bytes =
+                    hex::decode(hex_sig).map_err(|_| ValidationError::InvalidFormat {
+                        field: "signature".to_string(),
+                        message: "invalid hex encoding in HMAC-SHA1 signature".to_string(),
+                    })?;
 
-                mac.verify_slice(&sig_bytes).map_err(|_| ValidationError::InvalidFormat {
-                    field: "signature".to_string(),
-                    message: "HMAC-SHA1 signature mismatch".to_string(),
-                })?;
+                mac.verify_slice(&sig_bytes)
+                    .map_err(|_| ValidationError::InvalidFormat {
+                        field: "signature".to_string(),
+                        message: "HMAC-SHA1 signature mismatch".to_string(),
+                    })?;
             }
 
             SignatureAlgorithm::BearerToken => {
@@ -1021,12 +1028,11 @@ impl WebhookProcessor for GenericWebhookProvider {
         &self,
         request: &WebhookRequest,
     ) -> Result<WrappedEvent, NormalizationError> {
-        let payload: serde_json::Value =
-            serde_json::from_slice(&request.body).map_err(|e| {
-                NormalizationError::MissingRequiredField {
-                    field: format!("body (JSON parse error: {})", e),
-                }
-            })?;
+        let payload: serde_json::Value = serde_json::from_slice(&request.body).map_err(|e| {
+            NormalizationError::MissingRequiredField {
+                field: format!("body (JSON parse error: {})", e),
+            }
+        })?;
 
         let event_type = self
             .config
@@ -1086,7 +1092,10 @@ impl GenericWebhookProvider {
             });
         }
 
-        let extraction = self.config.field_extraction.as_ref()
+        let extraction = self
+            .config
+            .field_extraction
+            .as_ref()
             .expect("field_extraction required for wrap mode (validated at construction)");
 
         // Extract action from the configured path.

@@ -3,8 +3,8 @@
 use super::*;
 use crate::{
     webhook::{
-        NormalizationError, StorageError, StorageReference, ValidationStatus,
-        WebhookError, WebhookHeaders, WebhookRequest,
+        NormalizationError, StorageError, StorageReference, ValidationStatus, WebhookError,
+        WebhookHeaders, WebhookRequest,
     },
     Timestamp, ValidationError,
 };
@@ -442,7 +442,9 @@ mod normalize_event_tests {
         let event = result.unwrap();
         assert_eq!(event.event_type, "ping");
         assert_eq!(
-            event.payload["repository"]["full_name"].as_str().unwrap_or(""),
+            event.payload["repository"]["full_name"]
+                .as_str()
+                .unwrap_or(""),
             "owner/repo"
         );
     }

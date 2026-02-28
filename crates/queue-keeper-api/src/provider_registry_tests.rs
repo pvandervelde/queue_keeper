@@ -4,8 +4,8 @@ use super::*;
 use async_trait::async_trait;
 use queue_keeper_core::{
     webhook::{
-        NormalizationError, ProcessingOutput, StorageError, StorageReference,
-        ValidationStatus, WebhookError, WebhookRequest, WrappedEvent,
+        NormalizationError, ProcessingOutput, StorageError, StorageReference, ValidationStatus,
+        WebhookError, WebhookRequest, WrappedEvent,
     },
     Timestamp, ValidationError,
 };

@@ -113,19 +113,19 @@ impl SignatureValidator for LiteralSignatureValidator {
             })?
         };
 
-        let mut mac =
-            HmacSha256::new_from_slice(secret_key.as_bytes()).map_err(|_| {
-                ValidationError::InvalidFormat {
-                    field: "secret".to_string(),
-                    message: "secret cannot be used as HMAC key".to_string(),
-                }
-            })?;
+        let mut mac = HmacSha256::new_from_slice(secret_key.as_bytes()).map_err(|_| {
+            ValidationError::InvalidFormat {
+                field: "secret".to_string(),
+                message: "secret cannot be used as HMAC key".to_string(),
+            }
+        })?;
         mac.update(payload);
 
-        mac.verify_slice(&sig_bytes).map_err(|_| ValidationError::InvalidFormat {
-            field: "signature".to_string(),
-            message: "HMAC-SHA256 digest does not match".to_string(),
-        })
+        mac.verify_slice(&sig_bytes)
+            .map_err(|_| ValidationError::InvalidFormat {
+                field: "signature".to_string(),
+                message: "HMAC-SHA256 digest does not match".to_string(),
+            })
     }
 
     /// Return the literal secret for any event type.

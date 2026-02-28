@@ -349,7 +349,12 @@ mod event_normalization_tests {
         assert_eq!(event.event_type, "pull_request");
         assert_eq!(event.action, Some("opened".to_string()));
         assert!(
-            event.session_id.as_ref().unwrap().as_str().contains("pull_request/123"),
+            event
+                .session_id
+                .as_ref()
+                .unwrap()
+                .as_str()
+                .contains("pull_request/123"),
             "session_id should encode entity: {:?}",
             event.session_id
         );
@@ -389,7 +394,12 @@ mod event_normalization_tests {
         let event = result.unwrap();
         assert_eq!(event.event_type, "issues");
         assert!(
-            event.session_id.as_ref().unwrap().as_str().contains("issue/456"),
+            event
+                .session_id
+                .as_ref()
+                .unwrap()
+                .as_str()
+                .contains("issue/456"),
             "session_id should encode entity: {:?}",
             event.session_id
         );
@@ -424,7 +434,12 @@ mod event_normalization_tests {
 
         let event = result.unwrap();
         assert!(
-            event.session_id.as_ref().unwrap().as_str().contains("branch/main"),
+            event
+                .session_id
+                .as_ref()
+                .unwrap()
+                .as_str()
+                .contains("branch/main"),
             "session_id should encode branch: {:?}",
             event.session_id
         );
@@ -463,7 +478,12 @@ mod event_normalization_tests {
 
         let event = result.unwrap();
         assert!(
-            event.session_id.as_ref().unwrap().as_str().contains("release/v1.0.0"),
+            event
+                .session_id
+                .as_ref()
+                .unwrap()
+                .as_str()
+                .contains("release/v1.0.0"),
             "session_id should encode release: {:?}",
             event.session_id
         );
@@ -499,7 +519,12 @@ mod event_normalization_tests {
 
         let event = result.unwrap();
         assert!(
-            event.session_id.as_ref().unwrap().as_str().contains("repository/repository"),
+            event
+                .session_id
+                .as_ref()
+                .unwrap()
+                .as_str()
+                .contains("repository/repository"),
             "session_id should encode repository entity: {:?}",
             event.session_id
         );
@@ -534,7 +559,12 @@ mod event_normalization_tests {
 
         let event = result.unwrap();
         assert!(
-            event.session_id.as_ref().unwrap().as_str().contains("unknown/unknown"),
+            event
+                .session_id
+                .as_ref()
+                .unwrap()
+                .as_str()
+                .contains("unknown/unknown"),
             "session_id should encode unknown entity: {:?}",
             event.session_id
         );
@@ -855,7 +885,12 @@ mod integration_tests {
         let event = output.as_wrapped().expect("should be Wrapped output");
         assert_eq!(event.event_type, "pull_request");
         assert!(
-            event.session_id.as_ref().unwrap().as_str().contains("pull_request/123"),
+            event
+                .session_id
+                .as_ref()
+                .unwrap()
+                .as_str()
+                .contains("pull_request/123"),
             "session_id should encode entity: {:?}",
             event.session_id
         );
