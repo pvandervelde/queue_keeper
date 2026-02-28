@@ -15,6 +15,7 @@ mod config_validation {
         let config = GenericProviderConfig {
             provider_id: "jira".to_string(),
             processing_mode: ProcessingMode::Direct,
+            target_queue: Some("queue-keeper-jira".to_string()),
             event_type_source: None,
             delivery_id_source: None,
             signature: None,
@@ -29,6 +30,7 @@ mod config_validation {
         let config = GenericProviderConfig {
             provider_id: "gitlab".to_string(),
             processing_mode: ProcessingMode::Wrap,
+            target_queue: None,
             event_type_source: Some(FieldSource::Header {
                 name: "X-Gitlab-Event".to_string(),
             }),
@@ -49,6 +51,7 @@ mod config_validation {
         let config = GenericProviderConfig {
             provider_id: "no-extract".to_string(),
             processing_mode: ProcessingMode::Wrap,
+            target_queue: None,
             event_type_source: None,
             delivery_id_source: None,
             signature: None,
@@ -64,12 +67,51 @@ mod config_validation {
         );
     }
 
+    /// Verify that direct mode without target_queue is rejected.
+    #[test]
+    fn test_direct_mode_requires_target_queue() {
+        let config = GenericProviderConfig {
+            provider_id: "jira".to_string(),
+            processing_mode: ProcessingMode::Direct,
+            target_queue: None,
+            event_type_source: None,
+            delivery_id_source: None,
+            signature: None,
+            field_extraction: None,
+        };
+        let err = config.validate().unwrap_err();
+        assert!(
+            matches!(err, GenericProviderConfigError::MissingTargetQueue { .. }),
+            "expected MissingTargetQueue, got: {err:?}"
+        );
+    }
+
+    /// Verify that an empty target_queue is rejected even when provided.
+    #[test]
+    fn test_direct_mode_empty_target_queue_rejected() {
+        let config = GenericProviderConfig {
+            provider_id: "jira".to_string(),
+            processing_mode: ProcessingMode::Direct,
+            target_queue: Some("".to_string()),
+            event_type_source: None,
+            delivery_id_source: None,
+            signature: None,
+            field_extraction: None,
+        };
+        let err = config.validate().unwrap_err();
+        assert!(
+            matches!(err, GenericProviderConfigError::InvalidTargetQueue { .. }),
+            "expected InvalidTargetQueue, got: {err:?}"
+        );
+    }
+
     /// Verify that an empty provider_id is rejected.
     #[test]
     fn test_empty_provider_id_rejected() {
         let config = GenericProviderConfig {
             provider_id: "".to_string(),
             processing_mode: ProcessingMode::Direct,
+            target_queue: None,
             event_type_source: None,
             delivery_id_source: None,
             signature: None,
@@ -88,6 +130,7 @@ mod config_validation {
         let config = GenericProviderConfig {
             provider_id: "GitLab".to_string(),
             processing_mode: ProcessingMode::Direct,
+            target_queue: None,
             event_type_source: None,
             delivery_id_source: None,
             signature: None,
@@ -106,6 +149,7 @@ mod config_validation {
         let config = GenericProviderConfig {
             provider_id: "../escape".to_string(),
             processing_mode: ProcessingMode::Direct,
+            target_queue: None,
             event_type_source: None,
             delivery_id_source: None,
             signature: None,
@@ -124,6 +168,7 @@ mod config_validation {
         let config = GenericProviderConfig {
             provider_id: "my provider".to_string(),
             processing_mode: ProcessingMode::Direct,
+            target_queue: None,
             event_type_source: None,
             delivery_id_source: None,
             signature: None,
@@ -142,6 +187,7 @@ mod config_validation {
         let config = GenericProviderConfig {
             provider_id: "my-cool_app".to_string(),
             processing_mode: ProcessingMode::Direct,
+            target_queue: Some("queue-keeper-my-cool-app".to_string()),
             event_type_source: None,
             delivery_id_source: None,
             signature: None,
@@ -156,6 +202,7 @@ mod config_validation {
         let config = GenericProviderConfig {
             provider_id: "app42".to_string(),
             processing_mode: ProcessingMode::Direct,
+            target_queue: Some("queue-keeper-app42".to_string()),
             event_type_source: None,
             delivery_id_source: None,
             signature: None,
@@ -170,6 +217,7 @@ mod config_validation {
         let config = GenericProviderConfig {
             provider_id: "test".to_string(),
             processing_mode: ProcessingMode::Direct,
+            target_queue: Some("queue-keeper-test".to_string()),
             event_type_source: Some(FieldSource::Header {
                 name: "".to_string(),
             }),
@@ -190,6 +238,7 @@ mod config_validation {
         let config = GenericProviderConfig {
             provider_id: "test".to_string(),
             processing_mode: ProcessingMode::Direct,
+            target_queue: Some("queue-keeper-test".to_string()),
             event_type_source: None,
             delivery_id_source: Some(FieldSource::JsonPath {
                 path: "".to_string(),
@@ -210,6 +259,7 @@ mod config_validation {
         let config = GenericProviderConfig {
             provider_id: "test".to_string(),
             processing_mode: ProcessingMode::Direct,
+            target_queue: Some("queue-keeper-test".to_string()),
             event_type_source: None,
             delivery_id_source: None,
             signature: Some(SignatureConfig {
@@ -234,6 +284,7 @@ mod config_validation {
         let config = GenericProviderConfig {
             provider_id: "test".to_string(),
             processing_mode: ProcessingMode::Wrap,
+            target_queue: None,
             event_type_source: None,
             delivery_id_source: None,
             signature: None,
@@ -414,6 +465,7 @@ mod serde_roundtrip {
         let config = GenericProviderConfig {
             provider_id: "roundtrip".to_string(),
             processing_mode: ProcessingMode::Wrap,
+            target_queue: None,
             event_type_source: Some(FieldSource::Header {
                 name: "X-Event-Type".to_string(),
             }),
@@ -466,11 +518,13 @@ field_extraction:
         let yaml = r#"
 provider_id: "slack"
 processing_mode: "direct"
+target_queue: "queue-keeper-slack"
 "#;
         let config: GenericProviderConfig =
             serde_yaml::from_str(yaml).expect("YAML deserialisation");
         assert_eq!(config.provider_id, "slack");
         assert_eq!(config.processing_mode, ProcessingMode::Direct);
+        assert_eq!(config.target_queue.as_deref(), Some("queue-keeper-slack"));
         assert!(config.event_type_source.is_none());
         assert!(config.delivery_id_source.is_none());
         assert!(config.signature.is_none());
@@ -492,6 +546,7 @@ mod provider_construction {
         let config = GenericProviderConfig {
             provider_id: "jira".to_string(),
             processing_mode: ProcessingMode::Direct,
+            target_queue: Some("queue-keeper-jira".to_string()),
             event_type_source: None,
             delivery_id_source: None,
             signature: None,
@@ -510,6 +565,7 @@ mod provider_construction {
         let config = GenericProviderConfig {
             provider_id: "".to_string(),
             processing_mode: ProcessingMode::Direct,
+            target_queue: None,
             event_type_source: None,
             delivery_id_source: None,
             signature: None,
@@ -525,6 +581,7 @@ mod provider_construction {
         let config = GenericProviderConfig {
             provider_id: "wrap-test".to_string(),
             processing_mode: ProcessingMode::Wrap,
+            target_queue: None,
             event_type_source: None,
             delivery_id_source: None,
             signature: None,
@@ -552,6 +609,7 @@ mod processor_stubs {
         let config = GenericProviderConfig {
             provider_id: "stub-provider".to_string(),
             processing_mode: ProcessingMode::Direct,
+            target_queue: Some("queue-keeper-stub-provider".to_string()),
             event_type_source: None,
             delivery_id_source: None,
             signature: None,

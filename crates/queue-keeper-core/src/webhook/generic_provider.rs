@@ -30,6 +30,7 @@
 //! let config = GenericProviderConfig {
 //!     provider_id: "jira".to_string(),
 //!     processing_mode: ProcessingMode::Direct,
+//!     target_queue: Some("queue-keeper-jira".to_string()),
 //!     event_type_source: None,
 //!     delivery_id_source: None,
 //!     signature: None,
@@ -72,6 +73,7 @@ use tracing::instrument;
 ///
 /// - `provider_id` is non-empty and URL-safe (`[a-z0-9\-_]`)
 /// - Wrap mode requires a [`FieldExtractionConfig`] to be present
+/// - Direct mode requires a non-empty `target_queue` to be configured
 /// - Any [`SignatureConfig`] is internally consistent
 /// - Individual [`FieldSource`] values are non-empty
 ///
@@ -85,6 +87,7 @@ use tracing::instrument;
 /// let config = GenericProviderConfig {
 ///     provider_id: "gitlab".to_string(),
 ///     processing_mode: ProcessingMode::Wrap,
+///     target_queue: None,
 ///     event_type_source: Some(FieldSource::Header {
 ///         name: "X-Gitlab-Event".to_string(),
 ///     }),
@@ -110,6 +113,18 @@ pub struct GenericProviderConfig {
     /// Whether to normalise the payload into a [`WrappedEvent`] or forward
     /// it as-is.
     pub processing_mode: ProcessingMode,
+
+    /// Target Azure Service Bus queue for **direct** mode delivery.
+    ///
+    /// Required when `processing_mode` is [`ProcessingMode::Direct`].
+    /// The queue must follow Azure Service Bus naming conventions
+    /// (`queue-keeper-{provider}`).
+    /// Ignored in wrap mode (routing is determined by [`BotConfiguration`]
+    /// in that case).
+    ///
+    /// [`BotConfiguration`]: crate::bot_config::BotConfiguration
+    #[serde(default)]
+    pub target_queue: Option<String>,
 
     /// Where to read the "event type" value (e.g. a header or JSON field).
     ///
@@ -157,6 +172,7 @@ impl GenericProviderConfig {
     /// let config = GenericProviderConfig {
     ///     provider_id: "my-app".to_string(),
     ///     processing_mode: ProcessingMode::Direct,
+    ///     target_queue: Some("queue-keeper-my-app".to_string()),
     ///     event_type_source: None,
     ///     delivery_id_source: None,
     ///     signature: None,
@@ -190,6 +206,23 @@ impl GenericProviderConfig {
             return Err(GenericProviderConfigError::MissingFieldExtraction {
                 provider_id: self.provider_id.clone(),
             });
+        }
+
+        // Direct mode requires a target queue for delivery
+        if self.processing_mode == ProcessingMode::Direct && self.target_queue.is_none() {
+            return Err(GenericProviderConfigError::MissingTargetQueue {
+                provider_id: self.provider_id.clone(),
+            });
+        }
+
+        // Validate target queue name format if present
+        if let Some(ref queue) = self.target_queue {
+            if queue.is_empty() {
+                return Err(GenericProviderConfigError::InvalidTargetQueue {
+                    provider_id: self.provider_id.clone(),
+                    message: "target_queue must not be empty".to_string(),
+                });
+            }
         }
 
         // Validate field sources if present
@@ -489,6 +522,20 @@ pub enum GenericProviderConfigError {
     )]
     MissingFieldExtraction { provider_id: String },
 
+    /// Direct mode requires a target queue for message delivery.
+    #[error(
+        "provider '{provider_id}': processing_mode is 'direct' but no \
+         target_queue was configured"
+    )]
+    MissingTargetQueue { provider_id: String },
+
+    /// The target queue name is invalid.
+    #[error("provider '{provider_id}': invalid target_queue: {message}")]
+    InvalidTargetQueue {
+        provider_id: String,
+        message: String,
+    },
+
     /// A field source value is invalid (e.g. empty header name).
     #[error("{context}: {message}")]
     InvalidFieldSource { context: String, message: String },
@@ -539,6 +586,7 @@ pub enum GenericProviderConfigError {
 /// let config = GenericProviderConfig {
 ///     provider_id: "slack".to_string(),
 ///     processing_mode: ProcessingMode::Direct,
+///     target_queue: Some("queue-keeper-slack".to_string()),
 ///     event_type_source: None,
 ///     delivery_id_source: None,
 ///     signature: None,
@@ -576,6 +624,7 @@ impl GenericWebhookProvider {
     /// let config = GenericProviderConfig {
     ///     provider_id: "jira".to_string(),
     ///     processing_mode: ProcessingMode::Direct,
+    ///     target_queue: Some("queue-keeper-jira".to_string()),
     ///     event_type_source: None,
     ///     delivery_id_source: None,
     ///     signature: None,

@@ -1,6 +1,7 @@
 //! Configuration types for the HTTP service
 
 use crate::errors::ConfigError;
+use queue_keeper_core::webhook::generic_provider::{GenericProviderConfig, GenericProviderConfigError};
 use serde::{Deserialize, Serialize};
 
 /// Service configuration
@@ -25,6 +26,18 @@ pub struct ServiceConfig {
     /// requests to unknown providers will receive `404 Not Found`.
     #[serde(default)]
     pub providers: Vec<ProviderConfig>,
+
+    /// Configuration-driven generic webhook providers.
+    ///
+    /// Each entry registers a non-GitHub provider (e.g. `jira`, `slack`)
+    /// using [`GenericProviderConfig`]. These providers are fully
+    /// configuration-driven — no Rust code changes are needed to add
+    /// a new source. An empty list is valid.
+    ///
+    /// Provider IDs in this list must be unique and must not conflict
+    /// with IDs in the [`providers`](Self::providers) list.
+    #[serde(default)]
+    pub generic_providers: Vec<GenericProviderConfig>,
 }
 
 impl ServiceConfig {
@@ -57,7 +70,19 @@ impl ServiceConfig {
             provider.validate()?;
         }
 
-        // Detect duplicate provider IDs
+        // Validate each generic provider individually
+        for generic in &self.generic_providers {
+            generic.validate().map_err(|e| match e {
+                GenericProviderConfigError::InvalidProviderId { message } => {
+                    ConfigError::ProviderValidation { message }
+                }
+                other => ConfigError::ProviderValidation {
+                    message: other.to_string(),
+                },
+            })?;
+        }
+
+        // Detect duplicate provider IDs (across both lists)
         let mut seen = std::collections::HashSet::new();
         for provider in &self.providers {
             if !seen.insert(provider.id.as_str()) {
@@ -65,6 +90,16 @@ impl ServiceConfig {
                     message: format!(
                         "duplicate provider ID '{}': each provider ID must be unique",
                         provider.id
+                    ),
+                });
+            }
+        }
+        for generic in &self.generic_providers {
+            if !seen.insert(generic.provider_id.as_str()) {
+                return Err(ConfigError::ProviderValidation {
+                    message: format!(
+                        "duplicate provider ID '{}': each provider ID must be unique across providers and generic_providers",
+                        generic.provider_id
                     ),
                 });
             }

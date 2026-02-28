@@ -432,6 +432,123 @@ mod service_config_validate_tests {
         };
         assert!(config.validate().is_err());
     }
+
+    /// Verify that a valid generic provider passes validation.
+    #[test]
+    fn test_single_valid_generic_provider_passes() {
+        use queue_keeper_core::webhook::generic_provider::{
+            GenericProviderConfig, ProcessingMode,
+        };
+        let config = ServiceConfig {
+            generic_providers: vec![GenericProviderConfig {
+                provider_id: "jira".to_string(),
+                processing_mode: ProcessingMode::Direct,
+                target_queue: Some("queue-keeper-jira".to_string()),
+                event_type_source: None,
+                delivery_id_source: None,
+                signature: None,
+                field_extraction: None,
+            }],
+            ..Default::default()
+        };
+        assert!(config.validate().is_ok());
+    }
+
+    /// Verify that an invalid generic provider (missing target_queue) fails validation.
+    #[test]
+    fn test_generic_provider_missing_target_queue_fails() {
+        use queue_keeper_core::webhook::generic_provider::{
+            GenericProviderConfig, ProcessingMode,
+        };
+        let config = ServiceConfig {
+            generic_providers: vec![GenericProviderConfig {
+                provider_id: "jira".to_string(),
+                processing_mode: ProcessingMode::Direct,
+                target_queue: None,
+                event_type_source: None,
+                delivery_id_source: None,
+                signature: None,
+                field_extraction: None,
+            }],
+            ..Default::default()
+        };
+        assert!(config.validate().is_err());
+    }
+
+    /// Verify that duplicate ID across providers and generic_providers fails.
+    #[test]
+    fn test_conflict_between_providers_and_generic_providers_fails() {
+        use queue_keeper_core::webhook::generic_provider::{
+            GenericProviderConfig, ProcessingMode,
+        };
+        let config = ServiceConfig {
+            providers: vec![ProviderConfig {
+                id: "jira".to_string(),
+                require_signature: false,
+                secret: None,
+                allowed_event_types: vec![],
+            }],
+            generic_providers: vec![GenericProviderConfig {
+                provider_id: "jira".to_string(),
+                processing_mode: ProcessingMode::Direct,
+                target_queue: Some("queue-keeper-jira".to_string()),
+                event_type_source: None,
+                delivery_id_source: None,
+                signature: None,
+                field_extraction: None,
+            }],
+            ..Default::default()
+        };
+        let result = config.validate();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(&err, ConfigError::ProviderValidation { message }
+                if message.contains("duplicate")),
+            "expected duplicate provider error, got: {:?}",
+            err
+        );
+    }
+
+    /// Verify that duplicate IDs within generic_providers fails.
+    #[test]
+    fn test_duplicate_generic_provider_ids_fail() {
+        use queue_keeper_core::webhook::generic_provider::{
+            GenericProviderConfig, ProcessingMode,
+        };
+        let config = ServiceConfig {
+            generic_providers: vec![
+                GenericProviderConfig {
+                    provider_id: "jira".to_string(),
+                    processing_mode: ProcessingMode::Direct,
+                    target_queue: Some("queue-keeper-jira".to_string()),
+                    event_type_source: None,
+                    delivery_id_source: None,
+                    signature: None,
+                    field_extraction: None,
+                },
+                GenericProviderConfig {
+                    provider_id: "jira".to_string(),
+                    processing_mode: ProcessingMode::Direct,
+                    target_queue: Some("queue-keeper-jira-2".to_string()),
+                    event_type_source: None,
+                    delivery_id_source: None,
+                    signature: None,
+                    field_extraction: None,
+                },
+            ],
+            ..Default::default()
+        };
+        let result = config.validate();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(&err, ConfigError::ProviderValidation { message }
+                if message.contains("duplicate")),
+            "expected duplicate provider error, got: {:?}",
+            err
+        );
+    }
 }
 
 // ============================================================================
