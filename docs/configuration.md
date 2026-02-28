@@ -468,16 +468,227 @@ bots:
 
 The `config.settings` object is included in the event envelope payload sent to the bot's queue.
 
+## Service Configuration File
+
+The HTTP service itself is configured by a separate YAML file (`service.yaml`),
+distinct from the bot-subscription configuration described above.
+
+### Loading Sources (Priority Order)
+
+Configuration is merged from these sources in ascending priority order (later
+sources override earlier ones):
+
+| Priority | Source | Notes |
+|----------|--------|-------|
+| 1 (lowest) | `/etc/queue-keeper/service.yaml` | System-wide defaults |
+| 2 | `./config/service.yaml` | Deployment-local override |
+| 3 | Path from `QK_CONFIG_FILE` env var | Operator-specified file (required when set) |
+| 4 (highest) | Environment variables with `QK__` prefix | Override any file value |
+
+**Environment variable format:** double underscores (`__`) separate nesting
+levels. For example:
+
+```bash
+QK__SERVER__PORT=9090          # sets server.port
+QK__SERVER__HOST=127.0.0.1     # sets server.host
+QK__LOGGING__LEVEL=debug       # sets logging.level
+```
+
+### Minimal Service Configuration
+
+```yaml
+# config/service.yaml
+server:
+  host: "0.0.0.0"
+  port: 8080
+```
+
+### Full Service Configuration Schema
+
+```yaml
+server:
+  host: "0.0.0.0"       # Bind address
+  port: 8080             # Listen port
+
+webhooks:
+  max_payload_size: 26214400   # Max body in bytes (25 MB)
+  timeout_seconds: 30          # Processing timeout
+
+security:
+  require_https: false         # Enforce TLS (true in production)
+  allowed_origins: []          # CORS origins (empty = all)
+
+logging:
+  level: "info"                # trace | debug | info | warn | error
+  format: "json"               # json | text
+
+providers: []         # Standard GitHub webhook providers (see below)
+generic_providers: [] # Configuration-driven generic providers (see below)
+```
+
+---
+
+### `providers` — Standard GitHub Webhook Providers
+
+Each entry in `providers` registers a GitHub-style webhook provider at
+`POST /webhook/{id}`.
+
+```yaml
+providers:
+  - id: "github"               # URL segment: POST /webhook/github
+    require_signature: true    # Require HMAC-SHA256 X-Hub-Signature-256 header
+    secret:
+      type: key_vault          # or "literal" for development only
+      secret_name: "github-webhook-secret"   # Azure Key Vault secret name
+    allowed_event_types: []    # Empty = all event types accepted
+```
+
+#### Secret Sources for `providers`
+
+| `type` | Description | Recommendation |
+|--------|-------------|----------------|
+| `key_vault` | Azure Key Vault secret | **Use in production** |
+| `literal` | Hard-coded value in config | Development / CI only |
+
+**Development example (literal secret):**
+
+```yaml
+providers:
+  - id: "github"
+    require_signature: true
+    secret:
+      type: literal
+      value: "my-dev-secret"   # Never commit to source control
+```
+
+---
+
+### `generic_providers` — Configuration-Driven Providers
+
+Generic providers allow you to add non-GitHub webhook sources without
+writing any Rust code. Each entry is registered at `POST /webhook/{provider_id}`.
+
+#### Processing Modes
+
+| Mode | Description |
+|------|-------------|
+| `direct` | Forward raw request body to a configured Azure Service Bus queue. |
+| `wrap` | Parse JSON payload, extract fields, produce a standard `WrappedEvent`. |
+
+#### Example: Direct Mode (Jira)
+
+Forwards raw Jira webhook JSON to `queue-keeper-jira` without transformation:
+
+```yaml
+generic_providers:
+  - provider_id: "jira"
+    processing_mode: direct
+    target_queue: "queue-keeper-jira"       # Required for direct mode
+    event_type_source:
+      source: header
+      name: "X-Atlassian-Event"             # Use Jira's event header
+    signature:
+      header_name: "X-Hub-Signature"
+      algorithm: hmac_sha256
+    webhook_secret:
+      type: literal
+      value: "jira-dev-secret"              # Use key_vault in production
+```
+
+#### Example: Wrap Mode (GitLab)
+
+Normalises GitLab webhooks into the standard `WrappedEvent` format and routes
+them to bots using the standard subscription rules:
+
+```yaml
+generic_providers:
+  - provider_id: "gitlab"
+    processing_mode: wrap
+    # Wrap mode does not need target_queue; routing uses BotConfiguration
+    event_type_source:
+      source: header
+      name: "X-Gitlab-Event"
+    signature:
+      header_name: "X-Gitlab-Token"
+      algorithm: bearer_token              # GitLab uses a shared token, not HMAC
+    webhook_secret:
+      type: key_vault
+      secret_name: "gitlab-webhook-token"  # Retrieve from Key Vault
+    field_extraction:
+      repository_path: "project.path_with_namespace"   # "owner/repo"
+      entity_path: "object_attributes.iid"             # MR/issue number
+      action_path: "object_attributes.action"          # "open", "merge", etc.
+```
+
+#### Example: Wrap Mode (Slack Events API)
+
+```yaml
+generic_providers:
+  - provider_id: "slack"
+    processing_mode: wrap
+    event_type_source:
+      source: json_path
+      path: "event.type"                    # e.g. "message", "app_mention"
+    delivery_id_source:
+      source: auto_generate                 # No Slack delivery ID header
+    # No signature configured — rely on Slack's URL verification challenge
+    field_extraction:
+      repository_path: "team_id"            # Slack workspace ID as "repo"
+      entity_path: "event.channel"
+      action_path: "event.subtype"
+```
+
+#### `generic_providers` Field Reference
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `provider_id` | string | ✅ | URL-safe ID (`[a-z0-9-_]+`). Must be unique. |
+| `processing_mode` | `direct` \| `wrap` | ✅ | How to process incoming payloads. |
+| `target_queue` | string | Direct only | Azure Service Bus queue name. |
+| `event_type_source` | FieldSource | No | Where to read the event type. Defaults to `"webhook"`. |
+| `delivery_id_source` | FieldSource | No | Where to read the delivery ID. Defaults to auto-generated UUID. |
+| `signature` | SignatureConfig | No | Signature validation settings. |
+| `webhook_secret` | WebhookSecretConfig | No | Secret source for signature validation. |
+| `field_extraction` | FieldExtractionConfig | Wrap only | JSON field paths for wrap-mode extraction. |
+
+#### `FieldSource` Reference
+
+| `source` | Additional fields | Description |
+|----------|-------------------|-------------|
+| `header` | `name: string` | Read from HTTP header (case-insensitive) |
+| `json_path` | `path: string` | Dot-separated path into JSON body |
+| `static` | `value: string` | Constant compile-time value |
+| `auto_generate` | — | Auto-generated server-side value |
+
+#### `SignatureConfig` Reference
+
+| Field | Description |
+|-------|-------------|
+| `header_name` | HTTP header carrying the signature (e.g. `X-Hub-Signature-256`) |
+| `algorithm` | `hmac_sha256` \| `hmac_sha1` \| `bearer_token` |
+
+#### `WebhookSecretConfig` Reference
+
+| `type` | Additional fields | Description |
+|--------|-------------------|-------------|
+| `key_vault` | `secret_name: string` | Azure Key Vault secret name — **use in production** |
+| `literal` | `value: string` | Hard-coded secret — **development / CI only** |
+
+---
+
 ## Environment Variables
 
 ### Configuration Loading
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `BOT_CONFIG_PATH` | Path to YAML configuration file | `/config/bot-config.yaml` |
-| `BOT_CONFIGURATION` | JSON configuration string | `'{"bots": [...]}` |
+| `BOT_CONFIG_PATH` | Path to bot-subscription YAML file | `/config/bot-config.yaml` |
+| `BOT_CONFIGURATION` | JSON bot-subscription string | `'{"bots": [...]}` |
+| `QK_CONFIG_FILE` | Path to service configuration YAML | `/config/service.yaml` |
 
-If both are set, `BOT_CONFIG_PATH` takes precedence.
+If both `BOT_CONFIG_PATH` and `BOT_CONFIGURATION` are set, `BOT_CONFIG_PATH` takes precedence.
+
+
 
 ### Global Settings
 

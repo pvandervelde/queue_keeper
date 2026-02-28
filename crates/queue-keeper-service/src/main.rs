@@ -11,14 +11,16 @@
 //! See specs/interfaces/http-service.md for complete specification.
 
 mod circuit_breaker;
+mod signature_validator;
 
 use queue_keeper_api::{
     start_server, DefaultEventStore, DefaultHealthChecker, ProviderId, ProviderRegistry,
     ServiceConfig, ServiceError,
 };
-use queue_keeper_core::webhook::GithubWebhookProvider;
+use queue_keeper_core::webhook::{generic_provider::GenericWebhookProvider, GithubWebhookProvider};
+use signature_validator::LiteralSignatureValidator;
 use std::sync::Arc;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
@@ -35,20 +37,91 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Starting Queue-Keeper Service");
 
-    // Load configuration (TODO: from file/environment)
-    let config = ServiceConfig::default();
+    // -------------------------------------------------------------------------
+    // Load configuration
+    //
+    // Sources (applied in order — later sources override earlier ones):
+    //  1. /etc/queue-keeper/service.yaml   — system-wide defaults
+    //  2. ./config/service.yaml            — deployment-local override
+    //  3. Path given by QK_CONFIG_FILE env — operator-specified file
+    //  4. Environment variables prefixed QK__ (double-underscore separator)
+    //     e.g. QK__SERVER__PORT=9090 sets server.port = 9090
+    //
+    // An absent or unparseable configuration file is not an error; the service
+    // falls back to defaults for missing fields.  An unparseable environment
+    // variable *is* a hard error because it indicates operator misconfiguration.
+    // -------------------------------------------------------------------------
+    let mut config_builder = config::Config::builder()
+        .add_source(
+            config::File::with_name("/etc/queue-keeper/service")
+                .required(false)
+                .format(config::FileFormat::Yaml),
+        )
+        .add_source(
+            config::File::with_name("config/service")
+                .required(false)
+                .format(config::FileFormat::Yaml),
+        );
 
-    // Build provider registry from configuration.
-    // Each entry in config.providers gets its own webhook processor.
-    // TODO: Wire SignatureValidator from provider_config.secret once Key Vault
-    //       integration is available (see specs/interfaces/key-vault.md).
+    // Optional explicit path supplied by the operator.
+    if let Ok(explicit_path) = std::env::var("QK_CONFIG_FILE") {
+        if !explicit_path.is_empty() {
+            config_builder = config_builder.add_source(
+                config::File::with_name(&explicit_path)
+                    .required(true)
+                    .format(config::FileFormat::Yaml),
+            );
+            info!(path = %explicit_path, "Loading configuration from explicit path");
+        }
+    }
+
+    let config = match config_builder
+        .add_source(config::Environment::with_prefix("QK").separator("__"))
+        .build()
+    {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            error!(error = %e, "Failed to build configuration; aborting");
+            std::process::exit(3);
+        }
+    };
+
+    let service_config: ServiceConfig = match config.try_deserialize() {
+        Ok(sc) => sc,
+        Err(e) => {
+            warn!(
+                error = %e,
+                "Could not deserialize configuration, using service defaults"
+            );
+            ServiceConfig::default()
+        }
+    };
+
+    if let Err(e) = service_config.validate() {
+        error!(error = %e, "Service configuration is invalid; aborting");
+        std::process::exit(3);
+    }
+
+    // -------------------------------------------------------------------------
+    // Build provider registry
+    //
+    // For every entry in `config.providers` we create a GithubWebhookProvider
+    // with an optional LiteralSignatureValidator when the provider is
+    // configured with a Literal secret.
+    //
+    // Key Vault–backed secrets are not yet wired in this release; providers
+    // that request KeyVault will still receive webhooks but signature
+    // verification will be skipped and a WARN will be emitted.
+    // -------------------------------------------------------------------------
     let mut provider_registry = ProviderRegistry::new();
-    for provider_config in &config.providers {
+
+    for provider_config in &service_config.providers {
         match ProviderId::new(&provider_config.id) {
             Ok(provider_id) => {
-                let processor = Arc::new(GithubWebhookProvider::new(None, None, None));
+                let validator = build_validator_from_provider_config(provider_config);
+                let processor = Arc::new(GithubWebhookProvider::new(validator, None, None));
                 provider_registry.register(provider_id, processor);
-                info!(provider = %provider_config.id, "Registered webhook provider from config");
+                info!(provider = %provider_config.id, "Registered GitHub webhook provider from config");
             }
             Err(e) => {
                 error!(
@@ -72,17 +145,66 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         info!("Registered default GitHub webhook provider (no explicit config entry found)");
     }
 
+    // -------------------------------------------------------------------------
+    // Wire configuration-driven generic providers
+    //
+    // Each [`GenericProviderConfig`] entry in `service_config.generic_providers`
+    // becomes a [`GenericWebhookProvider`] registered under its provider ID.
+    // -------------------------------------------------------------------------
+    for generic_config in service_config.generic_providers.clone() {
+        let provider_id_str = generic_config.provider_id.clone();
+
+        match ProviderId::new(&provider_id_str) {
+            Ok(provider_id) => {
+                // Build a signature validator if the signature section carries a
+                // Literal secret.  Key Vault support will be added in a future
+                // release.
+                let validator = build_validator_from_generic_config(&generic_config);
+
+                let provider = GenericWebhookProvider::with_signature_validator(
+                    generic_config,
+                    None,
+                    validator,
+                );
+
+                match provider {
+                    Ok(p) => {
+                        provider_registry.register(provider_id, Arc::new(p));
+                        info!(
+                            provider = %provider_id_str,
+                            "Registered generic webhook provider from config"
+                        );
+                    }
+                    Err(e) => {
+                        error!(
+                            provider = %provider_id_str,
+                            error = %e,
+                            "Failed to construct generic webhook provider; skipping"
+                        );
+                    }
+                }
+            }
+            Err(e) => {
+                error!(
+                    provider = %provider_id_str,
+                    error = %e,
+                    "Skipping generic provider with invalid ID in configuration"
+                );
+            }
+        }
+    }
+
     let health_checker = Arc::new(DefaultHealthChecker);
     let event_store = Arc::new(DefaultEventStore);
 
     info!(
-        host = %config.server.host,
-        port = config.server.port,
+        host = %service_config.server.host,
+        port = service_config.server.port,
         "Starting HTTP server"
     );
 
     // Start the server
-    if let Err(e) = start_server(config, provider_registry, health_checker, event_store).await {
+    if let Err(e) = start_server(service_config, provider_registry, health_checker, event_store).await {
         error!("Failed to start server: {}", e);
 
         let exit_code = match e {
@@ -97,3 +219,60 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
+
+// ============================================================================
+// Private helpers
+// ============================================================================
+
+/// Build a [`SignatureValidator`] from a standard [`ProviderConfig`].
+///
+/// Returns `None` when no secret is configured or when the secret source is
+/// Key Vault (not yet implemented).
+fn build_validator_from_provider_config(
+    provider_config: &queue_keeper_api::ProviderConfig,
+) -> Option<Arc<dyn queue_keeper_core::webhook::SignatureValidator>> {
+    use queue_keeper_api::ProviderSecretConfig;
+
+    match provider_config.secret.as_ref()? {
+        ProviderSecretConfig::Literal { value } => {
+            Some(Arc::new(LiteralSignatureValidator::new(value.clone())))
+        }
+        ProviderSecretConfig::KeyVault { secret_name } => {
+            warn!(
+                provider = %provider_config.id,
+                secret_name = %secret_name,
+                "Key Vault–backed signature validation is not yet implemented; \
+                 signature validation will be SKIPPED for this provider. \
+                 Do not use in production."
+            );
+            None
+        }
+    }
+}
+
+/// Build a [`SignatureValidator`] from a [`GenericProviderConfig`] signature section.
+///
+/// Returns `None` when the provider has no `webhook_secret` configuration, or when
+/// the secret source is Key Vault (not yet implemented).
+fn build_validator_from_generic_config(
+    generic_config: &queue_keeper_core::webhook::generic_provider::GenericProviderConfig,
+) -> Option<Arc<dyn queue_keeper_core::webhook::SignatureValidator>> {
+    use queue_keeper_core::webhook::generic_provider::WebhookSecretConfig;
+
+    match generic_config.webhook_secret.as_ref()? {
+        WebhookSecretConfig::Literal { value } => {
+            Some(Arc::new(LiteralSignatureValidator::new(value.clone())))
+        }
+        WebhookSecretConfig::KeyVault { secret_name } => {
+            warn!(
+                provider = %generic_config.provider_id,
+                secret_name = %secret_name,
+                "Key Vault-backed signature validation is not yet implemented for generic \
+                 providers; signature validation will be SKIPPED. \
+                 Do not use in production."
+            );
+            None
+        }
+    }
+}
+
