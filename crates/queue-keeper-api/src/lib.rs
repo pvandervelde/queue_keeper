@@ -305,7 +305,7 @@ pub async fn handle_provider_webhook(
     // Start timing for metrics
     let start = std::time::Instant::now();
 
-    // Convert headers to HashMap
+    // Convert headers to HashMap (lowercase keys for consistent lookup)
     let header_map: HashMap<String, String> = headers
         .iter()
         .map(|(k, v)| {
@@ -316,14 +316,29 @@ pub async fn handle_provider_webhook(
         })
         .collect();
 
-    // Parse webhook headers
-    let webhook_headers = match WebhookHeaders::from_http_headers(&header_map) {
-        Ok(h) => h,
-        Err(e) => {
-            let duration = start.elapsed();
-            state.metrics.record_webhook_request(duration, false);
-            state.metrics.record_webhook_validation_failure();
-            return Err(WebhookHandlerError::InvalidHeaders(e));
+    // Determine whether this is a generic (non-GitHub) provider.
+    // Generic providers do not send GitHub-specific headers, so we use a
+    // relaxed parser that falls back to safe defaults instead of failing.
+    let is_generic_provider = state
+        .config
+        .generic_providers
+        .iter()
+        .any(|p| p.provider_id == provider);
+
+    let webhook_headers = if is_generic_provider {
+        // For generic providers, never fail on missing GitHub headers — the
+        // provider's own process_webhook will re-extract values from raw headers.
+        WebhookHeaders::from_http_headers_relaxed(&header_map)
+    } else {
+        // For GitHub and other strict providers, require all GitHub-specific headers.
+        match WebhookHeaders::from_http_headers(&header_map) {
+            Ok(h) => h,
+            Err(e) => {
+                let duration = start.elapsed();
+                state.metrics.record_webhook_request(duration, false);
+                state.metrics.record_webhook_validation_failure();
+                return Err(WebhookHandlerError::InvalidHeaders(e));
+            }
         }
     };
 
@@ -356,8 +371,9 @@ pub async fn handle_provider_webhook(
         }
     }
 
-    // Create webhook request
-    let webhook_request = WebhookRequest::new(webhook_headers, body);
+    // Create webhook request, carrying the full header map so generic providers
+    // can resolve FieldSource::Header values from any header name.
+    let webhook_request = WebhookRequest::with_raw_headers(webhook_headers, header_map, body);
 
     // Delegate to the provider-specific processor
     let processing_output = match processor.process_webhook(webhook_request).await {

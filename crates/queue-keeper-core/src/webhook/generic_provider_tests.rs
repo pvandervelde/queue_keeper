@@ -19,6 +19,7 @@ mod config_validation {
             event_type_source: None,
             delivery_id_source: None,
             signature: None,
+            webhook_secret: None,
             field_extraction: None,
         };
         assert!(config.validate().is_ok());
@@ -36,6 +37,7 @@ mod config_validation {
             }),
             delivery_id_source: Some(FieldSource::AutoGenerate),
             signature: None,
+            webhook_secret: None,
             field_extraction: Some(FieldExtractionConfig {
                 repository_path: "project.path_with_namespace".to_string(),
                 entity_path: Some("object_attributes.iid".to_string()),
@@ -55,6 +57,7 @@ mod config_validation {
             event_type_source: None,
             delivery_id_source: None,
             signature: None,
+            webhook_secret: None,
             field_extraction: None,
         };
         let err = config.validate().unwrap_err();
@@ -77,6 +80,7 @@ mod config_validation {
             event_type_source: None,
             delivery_id_source: None,
             signature: None,
+            webhook_secret: None,
             field_extraction: None,
         };
         let err = config.validate().unwrap_err();
@@ -96,6 +100,7 @@ mod config_validation {
             event_type_source: None,
             delivery_id_source: None,
             signature: None,
+            webhook_secret: None,
             field_extraction: None,
         };
         let err = config.validate().unwrap_err();
@@ -115,6 +120,7 @@ mod config_validation {
             event_type_source: None,
             delivery_id_source: None,
             signature: None,
+            webhook_secret: None,
             field_extraction: None,
         };
         let err = config.validate().unwrap_err();
@@ -134,6 +140,7 @@ mod config_validation {
             event_type_source: None,
             delivery_id_source: None,
             signature: None,
+            webhook_secret: None,
             field_extraction: None,
         };
         let err = config.validate().unwrap_err();
@@ -153,6 +160,7 @@ mod config_validation {
             event_type_source: None,
             delivery_id_source: None,
             signature: None,
+            webhook_secret: None,
             field_extraction: None,
         };
         let err = config.validate().unwrap_err();
@@ -172,6 +180,7 @@ mod config_validation {
             event_type_source: None,
             delivery_id_source: None,
             signature: None,
+            webhook_secret: None,
             field_extraction: None,
         };
         let err = config.validate().unwrap_err();
@@ -191,6 +200,7 @@ mod config_validation {
             event_type_source: None,
             delivery_id_source: None,
             signature: None,
+            webhook_secret: None,
             field_extraction: None,
         };
         assert!(config.validate().is_ok());
@@ -206,6 +216,7 @@ mod config_validation {
             event_type_source: None,
             delivery_id_source: None,
             signature: None,
+            webhook_secret: None,
             field_extraction: None,
         };
         assert!(config.validate().is_ok());
@@ -223,6 +234,7 @@ mod config_validation {
             }),
             delivery_id_source: None,
             signature: None,
+            webhook_secret: None,
             field_extraction: None,
         };
         let err = config.validate().unwrap_err();
@@ -244,6 +256,7 @@ mod config_validation {
                 path: "".to_string(),
             }),
             signature: None,
+            webhook_secret: None,
             field_extraction: None,
         };
         let err = config.validate().unwrap_err();
@@ -266,6 +279,7 @@ mod config_validation {
                 header_name: "".to_string(),
                 algorithm: SignatureAlgorithm::HmacSha256,
             }),
+            webhook_secret: None,
             field_extraction: None,
         };
         let err = config.validate().unwrap_err();
@@ -288,6 +302,7 @@ mod config_validation {
             event_type_source: None,
             delivery_id_source: None,
             signature: None,
+            webhook_secret: None,
             field_extraction: Some(FieldExtractionConfig {
                 repository_path: "".to_string(),
                 entity_path: None,
@@ -474,6 +489,7 @@ mod serde_roundtrip {
                 header_name: "X-Signature".to_string(),
                 algorithm: SignatureAlgorithm::HmacSha256,
             }),
+            webhook_secret: None,
             field_extraction: Some(FieldExtractionConfig {
                 repository_path: "repo.full_name".to_string(),
                 entity_path: Some("pr.number".to_string()),
@@ -550,6 +566,7 @@ mod provider_construction {
             event_type_source: None,
             delivery_id_source: None,
             signature: None,
+            webhook_secret: None,
             field_extraction: None,
         };
         let provider = GenericWebhookProvider::new(config, None);
@@ -569,6 +586,7 @@ mod provider_construction {
             event_type_source: None,
             delivery_id_source: None,
             signature: None,
+            webhook_secret: None,
             field_extraction: None,
         };
         let result = GenericWebhookProvider::new(config, None);
@@ -585,6 +603,7 @@ mod provider_construction {
             event_type_source: None,
             delivery_id_source: None,
             signature: None,
+            webhook_secret: None,
             field_extraction: Some(FieldExtractionConfig {
                 repository_path: "repo.name".to_string(),
                 entity_path: None,
@@ -597,49 +616,214 @@ mod provider_construction {
 }
 
 // ============================================================================
-// WebhookProcessor stub behaviour tests
+// WebhookProcessor behaviour tests
 // ============================================================================
 
-mod processor_stubs {
+mod processor_tests {
     use super::*;
-    use crate::webhook::{ValidationStatus, WebhookHeaders, WebhookRequest};
+    use crate::webhook::{ProcessingOutput, ValidationStatus, WebhookHeaders, WebhookRequest};
     use bytes::Bytes;
+    use std::collections::HashMap;
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
 
     fn direct_provider() -> GenericWebhookProvider {
         let config = GenericProviderConfig {
-            provider_id: "stub-provider".to_string(),
+            provider_id: "test-provider".to_string(),
             processing_mode: ProcessingMode::Direct,
-            target_queue: Some("queue-keeper-stub-provider".to_string()),
+            target_queue: Some("queue-keeper-test-provider".to_string()),
             event_type_source: None,
             delivery_id_source: None,
             signature: None,
+            webhook_secret: None,
             field_extraction: None,
         };
         GenericWebhookProvider::new(config, None).unwrap()
     }
 
-    fn test_request() -> WebhookRequest {
+    fn wrap_provider() -> GenericWebhookProvider {
+        let config = GenericProviderConfig {
+            provider_id: "wrap-provider".to_string(),
+            processing_mode: ProcessingMode::Wrap,
+            target_queue: None,
+            event_type_source: Some(FieldSource::Header {
+                name: "X-Event-Type".to_string(),
+            }),
+            delivery_id_source: None,
+            signature: None,
+            webhook_secret: None,
+            field_extraction: Some(FieldExtractionConfig {
+                repository_path: "repo.full_name".to_string(),
+                entity_path: Some("entity.id".to_string()),
+                action_path: Some("action".to_string()),
+            }),
+        };
+        GenericWebhookProvider::new(config, None).unwrap()
+    }
+
+    fn make_request(body: &str, extra_headers: Option<Vec<(&str, &str)>>) -> WebhookRequest {
         let headers = WebhookHeaders {
-            event_type: "ping".to_string(),
+            event_type: "webhook".to_string(),
             delivery_id: "550e8400-e29b-41d4-a716-446655440000".to_string(),
             signature: None,
             user_agent: None,
             content_type: "application/json".to_string(),
         };
-        WebhookRequest::new(headers, Bytes::from(r#"{"test":true}"#))
+        let mut raw: HashMap<String, String> = HashMap::new();
+        raw.insert("content-type".to_string(), "application/json".to_string());
+        if let Some(extras) = extra_headers {
+            for (k, v) in extras {
+                raw.insert(k.to_lowercase(), v.to_string());
+            }
+        }
+        WebhookRequest::with_raw_headers(headers, raw, Bytes::from(body.to_string()))
     }
 
-    /// Verify that process_webhook returns an error (not yet implemented).
+    // ── Direct mode ──────────────────────────────────────────────────────────
+
+    /// Verify that a direct-mode provider returns `ProcessingOutput::Direct`.
     #[tokio::test]
-    async fn test_process_webhook_returns_not_implemented_error() {
+    async fn test_direct_mode_returns_direct_output() {
         let provider = direct_provider();
-        let result = provider.process_webhook(test_request()).await;
-        assert!(result.is_err());
+        let request = make_request(r#"{"text":"hello"}"#, None);
+
+        let result = provider.process_webhook(request).await;
+        assert!(result.is_ok(), "expected OK, got: {:?}", result);
+        assert!(
+            result.unwrap().is_direct(),
+            "expected Direct output for direct mode"
+        );
     }
 
-    /// Verify that validate_signature succeeds (stub passthrough).
+    /// Verify that the raw payload bytes are forwarded unchanged in direct mode.
     #[tokio::test]
-    async fn test_validate_signature_stub_succeeds() {
+    async fn test_direct_mode_preserves_raw_payload() {
+        let provider = direct_provider();
+        let body = r#"{"original":"payload","number":42}"#;
+        let request = make_request(body, None);
+
+        let result = provider.process_webhook(request).await.unwrap();
+        if let ProcessingOutput::Direct { payload, .. } = result {
+            assert_eq!(payload.as_ref(), body.as_bytes());
+        } else {
+            panic!("expected Direct output");
+        }
+    }
+
+    /// Verify that the content-type is propagated into DirectQueueMetadata.
+    #[tokio::test]
+    async fn test_direct_mode_metadata_has_correct_provider_and_content_type() {
+        let provider = direct_provider();
+        let request = make_request(r#"{}"#, None);
+
+        let result = provider.process_webhook(request).await.unwrap();
+        if let ProcessingOutput::Direct { metadata, .. } = result {
+            assert_eq!(metadata.provider_id(), "test-provider");
+            assert_eq!(metadata.content_type(), "application/json");
+        } else {
+            panic!("expected Direct output");
+        }
+    }
+
+    // ── Wrap mode ─────────────────────────────────────────────────────────────
+
+    /// Verify that a wrap-mode provider returns `ProcessingOutput::Wrapped`.
+    #[tokio::test]
+    async fn test_wrap_mode_returns_wrapped_output() {
+        let provider = wrap_provider();
+        let body = r#"{"repo":{"full_name":"owner/repo"},"entity":{"id":42},"action":"opened"}"#;
+        let request = make_request(
+            body,
+            Some(vec![("X-Event-Type", "pull_request")]),
+        );
+
+        let result = provider.process_webhook(request).await;
+        assert!(result.is_ok(), "expected OK, got: {:?}", result);
+        assert!(
+            result.unwrap().is_wrapped(),
+            "expected Wrapped output for wrap mode"
+        );
+    }
+
+    /// Verify that the event type is extracted from the configured header.
+    #[tokio::test]
+    async fn test_wrap_mode_extracts_event_type_from_header() {
+        let provider = wrap_provider();
+        let body = r#"{"repo":{"full_name":"owner/repo"}}"#;
+        let request = make_request(body, Some(vec![("X-Event-Type", "issue_updated")]));
+
+        let result = provider.process_webhook(request).await.unwrap();
+        let event = result.as_wrapped().unwrap();
+        assert_eq!(event.event_type, "issue_updated");
+    }
+
+    /// Verify that when the event-type header is absent, the event type defaults to "webhook".
+    #[tokio::test]
+    async fn test_wrap_mode_event_type_defaults_to_webhook_when_header_missing() {
+        let provider = wrap_provider();
+        // No X-Event-Type header
+        let body = r#"{"repo":{"full_name":"owner/repo"}}"#;
+        let request = make_request(body, None);
+
+        let result = provider.process_webhook(request).await.unwrap();
+        let event = result.as_wrapped().unwrap();
+        assert_eq!(event.event_type, "webhook");
+    }
+
+    /// Verify that the action field is extracted from the JSON body.
+    #[tokio::test]
+    async fn test_wrap_mode_extracts_action_from_json() {
+        let provider = wrap_provider();
+        let body = r#"{"repo":{"full_name":"owner/repo"},"action":"closed"}"#;
+        let request = make_request(body, Some(vec![("X-Event-Type", "pull_request")]));
+
+        let result = provider.process_webhook(request).await.unwrap();
+        let event = result.as_wrapped().unwrap();
+        assert_eq!(event.action, Some("closed".to_string()));
+    }
+
+    /// Verify that a missing action path results in None action (not an error).
+    #[tokio::test]
+    async fn test_wrap_mode_missing_action_is_none() {
+        let provider = wrap_provider();
+        // No "action" field in body
+        let body = r#"{"repo":{"full_name":"owner/repo"}}"#;
+        let request = make_request(body, None);
+
+        let result = provider.process_webhook(request).await.unwrap();
+        let event = result.as_wrapped().unwrap();
+        assert!(event.action.is_none());
+    }
+
+    /// Verify the provider field is stamped with the configured provider ID.
+    #[tokio::test]
+    async fn test_wrap_mode_provider_field_is_set() {
+        let provider = wrap_provider();
+        let body = r#"{"repo":{"full_name":"owner/repo"}}"#;
+        let request = make_request(body, None);
+
+        let result = provider.process_webhook(request).await.unwrap();
+        let event = result.as_wrapped().unwrap();
+        assert_eq!(event.provider, "wrap-provider");
+    }
+
+    /// Verify the original payload is preserved in the WrappedEvent.
+    #[tokio::test]
+    async fn test_wrap_mode_preserves_original_payload() {
+        let provider = wrap_provider();
+        let body = r#"{"repo":{"full_name":"owner/repo"},"extra":99}"#;
+        let request = make_request(body, None);
+
+        let result = provider.process_webhook(request).await.unwrap();
+        let event = result.as_wrapped().unwrap();
+        assert_eq!(event.payload["extra"], 99);
+    }
+
+    // ── Signature validation ──────────────────────────────────────────────────
+
+    /// Verify that validate_signature with no sig config always succeeds.
+    #[tokio::test]
+    async fn test_validate_signature_with_no_config_succeeds() {
         let provider = direct_provider();
         let result = provider
             .validate_signature(b"payload", "sig", "event")
@@ -647,11 +831,38 @@ mod processor_stubs {
         assert!(result.is_ok());
     }
 
+    /// Verify that a missing required signature header returns an error.
+    #[tokio::test]
+    async fn test_process_webhook_missing_signature_header_returns_error() {
+        let config = GenericProviderConfig {
+            provider_id: "signed-provider".to_string(),
+            processing_mode: ProcessingMode::Direct,
+            target_queue: Some("queue-keeper-signed".to_string()),
+            event_type_source: None,
+            delivery_id_source: None,
+            signature: Some(SignatureConfig {
+                header_name: "X-Signature-256".to_string(),
+                algorithm: SignatureAlgorithm::HmacSha256,
+            }),
+            webhook_secret: None,
+            field_extraction: None,
+        };
+        // No validator wired — but the signature header itself is still required.
+        let provider = GenericWebhookProvider::new(config, None).unwrap();
+
+        // Request is missing "x-signature-256" header — should fail before validation
+        let request = make_request(r#"{"test":true}"#, None);
+        let result = provider.process_webhook(request).await;
+        assert!(result.is_err(), "expected error for missing signature header");
+    }
+
+    // ── store_raw_payload ────────────────────────────────────────────────────
+
     /// Verify that store_raw_payload returns a placeholder reference.
     #[tokio::test]
     async fn test_store_raw_payload_returns_placeholder() {
         let provider = direct_provider();
-        let request = test_request();
+        let request = make_request(r#"{"test":true}"#, None);
         let result = provider
             .store_raw_payload(&request, ValidationStatus::Valid)
             .await;
@@ -660,11 +871,85 @@ mod processor_stubs {
         assert!(storage_ref.blob_path.starts_with("not-stored/"));
     }
 
-    /// Verify that normalize_event returns not-implemented error.
+    // ── normalize_event ──────────────────────────────────────────────────────
+
+    /// Verify that normalize_event succeeds for a valid JSON body.
     #[tokio::test]
-    async fn test_normalize_event_returns_not_implemented() {
-        let provider = direct_provider();
-        let result = provider.normalize_event(&test_request()).await;
-        assert!(result.is_err());
+    async fn test_normalize_event_wrap_mode_succeeds() {
+        let provider = wrap_provider();
+        let body = r#"{"repo":{"full_name":"owner/repo"},"action":"opened"}"#;
+        let request = make_request(body, Some(vec![("X-Event-Type", "push")]));
+
+        let result = provider.normalize_event(&request).await;
+        assert!(result.is_ok(), "expected Ok, got: {:?}", result);
+        let event = result.unwrap();
+        assert_eq!(event.provider, "wrap-provider");
+        assert_eq!(event.event_type, "push");
+        assert_eq!(event.action, Some("opened".to_string()));
+    }
+
+    /// Verify that normalize_event handles missing raw headers gracefully (defaults event_type).
+    #[tokio::test]
+    async fn test_normalize_event_uses_default_event_type_when_header_absent() {
+        let provider = wrap_provider();
+        let body = r#"{"repo":{"full_name":"owner/repo"}}"#;
+        // No raw headers → event_type_source (Header) lookup returns None
+        let request = make_request(body, None);
+
+        let result = provider.normalize_event(&request).await.unwrap();
+        assert_eq!(result.event_type, "webhook");
+    }
+
+    /// Verify that normalize_event with a static event_type_source always returns that value.
+    #[tokio::test]
+    async fn test_normalize_event_static_event_type_source() {
+        let config = GenericProviderConfig {
+            provider_id: "static-type".to_string(),
+            processing_mode: ProcessingMode::Wrap,
+            target_queue: None,
+            event_type_source: Some(FieldSource::Static {
+                value: "jira_issue".to_string(),
+            }),
+            delivery_id_source: None,
+            signature: None,
+            webhook_secret: None,
+            field_extraction: Some(FieldExtractionConfig {
+                repository_path: "issue.project.key".to_string(),
+                entity_path: None,
+                action_path: None,
+            }),
+        };
+        let provider = GenericWebhookProvider::new(config, None).unwrap();
+        let body = r#"{"issue":{"project":{"key":"PROJ-1"}}}"#;
+        let request = make_request(body, None);
+
+        let result = provider.normalize_event(&request).await.unwrap();
+        assert_eq!(result.event_type, "jira_issue");
+    }
+
+    /// Verify that a JsonPath event_type_source extracts from the body.
+    #[tokio::test]
+    async fn test_direct_mode_jsonpath_event_type_source() {
+        let config = GenericProviderConfig {
+            provider_id: "json-type".to_string(),
+            processing_mode: ProcessingMode::Direct,
+            target_queue: Some("queue-keeper-json-type".to_string()),
+            event_type_source: Some(FieldSource::JsonPath {
+                path: "event.type".to_string(),
+            }),
+            delivery_id_source: None,
+            signature: None,
+            webhook_secret: None,
+            field_extraction: None,
+        };
+        let provider = GenericWebhookProvider::new(config, None).unwrap();
+        let body = r#"{"event":{"type":"order_placed"},"payload":"data"}"#;
+        let request = make_request(body, None);
+
+        // Direct mode should succeed
+        let result = provider.process_webhook(request).await;
+        assert!(result.is_ok(), "expected Ok, got: {:?}", result);
+        assert!(result.unwrap().is_direct());
     }
 }
+

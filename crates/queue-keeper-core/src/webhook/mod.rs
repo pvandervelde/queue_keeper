@@ -25,15 +25,41 @@ pub struct WebhookRequest {
     pub headers: WebhookHeaders,
     pub body: Bytes,
     pub received_at: Timestamp,
+    /// Raw HTTP headers (lowercase names) for providers that use non-GitHub header names.
+    ///
+    /// Populated by [`WebhookRequest::with_raw_headers`]; empty when constructed via
+    /// [`WebhookRequest::new`] for backward compatibility.
+    pub raw_headers: HashMap<String, String>,
 }
 
 impl WebhookRequest {
-    /// Create new webhook request
+    /// Create new webhook request (backward-compatible, no raw headers).
     pub fn new(headers: WebhookHeaders, body: Bytes) -> Self {
         Self {
             headers,
             body,
             received_at: Timestamp::now(),
+            raw_headers: HashMap::new(),
+        }
+    }
+
+    /// Create a webhook request including the full raw header map.
+    ///
+    /// Generic providers use `raw_headers` to extract values according to
+    /// provider-specific [`FieldSource`] configuration rather than relying on
+    /// the pre-parsed GitHub-specific fields on [`WebhookHeaders`].
+    ///
+    /// [`FieldSource`]: crate::webhook::generic_provider::FieldSource
+    pub fn with_raw_headers(
+        headers: WebhookHeaders,
+        raw_headers: HashMap<String, String>,
+        body: Bytes,
+    ) -> Self {
+        Self {
+            headers,
+            body,
+            received_at: Timestamp::now(),
+            raw_headers,
         }
     }
 
@@ -64,7 +90,16 @@ pub struct WebhookHeaders {
 }
 
 impl WebhookHeaders {
-    /// Parse headers from HTTP header map
+    /// Parse GitHub-specific headers from an HTTP header map.
+    ///
+    /// Requires `X-GitHub-Event` and `X-GitHub-Delivery` to be present. Use
+    /// [`from_http_headers_relaxed`](Self::from_http_headers_relaxed) for
+    /// non-GitHub (generic) providers whose requests do not carry those headers.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ValidationError`] when required GitHub headers are absent,
+    /// the delivery ID is not a valid UUID, or the content type is not JSON.
     pub fn from_http_headers(headers: &HashMap<String, String>) -> Result<Self, ValidationError> {
         let event_type = headers
             .get("x-github-event")
@@ -108,6 +143,44 @@ impl WebhookHeaders {
 
         headers.validate()?;
         Ok(headers)
+    }
+
+    /// Parse headers from any HTTP source, using safe defaults for absent GitHub-specific fields.
+    ///
+    /// Unlike [`from_http_headers`](Self::from_http_headers), this constructor never fails:
+    /// - When `X-GitHub-Event` is absent, `event_type` defaults to `"webhook"`.
+    /// - When `X-GitHub-Delivery` is absent, `delivery_id` is auto-generated as a UUID v4.
+    ///
+    /// Intended for use with generic (non-GitHub) providers. The generic provider's
+    /// `process_webhook` implementation will re-derive the real event type and
+    /// delivery ID from the raw headers using its [`FieldSource`] configuration.
+    ///
+    /// [`FieldSource`]: crate::webhook::generic_provider::FieldSource
+    pub fn from_http_headers_relaxed(headers: &HashMap<String, String>) -> Self {
+        let event_type = headers
+            .get("x-github-event")
+            .cloned()
+            .unwrap_or_else(|| "webhook".to_string());
+
+        let delivery_id = headers
+            .get("x-github-delivery")
+            .cloned()
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+        let signature = headers.get("x-hub-signature-256").cloned();
+        let user_agent = headers.get("user-agent").cloned();
+        let content_type = headers
+            .get("content-type")
+            .cloned()
+            .unwrap_or_else(|| "application/json".to_string());
+
+        Self {
+            event_type,
+            delivery_id,
+            signature,
+            user_agent,
+            content_type,
+        }
     }
 
     /// Validate header values

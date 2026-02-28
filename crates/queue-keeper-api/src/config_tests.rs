@@ -447,6 +447,7 @@ mod service_config_validate_tests {
                 event_type_source: None,
                 delivery_id_source: None,
                 signature: None,
+                webhook_secret: None,
                 field_extraction: None,
             }],
             ..Default::default()
@@ -468,6 +469,7 @@ mod service_config_validate_tests {
                 event_type_source: None,
                 delivery_id_source: None,
                 signature: None,
+                webhook_secret: None,
                 field_extraction: None,
             }],
             ..Default::default()
@@ -495,6 +497,7 @@ mod service_config_validate_tests {
                 event_type_source: None,
                 delivery_id_source: None,
                 signature: None,
+                webhook_secret: None,
                 field_extraction: None,
             }],
             ..Default::default()
@@ -525,6 +528,7 @@ mod service_config_validate_tests {
                     event_type_source: None,
                     delivery_id_source: None,
                     signature: None,
+                    webhook_secret: None,
                     field_extraction: None,
                 },
                 GenericProviderConfig {
@@ -534,6 +538,7 @@ mod service_config_validate_tests {
                     event_type_source: None,
                     delivery_id_source: None,
                     signature: None,
+                    webhook_secret: None,
                     field_extraction: None,
                 },
             ],
