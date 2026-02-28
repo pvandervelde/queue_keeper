@@ -196,16 +196,35 @@ impl EventEnvelope {
 
     /// Generate session ID from repository and entity
     fn generate_session_id(repository: &Repository, entity: &EventEntity) -> SessionId {
-        let entity_type = entity.entity_type();
-        let entity_id = entity.entity_id();
-
-        SessionId::from_parts(
-            repository.owner_name(),
-            repository.repo_name(),
-            entity_type,
-            &entity_id,
-        )
+        generate_session_id(repository, entity)
     }
+}
+
+/// Derive a session identifier from a repository and entity.
+///
+/// Session IDs are used for ordered processing of related events. They encode
+/// the repository owner, repository name, entity type, and entity identifier in
+/// the format `"owner/repo/entity_type/entity_id"`.
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// use queue_keeper_core::webhook::{generate_session_id, EventEntity};
+/// use queue_keeper_core::Repository;
+///
+/// let session_id = generate_session_id(&repo, &EventEntity::PullRequest { number: 42 });
+/// assert_eq!(session_id.as_str(), "owner/repo/pull_request/42");
+/// ```
+pub(crate) fn generate_session_id(repository: &Repository, entity: &EventEntity) -> SessionId {
+    let entity_type = entity.entity_type();
+    let entity_id = entity.entity_id();
+
+    SessionId::from_parts(
+        repository.owner_name(),
+        repository.repo_name(),
+        entity_type,
+        &entity_id,
+    )
 }
 
 /// The primary GitHub object affected by the event (for session grouping)
@@ -440,8 +459,10 @@ pub enum ValidationStatus {
 #[async_trait]
 pub trait WebhookProcessor: Send + Sync {
     /// Process complete webhook request through the pipeline
-    async fn process_webhook(&self, request: WebhookRequest)
-        -> Result<EventEnvelope, WebhookError>;
+    async fn process_webhook(
+        &self,
+        request: WebhookRequest,
+    ) -> Result<ProcessingOutput, WebhookError>;
 
     /// Validate webhook signature
     async fn validate_signature(
@@ -458,11 +479,11 @@ pub trait WebhookProcessor: Send + Sync {
         validation_status: ValidationStatus,
     ) -> Result<StorageReference, StorageError>;
 
-    /// Normalize event to standard format
+    /// Normalize event to provider-agnostic wrapped format
     async fn normalize_event(
         &self,
         request: &WebhookRequest,
-    ) -> Result<EventEnvelope, NormalizationError>;
+    ) -> Result<WrappedEvent, NormalizationError>;
 }
 
 /// Interface for GitHub webhook signature validation
@@ -509,11 +530,11 @@ pub trait PayloadStorer: Send + Sync {
 /// Interface for transforming GitHub payloads to standard event format
 #[async_trait]
 pub trait EventNormalizer: Send + Sync {
-    /// Normalize webhook request to event envelope
+    /// Normalize webhook request to provider-agnostic wrapped event
     async fn normalize_event(
         &self,
         request: &WebhookRequest,
-    ) -> Result<EventEnvelope, NormalizationError>;
+    ) -> Result<WrappedEvent, NormalizationError>;
 
     /// Extract repository information from payload
     fn extract_repository(
@@ -717,7 +738,7 @@ impl WebhookProcessor for WebhookProcessorImpl {
     async fn process_webhook(
         &self,
         request: WebhookRequest,
-    ) -> Result<EventEnvelope, WebhookError> {
+    ) -> Result<ProcessingOutput, WebhookError> {
         let start_time = std::time::Instant::now();
 
         info!(
@@ -739,45 +760,51 @@ impl WebhookProcessor for WebhookProcessorImpl {
         let validation_status = ValidationStatus::Valid;
         let _storage_ref = self.store_raw_payload(&request, validation_status).await?;
 
-        // 4. Normalize to standard event format
-        let event_envelope = self.normalize_event(&request).await?;
+        // 4. Normalize to provider-agnostic wrapped event
+        let wrapped_event = self.normalize_event(&request).await?;
 
-        // 5. Log successful webhook processing to audit trail
+        // 5. Log successful webhook processing to audit trail (GitHub-specific path:
+        //    only emit the full audit record when session_id and repository are available)
         if let Some(audit_logger) = &self.audit_logger {
-            let processing_time = start_time.elapsed();
-            let result = AuditResult::Success {
-                duration: Some(processing_time),
-                details: Some(format!("Webhook processed: {}", request.event_type())),
-            };
-            let context = AuditContext {
-                correlation_id: Some(event_envelope.correlation_id.to_string()),
-                ..Default::default()
-            };
+            if let (Some(session_id), Ok(repository)) = (
+                wrapped_event.session_id.clone(),
+                self.extract_repository(&wrapped_event.payload),
+            ) {
+                let processing_time = start_time.elapsed();
+                let result = AuditResult::Success {
+                    duration: Some(processing_time),
+                    details: Some(format!("Webhook processed: {}", request.event_type())),
+                };
+                let context = AuditContext {
+                    correlation_id: Some(wrapped_event.correlation_id.to_string()),
+                    ..Default::default()
+                };
 
-            let _ = audit_logger
-                .log_webhook_processing(
-                    event_envelope.event_id,
-                    event_envelope.session_id.clone(),
-                    event_envelope.repository.clone(),
-                    WebhookProcessingAction::ProcessingComplete {
-                        total_duration_ms: processing_time.as_millis() as u64,
-                        success_count: 1,
-                        failure_count: 0,
-                    },
-                    result,
-                    context,
-                )
-                .await;
+                let _ = audit_logger
+                    .log_webhook_processing(
+                        wrapped_event.event_id,
+                        session_id,
+                        repository,
+                        WebhookProcessingAction::ProcessingComplete {
+                            total_duration_ms: processing_time.as_millis() as u64,
+                            success_count: 1,
+                            failure_count: 0,
+                        },
+                        result,
+                        context,
+                    )
+                    .await;
+            }
         }
 
         info!(
-            event_id = %event_envelope.event_id,
-            session_id = %event_envelope.session_id,
-            entity = ?event_envelope.entity,
+            event_id = %wrapped_event.event_id,
+            session_id = ?wrapped_event.session_id,
+            event_type = %wrapped_event.event_type,
             "Successfully processed webhook"
         );
 
-        Ok(event_envelope)
+        Ok(ProcessingOutput::Wrapped(wrapped_event))
     }
 
     async fn validate_signature(
@@ -847,15 +874,18 @@ impl WebhookProcessor for WebhookProcessorImpl {
     async fn normalize_event(
         &self,
         request: &WebhookRequest,
-    ) -> Result<EventEnvelope, NormalizationError> {
+    ) -> Result<WrappedEvent, NormalizationError> {
         // Parse JSON payload
         let payload: serde_json::Value = serde_json::from_slice(&request.body)?;
 
-        // Extract repository (required for all events)
+        // Extract repository (required for session-ID derivation on GitHub events)
         let repository = self.extract_repository(&payload)?;
 
-        // Extract entity based on event type
+        // Extract entity based on event type (used to derive session key)
         let entity = EventEntity::from_payload(request.event_type(), &payload);
+
+        // Derive session ID from repository + entity (GitHub ordering semantics)
+        let session_id = generate_session_id(&repository, &entity);
 
         // Extract action if present
         let action = payload
@@ -863,19 +893,21 @@ impl WebhookProcessor for WebhookProcessorImpl {
             .and_then(|a| a.as_str())
             .map(String::from);
 
-        // Create normalized event envelope
-        let event = EventEnvelope::new(
+        // Build provider-agnostic wrapped event.
+        // The provider field is intentionally left empty here; the outer
+        // GithubWebhookProvider stamps the final provider name.
+        let event = WrappedEvent::new(
+            String::new(),
             request.event_type().to_string(),
             action,
-            repository,
-            entity,
+            Some(session_id),
             payload,
         );
 
         info!(
             event_id = %event.event_id,
             event_type = %event.event_type,
-            entity_type = %event.entity.entity_type(),
+            session_id = ?event.session_id,
             "Event normalized successfully"
         );
 
@@ -896,6 +928,14 @@ pub use storage_adapter::BlobStorageAdapter;
 // GitHub-specific webhook provider
 mod github_provider;
 pub use github_provider::GithubWebhookProvider;
+
+// Generic (configuration-driven) webhook provider
+pub mod generic_provider;
+pub use generic_provider::GenericWebhookProvider;
+
+// Processing output types for multi-mode webhook processing
+mod processing_output;
+pub use processing_output::{DirectQueueMetadata, ProcessingOutput, WrappedEvent};
 
 #[cfg(test)]
 #[path = "mod_tests.rs"]

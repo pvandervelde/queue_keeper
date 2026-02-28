@@ -115,8 +115,8 @@ async fn test_webhook_response_includes_event_metadata() {
         "Event ID should not be empty"
     );
     assert!(
-        !response.session_id.to_string().is_empty(),
-        "Session ID should not be empty"
+        response.session_id.is_some(),
+        "Session ID should be present"
     );
     assert_eq!(response.status, "processed", "Status should be 'processed'");
     assert!(

@@ -8,7 +8,7 @@
 //!   `X-Hub-Signature-256`)
 //! - HMAC-SHA256 signature validation via a pluggable [`SignatureValidator`]
 //! - Raw payload archival via a pluggable [`PayloadStorer`]
-//! - Normalisation of GitHub payloads into the standard [`EventEnvelope`] format
+//! - Normalisation of GitHub payloads into the provider-agnostic [`WrappedEvent`] format
 //!
 //! # Registration
 //!
@@ -31,9 +31,9 @@
 use crate::{
     audit_logging::AuditLogger,
     webhook::{
-        EventEnvelope, NormalizationError, PayloadStorer, SignatureValidator, StorageError,
+        NormalizationError, PayloadStorer, ProcessingOutput, SignatureValidator, StorageError,
         StorageReference, ValidationStatus, WebhookError, WebhookProcessor, WebhookProcessorImpl,
-        WebhookRequest,
+        WebhookRequest, WrappedEvent,
     },
     ValidationError,
 };
@@ -138,8 +138,15 @@ impl WebhookProcessor for GithubWebhookProvider {
     async fn process_webhook(
         &self,
         request: WebhookRequest,
-    ) -> Result<EventEnvelope, WebhookError> {
-        self.inner.process_webhook(request).await
+    ) -> Result<ProcessingOutput, WebhookError> {
+        let mut output = self.inner.process_webhook(request).await?;
+
+        // Stamp the provider name so consumers know this came from GitHub
+        if let ProcessingOutput::Wrapped(ref mut event) = output {
+            event.provider = Self::PROVIDER_ID.to_string();
+        }
+
+        Ok(output)
     }
 
     /// Validate the GitHub HMAC-SHA256 webhook signature.
@@ -179,7 +186,7 @@ impl WebhookProcessor for GithubWebhookProvider {
             .await
     }
 
-    /// Normalise a GitHub webhook payload into an [`EventEnvelope`].
+    /// Normalise a GitHub webhook payload into a [`WrappedEvent`].
     ///
     /// Delegates to the inner [`WebhookProcessorImpl`].
     ///
@@ -190,7 +197,7 @@ impl WebhookProcessor for GithubWebhookProvider {
     async fn normalize_event(
         &self,
         request: &WebhookRequest,
-    ) -> Result<EventEnvelope, NormalizationError> {
+    ) -> Result<WrappedEvent, NormalizationError> {
         self.inner.normalize_event(request).await
     }
 }

@@ -15,7 +15,7 @@ use crate::retry::{RetryPolicy, RetryState};
 use queue_keeper_core::{
     bot_config::BotConfiguration,
     queue_integration::{DeliveryResult, EventRouter, FailedDelivery, SuccessfulDelivery},
-    webhook::EventEnvelope,
+    webhook::WrappedEvent,
     EventId, Timestamp,
 };
 use queue_runtime::QueueClient;
@@ -164,7 +164,7 @@ impl QueueDeliveryOutcome {
 /// }
 /// ```
 pub async fn deliver_event_to_queues(
-    event: EventEnvelope,
+    event: WrappedEvent,
     event_router: Arc<dyn EventRouter>,
     bot_config: Arc<BotConfiguration>,
     queue_client: Arc<dyn QueueClient>,
@@ -292,7 +292,7 @@ pub async fn deliver_event_to_queues(
 ///
 /// Processes remaining failures and optionally persists to DLQ.
 async fn handle_final_delivery_result(
-    event: &EventEnvelope,
+    event: &WrappedEvent,
     result: DeliveryResult,
     total_attempts: u32,
     first_attempt_at: Timestamp,
@@ -369,7 +369,7 @@ async fn handle_final_delivery_result(
 ///
 /// Creates a FailedEventRecord and persists it to blob storage.
 async fn persist_delivery_failures_to_dlq(
-    event: &EventEnvelope,
+    event: &WrappedEvent,
     successful: &[SuccessfulDelivery],
     failed: &[FailedDelivery],
     total_attempts: u32,
@@ -456,7 +456,7 @@ async fn persist_delivery_failures_to_dlq(
 ///
 /// Creates a FailedEventRecord for routing errors and persists it.
 async fn persist_routing_error_to_dlq(
-    event: &EventEnvelope,
+    event: &WrappedEvent,
     error: &str,
     total_attempts: u32,
     first_attempt_at: Timestamp,
@@ -545,7 +545,7 @@ async fn persist_routing_error_to_dlq(
 /// // The handle can be stored for monitoring/testing if needed
 /// ```
 pub fn spawn_queue_delivery(
-    event: EventEnvelope,
+    event: WrappedEvent,
     event_router: Arc<dyn EventRouter>,
     bot_config: Arc<BotConfiguration>,
     queue_client: Arc<dyn QueueClient>,

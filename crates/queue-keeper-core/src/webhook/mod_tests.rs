@@ -345,11 +345,14 @@ mod event_normalization_tests {
         let result = processor.normalize_event(&request).await;
         assert!(result.is_ok());
 
-        let envelope = result.unwrap();
-        assert_eq!(envelope.event_type, "pull_request");
-        assert_eq!(envelope.action, Some("opened".to_string()));
-        assert_eq!(envelope.entity, EventEntity::PullRequest { number: 123 });
-        assert_eq!(envelope.repository.name, "test-repo");
+        let event = result.unwrap();
+        assert_eq!(event.event_type, "pull_request");
+        assert_eq!(event.action, Some("opened".to_string()));
+        assert!(
+            event.session_id.as_ref().unwrap().as_str().contains("pull_request/123"),
+            "session_id should encode entity: {:?}",
+            event.session_id
+        );
     }
 
     #[tokio::test]
@@ -383,9 +386,13 @@ mod event_normalization_tests {
         let result = processor.normalize_event(&request).await;
         assert!(result.is_ok());
 
-        let envelope = result.unwrap();
-        assert_eq!(envelope.event_type, "issues");
-        assert_eq!(envelope.entity, EventEntity::Issue { number: 456 });
+        let event = result.unwrap();
+        assert_eq!(event.event_type, "issues");
+        assert!(
+            event.session_id.as_ref().unwrap().as_str().contains("issue/456"),
+            "session_id should encode entity: {:?}",
+            event.session_id
+        );
     }
 
     #[tokio::test]
@@ -415,12 +422,11 @@ mod event_normalization_tests {
         let result = processor.normalize_event(&request).await;
         assert!(result.is_ok());
 
-        let envelope = result.unwrap();
-        assert_eq!(
-            envelope.entity,
-            EventEntity::Branch {
-                name: "main".to_string()
-            }
+        let event = result.unwrap();
+        assert!(
+            event.session_id.as_ref().unwrap().as_str().contains("branch/main"),
+            "session_id should encode branch: {:?}",
+            event.session_id
         );
     }
 
@@ -455,12 +461,11 @@ mod event_normalization_tests {
         let result = processor.normalize_event(&request).await;
         assert!(result.is_ok());
 
-        let envelope = result.unwrap();
-        assert_eq!(
-            envelope.entity,
-            EventEntity::Release {
-                tag: "v1.0.0".to_string()
-            }
+        let event = result.unwrap();
+        assert!(
+            event.session_id.as_ref().unwrap().as_str().contains("release/v1.0.0"),
+            "session_id should encode release: {:?}",
+            event.session_id
         );
     }
 
@@ -492,8 +497,12 @@ mod event_normalization_tests {
         let result = processor.normalize_event(&request).await;
         assert!(result.is_ok());
 
-        let envelope = result.unwrap();
-        assert_eq!(envelope.entity, EventEntity::Repository);
+        let event = result.unwrap();
+        assert!(
+            event.session_id.as_ref().unwrap().as_str().contains("repository/repository"),
+            "session_id should encode repository entity: {:?}",
+            event.session_id
+        );
     }
 
     #[tokio::test]
@@ -523,8 +532,12 @@ mod event_normalization_tests {
         let result = processor.normalize_event(&request).await;
         assert!(result.is_ok());
 
-        let envelope = result.unwrap();
-        assert_eq!(envelope.entity, EventEntity::Unknown);
+        let event = result.unwrap();
+        assert!(
+            event.session_id.as_ref().unwrap().as_str().contains("unknown/unknown"),
+            "session_id should encode unknown entity: {:?}",
+            event.session_id
+        );
     }
 
     #[tokio::test]
@@ -560,8 +573,8 @@ mod event_normalization_tests {
         let result = processor.normalize_event(&request).await;
         assert!(result.is_ok());
 
-        let envelope = result.unwrap();
-        assert_eq!(envelope.action, Some("opened".to_string()));
+        let event = result.unwrap();
+        assert_eq!(event.action, Some("opened".to_string()));
     }
 
     #[tokio::test]
@@ -590,8 +603,8 @@ mod event_normalization_tests {
         let result = processor.normalize_event(&request).await;
         assert!(result.is_ok());
 
-        let envelope = result.unwrap();
-        assert_eq!(envelope.action, None);
+        let event = result.unwrap();
+        assert_eq!(event.action, None);
     }
 
     #[tokio::test]
@@ -605,9 +618,9 @@ mod event_normalization_tests {
         let result = processor.normalize_event(&request).await;
         assert!(result.is_ok());
 
-        let envelope = result.unwrap();
-        assert!(envelope.occurred_at.as_datetime() <= &chrono::Utc::now());
-        assert!(envelope.processed_at.as_datetime() <= &chrono::Utc::now());
+        let event = result.unwrap();
+        assert!(event.received_at.as_datetime() <= &chrono::Utc::now());
+        assert!(event.processed_at.as_datetime() <= &chrono::Utc::now());
     }
 
     #[tokio::test]
@@ -621,9 +634,9 @@ mod event_normalization_tests {
         let result = processor.normalize_event(&request).await;
         assert!(result.is_ok());
 
-        let envelope = result.unwrap();
+        let event = result.unwrap();
         // EventId is ULID format - should be parseable
-        let id_str = envelope.event_id.as_str();
+        let id_str = event.event_id.as_str();
         assert!(!id_str.is_empty());
     }
 
@@ -638,9 +651,9 @@ mod event_normalization_tests {
         let result = processor.normalize_event(&request).await;
         assert!(result.is_ok());
 
-        let envelope = result.unwrap();
+        let event = result.unwrap();
         // CorrelationId is UUID format
-        let id_str = envelope.correlation_id.as_str();
+        let id_str = event.correlation_id.as_str();
         assert!(!id_str.is_empty());
     }
 }
@@ -656,7 +669,7 @@ mod session_id_generation_tests {
     fn test_pull_request_session_id() {
         let repository = create_test_repository();
         let entity = EventEntity::PullRequest { number: 123 };
-        let session_id = EventEnvelope::generate_session_id(&repository, &entity);
+        let session_id = generate_session_id(&repository, &entity);
 
         assert_eq!(session_id.as_str(), "owner/test-repo/pull_request/123");
     }
@@ -665,7 +678,7 @@ mod session_id_generation_tests {
     fn test_issue_session_id() {
         let repository = create_test_repository();
         let entity = EventEntity::Issue { number: 456 };
-        let session_id = EventEnvelope::generate_session_id(&repository, &entity);
+        let session_id = generate_session_id(&repository, &entity);
 
         assert_eq!(session_id.as_str(), "owner/test-repo/issue/456");
     }
@@ -676,7 +689,7 @@ mod session_id_generation_tests {
         let entity = EventEntity::Branch {
             name: "main".to_string(),
         };
-        let session_id = EventEnvelope::generate_session_id(&repository, &entity);
+        let session_id = generate_session_id(&repository, &entity);
 
         assert_eq!(session_id.as_str(), "owner/test-repo/branch/main");
     }
@@ -687,7 +700,7 @@ mod session_id_generation_tests {
         let entity = EventEntity::Release {
             tag: "v1.0.0".to_string(),
         };
-        let session_id = EventEnvelope::generate_session_id(&repository, &entity);
+        let session_id = generate_session_id(&repository, &entity);
 
         assert_eq!(session_id.as_str(), "owner/test-repo/release/v1.0.0");
     }
@@ -696,7 +709,7 @@ mod session_id_generation_tests {
     fn test_repository_session_id() {
         let repository = create_test_repository();
         let entity = EventEntity::Repository;
-        let session_id = EventEnvelope::generate_session_id(&repository, &entity);
+        let session_id = generate_session_id(&repository, &entity);
 
         assert_eq!(session_id.as_str(), "owner/test-repo/repository/repository");
     }
@@ -705,7 +718,7 @@ mod session_id_generation_tests {
     fn test_unknown_session_id() {
         let repository = create_test_repository();
         let entity = EventEntity::Unknown;
-        let session_id = EventEnvelope::generate_session_id(&repository, &entity);
+        let session_id = generate_session_id(&repository, &entity);
 
         assert_eq!(session_id.as_str(), "owner/test-repo/unknown/unknown");
     }
@@ -714,7 +727,7 @@ mod session_id_generation_tests {
     fn test_session_id_max_length() {
         let repository = create_test_repository();
         let entity = EventEntity::PullRequest { number: 123 };
-        let session_id = EventEnvelope::generate_session_id(&repository, &entity);
+        let session_id = generate_session_id(&repository, &entity);
 
         // Session IDs must not exceed 128 characters
         assert!(session_id.as_str().len() <= 128);
@@ -838,10 +851,14 @@ mod integration_tests {
         let result = processor.process_webhook(request).await;
         assert!(result.is_ok());
 
-        let envelope = result.unwrap();
-        assert_eq!(envelope.event_type, "pull_request");
-        assert_eq!(envelope.entity, EventEntity::PullRequest { number: 123 });
-        assert_eq!(envelope.repository.name, "test-repo");
+        let output = result.unwrap();
+        let event = output.as_wrapped().expect("should be Wrapped output");
+        assert_eq!(event.event_type, "pull_request");
+        assert!(
+            event.session_id.as_ref().unwrap().as_str().contains("pull_request/123"),
+            "session_id should encode entity: {:?}",
+            event.session_id
+        );
     }
 
     #[tokio::test]

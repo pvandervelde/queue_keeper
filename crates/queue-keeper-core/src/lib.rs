@@ -444,6 +444,7 @@ impl Repository {
 pub struct User {
     pub id: UserId,
     pub login: String,
+    #[serde(rename = "type")]
     pub user_type: UserType,
 }
 
@@ -886,7 +887,8 @@ pub use queue_integration::{
     SuccessfulDelivery,
 };
 pub use webhook::{
-    EventEntity, EventEnvelope, GithubWebhookProvider, WebhookError, WebhookProcessor,
+    EventEntity, EventEnvelope, GithubWebhookProvider, ProcessingOutput, WebhookError,
+    WebhookProcessor, WrappedEvent,
 };
 
 #[cfg(test)]

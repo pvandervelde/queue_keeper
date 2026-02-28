@@ -9,10 +9,10 @@ use axum::{
 use provider_registry::{ProviderId, ProviderRegistry};
 use queue_keeper_core::{
     webhook::{
-        EventEntity, EventEnvelope, NormalizationError, StorageError, StorageReference,
-        ValidationStatus, WebhookError, WebhookProcessor, WebhookRequest,
+        NormalizationError, ProcessingOutput, StorageError, StorageReference,
+        ValidationStatus, WebhookError, WebhookProcessor, WebhookRequest, WrappedEvent,
     },
-    Repository, RepositoryId, Timestamp, User, UserId, UserType, ValidationError,
+    Timestamp, ValidationError,
 };
 use std::sync::{Arc, Mutex, OnceLock};
 use tower::ServiceExt;
@@ -22,7 +22,7 @@ use tower::ServiceExt;
 // ============================================================================
 
 /// Test double that records whether `process_webhook` was called and returns
-/// a preset [`EventEnvelope`].
+/// a preset [`ProcessingOutput`].
 struct MockWebhookProcessor {
     called: Arc<Mutex<bool>>,
 }
@@ -45,9 +45,9 @@ impl WebhookProcessor for MockWebhookProcessor {
     async fn process_webhook(
         &self,
         _request: WebhookRequest,
-    ) -> Result<EventEnvelope, WebhookError> {
+    ) -> Result<ProcessingOutput, WebhookError> {
         *self.called.lock().unwrap() = true;
-        Ok(test_event_envelope())
+        Ok(ProcessingOutput::Wrapped(test_wrapped_event()))
     }
 
     async fn validate_signature(
@@ -74,8 +74,8 @@ impl WebhookProcessor for MockWebhookProcessor {
     async fn normalize_event(
         &self,
         _request: &WebhookRequest,
-    ) -> Result<EventEnvelope, NormalizationError> {
-        Ok(test_event_envelope())
+    ) -> Result<WrappedEvent, NormalizationError> {
+        Ok(test_wrapped_event())
     }
 }
 
@@ -83,25 +83,13 @@ impl WebhookProcessor for MockWebhookProcessor {
 // Test helpers
 // ============================================================================
 
-/// Build a minimal [`EventEnvelope`] suitable for mock responses.
-fn test_event_envelope() -> EventEnvelope {
-    let user = User {
-        id: UserId::new(1),
-        login: "owner".to_string(),
-        user_type: UserType::User,
-    };
-    let repo = Repository::new(
-        RepositoryId::new(1),
-        "repo".to_string(),
-        "owner/repo".to_string(),
-        user,
-        false,
-    );
-    EventEnvelope::new(
+/// Build a minimal [`WrappedEvent`] suitable for mock responses.
+fn test_wrapped_event() -> WrappedEvent {
+    WrappedEvent::new(
+        "github".to_string(),
         "ping".to_string(),
         None,
-        repo,
-        EventEntity::Repository,
+        None,
         serde_json::json!({}),
     )
 }

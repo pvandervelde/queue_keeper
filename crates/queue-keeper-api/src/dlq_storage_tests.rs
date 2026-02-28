@@ -6,9 +6,8 @@ use queue_keeper_core::{
         BlobMetadata, BlobStorage, BlobStorageError, PayloadFilter, StorageHealthStatus,
         StoredWebhook, WebhookPayload,
     },
-    webhook::EventEnvelope,
-    BotName, CorrelationId, EventEntity, EventId, QueueName, Repository, RepositoryId, SessionId,
-    Timestamp, User, UserId, UserType,
+    webhook::WrappedEvent,
+    BotName, EventId, QueueName, Timestamp,
 };
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -128,29 +127,24 @@ impl BlobStorage for MockBlobStorage {
 // Test Helpers
 // ============================================================================
 
-fn create_test_event() -> EventEnvelope {
-    EventEnvelope {
-        event_id: EventId::new(),
-        event_type: "pull_request".to_string(),
-        action: Some("opened".to_string()),
-        repository: Repository::new(
-            RepositoryId::new(123),
-            "test-repo".to_string(),
-            "owner/test-repo".to_string(),
-            User {
-                id: UserId::new(1),
-                login: "owner".to_string(),
-                user_type: UserType::User,
+fn create_test_event() -> WrappedEvent {
+    WrappedEvent::new(
+        "github".to_string(),
+        "pull_request".to_string(),
+        Some("opened".to_string()),
+        None,
+        serde_json::json!({
+            "action": "opened",
+            "repository": {
+                "id": 123,
+                "name": "test-repo",
+                "full_name": "owner/test-repo",
+                "owner": {"login": "owner", "id": 1, "type": "User"},
+                "private": false
             },
-            false,
-        ),
-        entity: EventEntity::PullRequest { number: 42 },
-        session_id: SessionId::from_parts("owner", "test-repo", "pull_request", "42"),
-        correlation_id: CorrelationId::new(),
-        occurred_at: Timestamp::now(),
-        processed_at: Timestamp::now(),
-        payload: serde_json::json!({"action": "opened"}),
-    }
+            "pull_request": {"number": 42}
+        }),
+    )
 }
 
 fn create_failed_event_record() -> FailedEventRecord {

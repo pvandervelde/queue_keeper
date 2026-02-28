@@ -6,7 +6,7 @@
 // and idempotency guarantees.
 
 use crate::{
-    webhook::EventEnvelope, BotName, EventId, QueueName, Repository, SessionId, Timestamp,
+    webhook::WrappedEvent, BotName, EventId, QueueName, Repository, SessionId, Timestamp,
 };
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -308,14 +308,29 @@ impl EventFilter {
 
         // Check repositories
         if let Some(ref repos) = self.repositories {
-            if !repos.contains(&event.envelope.repository) {
+            if let Some(repo) = event
+                .envelope
+                .payload
+                .get("repository")
+                .and_then(|r| serde_json::from_value::<Repository>(r.clone()).ok())
+            {
+                if !repos.contains(&repo) {
+                    return false;
+                }
+            } else {
+                // No repository info - cannot match repository filter
                 return false;
             }
         }
 
         // Check session IDs
         if let Some(ref sessions) = self.session_ids {
-            if !sessions.contains(&event.envelope.session_id) {
+            if !event
+                .envelope
+                .session_id
+                .as_ref()
+                .map_or(false, |s| sessions.contains(s))
+            {
                 return false;
             }
         }
@@ -739,8 +754,8 @@ pub trait ReplayExecutor: Send + Sync {
 /// Event retrieved from blob storage for replay
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoredEvent {
-    /// Original event envelope
-    pub envelope: EventEnvelope,
+    /// Original wrapped event
+    pub envelope: WrappedEvent,
 
     /// Storage metadata
     pub storage_metadata: StorageMetadata,
@@ -764,7 +779,7 @@ impl StoredEvent {
     /// Get event age
     pub fn get_age(&self) -> Duration {
         let now = Timestamp::now();
-        now.duration_since(self.envelope.occurred_at)
+        now.duration_since(self.envelope.received_at)
     }
 
     /// Check if event has been replayed recently
@@ -1462,7 +1477,6 @@ impl ReplayExecutor for DefaultReplayExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{CorrelationId, RepositoryId, User, UserId, UserType};
 
     #[test]
     fn test_replay_id_creation() {
@@ -1519,28 +1533,21 @@ mod tests {
         let filter = EventFilter::event_types(vec!["push".to_string(), "pull_request".to_string()]);
 
         let event = StoredEvent {
-            envelope: EventEnvelope {
-                event_id: EventId::new(),
-                event_type: "push".to_string(),
-                action: None,
-                repository: crate::Repository {
-                    id: RepositoryId::new(123),
-                    owner: User {
-                        id: UserId::new(456),
-                        login: "owner".to_string(),
-                        user_type: UserType::User,
-                    },
-                    name: "repo".to_string(),
-                    full_name: "owner/repo".to_string(),
-                    private: false,
-                },
-                entity: crate::webhook::EventEntity::Repository,
-                session_id: SessionId::from_parts("owner", "repo", "push", "event1"),
-                correlation_id: CorrelationId::new(),
-                occurred_at: Timestamp::now(),
-                processed_at: Timestamp::now(),
-                payload: serde_json::json!({}),
-            },
+            envelope: WrappedEvent::new(
+                "github".to_string(),
+                "push".to_string(),
+                None,
+                Some(SessionId::from_parts("owner", "repo", "push", "event1")),
+                serde_json::json!({
+                    "repository": {
+                        "id": 123,
+                        "name": "repo",
+                        "full_name": "owner/repo",
+                        "private": false,
+                        "owner": {"id": 456, "login": "owner", "type": "User"}
+                    }
+                }),
+            ),
             storage_metadata: StorageMetadata {
                 blob_path: "path".to_string(),
                 stored_at: Timestamp::now(),

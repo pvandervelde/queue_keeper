@@ -5,7 +5,7 @@
 //!
 //! See specs/interfaces/bot-configuration.md for complete specification.
 
-use crate::{BotName, EventEnvelope, EventId, QueueName, Repository, Timestamp};
+use crate::{webhook::WrappedEvent, BotName, EventId, QueueName, Repository, Timestamp};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::Path, str::FromStr};
@@ -160,7 +160,7 @@ impl BotConfiguration {
     }
 
     /// Get all bots that should receive the given event
-    pub fn get_target_bots(&self, event: &EventEnvelope) -> Vec<&BotSubscription> {
+    pub fn get_target_bots(&self, event: &WrappedEvent) -> Vec<&BotSubscription> {
         self.bots
             .iter()
             .filter(|bot| bot.matches_event(event))
@@ -194,7 +194,7 @@ pub struct BotSubscription {
 
 impl BotSubscription {
     /// Check if this bot should receive the given event
-    pub fn matches_event(&self, event: &EventEnvelope) -> bool {
+    pub fn matches_event(&self, event: &WrappedEvent) -> bool {
         // Check if event type matches any of the bot's subscribed patterns
         let event_matches = self.events.iter().any(|pattern| {
             match pattern {
@@ -222,7 +222,16 @@ impl BotSubscription {
 
         // Check repository filter if specified
         if let Some(ref filter) = self.repository_filter {
-            if !filter.matches(&event.repository) {
+            if let Some(repo) = event
+                .payload
+                .get("repository")
+                .and_then(|r| serde_json::from_value::<Repository>(r.clone()).ok())
+            {
+                if !filter.matches(&repo) {
+                    return false;
+                }
+            } else {
+                // No repository info in payload - cannot match repository filter
                 return false;
             }
         }
@@ -538,7 +547,7 @@ pub trait BotConfigurationProvider: Send + Sync {
     /// Get all bots that should receive the given event
     async fn get_target_bots(
         &self,
-        event: &EventEnvelope,
+        event: &WrappedEvent,
     ) -> Result<Vec<BotSubscription>, BotConfigError>;
 
     /// Get specific bot subscription by name
@@ -580,7 +589,7 @@ pub trait ConfigurationLoader: Send + Sync {
 /// See specs/interfaces/bot-configuration.md
 pub trait EventMatcher: Send + Sync {
     /// Check if event matches the given subscription
-    fn matches_subscription(&self, event: &EventEnvelope, subscription: &BotSubscription) -> bool;
+    fn matches_subscription(&self, event: &WrappedEvent, subscription: &BotSubscription) -> bool;
 
     /// Check if event type matches the given pattern
     fn matches_pattern(&self, event_type: &str, pattern: &EventTypePattern) -> bool;
@@ -818,7 +827,7 @@ impl BotConfigurationProvider for DefaultBotConfigurationProvider {
 
     async fn get_target_bots(
         &self,
-        event: &EventEnvelope,
+        event: &WrappedEvent,
     ) -> Result<Vec<BotSubscription>, BotConfigError> {
         let matching_bots = self
             .configuration
@@ -897,7 +906,7 @@ impl ConfigurationLoader for FileConfigurationLoader {
 pub struct DefaultEventMatcher;
 
 impl EventMatcher for DefaultEventMatcher {
-    fn matches_subscription(&self, event: &EventEnvelope, subscription: &BotSubscription) -> bool {
+    fn matches_subscription(&self, event: &WrappedEvent, subscription: &BotSubscription) -> bool {
         // Check if event type matches any subscription pattern
         let event_matches = subscription
             .events
@@ -910,7 +919,16 @@ impl EventMatcher for DefaultEventMatcher {
 
         // Check repository filter if present
         if let Some(ref filter) = subscription.repository_filter {
-            if !self.matches_repository(&event.repository, filter) {
+            if let Some(repo) = event
+                .payload
+                .get("repository")
+                .and_then(|r| serde_json::from_value::<Repository>(r.clone()).ok())
+            {
+                if !self.matches_repository(&repo, filter) {
+                    return false;
+                }
+            } else {
+                // No repository info in payload - cannot match repository filter
                 return false;
             }
         }

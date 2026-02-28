@@ -3,7 +3,7 @@
 use super::*;
 use crate::{
     webhook::{
-        EventEntity, NormalizationError, StorageError, StorageReference, ValidationStatus,
+        NormalizationError, StorageError, StorageReference, ValidationStatus,
         WebhookError, WebhookHeaders, WebhookRequest,
     },
     Timestamp, ValidationError,
@@ -234,8 +234,8 @@ mod process_webhook_tests {
             "ping event should succeed: {:?}",
             result.err()
         );
-        let envelope = result.unwrap();
-        assert_eq!(envelope.event_type, "ping");
+        let output = result.unwrap();
+        assert_eq!(output.event_type(), Some("ping"));
     }
 
     /// Verify that a pull_request event without a signature fails validation.
@@ -269,13 +269,11 @@ mod process_webhook_tests {
             "signed PR event should succeed: {:?}",
             result.err()
         );
-        let envelope = result.unwrap();
-        assert_eq!(envelope.event_type, "pull_request");
-        assert!(
-            matches!(envelope.entity, EventEntity::PullRequest { number: 42 }),
-            "unexpected entity: {:?}",
-            envelope.entity
-        );
+        let output = result.unwrap();
+        let event = output.as_wrapped().expect("should be Wrapped output");
+        assert_eq!(event.event_type, "pull_request");
+        let pr_number = event.payload["pull_request"]["number"].as_u64();
+        assert_eq!(pr_number, Some(42), "expected PR number 42");
     }
 
     /// Verify that an invalid signature causes processing to fail.
@@ -441,9 +439,12 @@ mod normalize_event_tests {
             "normalization should succeed: {:?}",
             result.err()
         );
-        let envelope = result.unwrap();
-        assert_eq!(envelope.event_type, "ping");
-        assert_eq!(envelope.repository.full_name, "owner/repo");
+        let event = result.unwrap();
+        assert_eq!(event.event_type, "ping");
+        assert_eq!(
+            event.payload["repository"]["full_name"].as_str().unwrap_or(""),
+            "owner/repo"
+        );
     }
 
     /// Verify that a pull_request payload normalises with the correct entity.
@@ -477,13 +478,10 @@ mod normalize_event_tests {
             "PR normalisation should succeed: {:?}",
             result.err()
         );
-        let envelope = result.unwrap();
-        assert!(
-            matches!(envelope.entity, EventEntity::PullRequest { number: 7 }),
-            "expected PullRequest(7), got: {:?}",
-            envelope.entity
-        );
-        assert_eq!(envelope.action, Some("opened".to_string()));
+        let event = result.unwrap();
+        let pr_number = event.payload["pull_request"]["number"].as_u64();
+        assert_eq!(pr_number, Some(7), "expected PR number 7");
+        assert_eq!(event.action, Some("opened".to_string()));
     }
 
     /// Verify that a payload missing the repository field fails normalisation.

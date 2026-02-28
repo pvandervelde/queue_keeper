@@ -15,8 +15,8 @@
 use chrono::{Datelike, Timelike};
 use queue_keeper_core::{
     blob_storage::{BlobStorage, BlobStorageError, WebhookPayload},
-    webhook::EventEnvelope,
-    BotName, EventId, QueueName, Timestamp,
+    webhook::WrappedEvent,
+    BotName, EventId, QueueName, Repository, Timestamp,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -77,8 +77,8 @@ pub struct FailedEventRecord {
     /// Event ID for correlation
     pub event_id: EventId,
 
-    /// Original event envelope
-    pub event: EventEnvelope,
+    /// Original wrapped event
+    pub event: WrappedEvent,
 
     /// Why this event ended up in DLQ
     pub reason: DlqReason,
@@ -105,7 +105,7 @@ pub struct FailedEventRecord {
 impl FailedEventRecord {
     /// Create a new DLQ record for an event
     pub fn new(
-        event: EventEnvelope,
+        event: WrappedEvent,
         reason: DlqReason,
         failed_queues: Vec<FailedQueueInfo>,
         successful_queues: Vec<String>,
@@ -237,7 +237,11 @@ impl DlqStorageService {
             metadata: queue_keeper_core::blob_storage::PayloadMetadata {
                 event_id: record.event_id,
                 event_type: record.event.event_type.clone(),
-                repository: Some(record.event.repository.clone()),
+                repository: record
+                    .event
+                    .payload
+                    .get("repository")
+                    .and_then(|r| serde_json::from_value::<Repository>(r.clone()).ok()),
                 signature_valid: true,
                 received_at: record.first_attempt_at,
                 delivery_id: None,
@@ -296,7 +300,7 @@ impl DlqStorageService {
 ///
 /// This is a convenience function for use in the queue delivery module.
 pub fn create_failed_event_record(
-    event: EventEnvelope,
+    event: WrappedEvent,
     failed_queues: Vec<(BotName, QueueName, String, bool)>,
     successful_queues: Vec<(BotName, QueueName)>,
     retry_attempts: u32,

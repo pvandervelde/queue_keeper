@@ -360,8 +360,8 @@ pub async fn handle_provider_webhook(
     let webhook_request = WebhookRequest::new(webhook_headers, body);
 
     // Delegate to the provider-specific processor
-    let event_envelope = match processor.process_webhook(webhook_request).await {
-        Ok(envelope) => envelope,
+    let processing_output = match processor.process_webhook(webhook_request).await {
+        Ok(output) => output,
         Err(e) => {
             let duration = start.elapsed();
             state.metrics.record_webhook_request(duration, false);
@@ -370,10 +370,9 @@ pub async fn handle_provider_webhook(
     };
 
     info!(
-        event_id = %event_envelope.event_id,
-        event_type = %event_envelope.event_type,
-        repository = %event_envelope.repository.full_name,
-        session_id = %event_envelope.session_id,
+        event_id = %processing_output.event_id(),
+        event_type = processing_output.event_type().unwrap_or("unknown"),
+        session_id = ?processing_output.session_id(),
         provider = %provider,
         "Successfully processed webhook - returning immediate response"
     );
@@ -382,8 +381,8 @@ pub async fn handle_provider_webhook(
     state.metrics.record_webhook_request(duration, true);
 
     Ok(Json(WebhookResponse {
-        event_id: event_envelope.event_id,
-        session_id: event_envelope.session_id,
+        event_id: processing_output.event_id(),
+        session_id: processing_output.session_id().cloned(),
         status: "processed".to_string(),
         message: "Webhook processed successfully".to_string(),
     }))

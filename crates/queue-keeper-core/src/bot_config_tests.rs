@@ -1,7 +1,7 @@
 //! Tests for the bot configuration module.
 
 use super::*;
-use crate::{EventEntity, Repository, RepositoryId, User, UserId, UserType};
+use crate::{webhook::WrappedEvent, Repository, RepositoryId, User, UserId, UserType};
 
 // ============================================================================
 // Basic Type Tests
@@ -318,25 +318,22 @@ mod bot_configuration_tests {
         }
     }
 
-    fn create_test_event(event_type: &str, owner: &str, repo: &str) -> EventEnvelope {
-        let repository = Repository::new(
-            RepositoryId::new(12345),
-            repo.to_string(),
-            format!("{}/{}", owner, repo),
-            User {
-                id: UserId::new(1),
-                login: owner.to_string(),
-                user_type: UserType::User,
-            },
-            false,
-        );
-
-        EventEnvelope::new(
+    fn create_test_event(event_type: &str, owner: &str, repo: &str) -> WrappedEvent {
+        WrappedEvent::new(
+            "github".to_string(),
             event_type.to_string(),
             Some("opened".to_string()),
-            repository,
-            EventEntity::Issue { number: 1 },
-            serde_json::json!({}),
+            None,
+            serde_json::json!({
+                "action": "opened",
+                "repository": {
+                    "id": 12345,
+                    "name": repo,
+                    "full_name": format!("{}/{}", owner, repo),
+                    "private": false,
+                    "owner": {"id": 1, "login": owner, "type": "User"}
+                }
+            }),
         )
     }
 
@@ -442,25 +439,22 @@ mod bot_configuration_tests {
 mod bot_subscription_tests {
     use super::*;
 
-    fn create_test_event(event_type: &str, owner: &str, repo: &str) -> EventEnvelope {
-        let repository = Repository::new(
-            RepositoryId::new(12345),
-            repo.to_string(),
-            format!("{}/{}", owner, repo),
-            User {
-                id: UserId::new(1),
-                login: owner.to_string(),
-                user_type: UserType::User,
-            },
-            false,
-        );
-
-        EventEnvelope::new(
+    fn create_test_event(event_type: &str, owner: &str, repo: &str) -> WrappedEvent {
+        WrappedEvent::new(
+            "github".to_string(),
             event_type.to_string(),
             Some("opened".to_string()),
-            repository,
-            EventEntity::Issue { number: 1 },
-            serde_json::json!({}),
+            None,
+            serde_json::json!({
+                "action": "opened",
+                "repository": {
+                    "id": 12345,
+                    "name": repo,
+                    "full_name": format!("{}/{}", owner, repo),
+                    "private": false,
+                    "owner": {"id": 1, "login": owner, "type": "User"}
+                }
+            }),
         )
     }
 
@@ -544,25 +538,22 @@ mod bot_subscription_tests {
 mod event_matcher_tests {
     use super::*;
 
-    fn create_test_event(event_type: &str, owner: &str, repo: &str) -> EventEnvelope {
-        let repository = Repository::new(
-            RepositoryId::new(12345),
-            repo.to_string(),
-            format!("{}/{}", owner, repo),
-            User {
-                id: UserId::new(1),
-                login: owner.to_string(),
-                user_type: UserType::User,
-            },
-            false,
-        );
-
-        EventEnvelope::new(
+    fn create_test_event(event_type: &str, owner: &str, repo: &str) -> WrappedEvent {
+        WrappedEvent::new(
+            "github".to_string(),
             event_type.to_string(),
             Some("opened".to_string()),
-            repository,
-            EventEntity::Issue { number: 1 },
-            serde_json::json!({}),
+            None,
+            serde_json::json!({
+                "action": "opened",
+                "repository": {
+                    "id": 12345,
+                    "name": repo,
+                    "full_name": format!("{}/{}", owner, repo),
+                    "private": false,
+                    "owner": {"id": 1, "login": owner, "type": "User"}
+                }
+            }),
         )
     }
 
