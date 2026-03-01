@@ -346,6 +346,7 @@ pub fn create_test_app_state_with_providers(
         event_store,
         metrics,
         telemetry_config,
+        std::collections::HashSet::new(),
     )
 }
 

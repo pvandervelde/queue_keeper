@@ -362,12 +362,18 @@ impl Default for ServerConfig {
 ///
 /// # Relationship to [`ProviderConfig`]
 ///
-/// [`ProviderConfig`] introduces per-provider overrides for
-/// `require_signature` and `allowed_event_types`. When a matching
-/// [`ProviderConfig`] entry exists, its values take precedence over
-/// the global defaults defined here. [`WebhookConfig`] is retained
-/// for backward compatibility and for settings that do not yet have
-/// a per-provider equivalent (e.g. `store_payloads`, `rate_limit_per_repo`).
+/// [`ProviderConfig`] holds per-provider settings such as `allowed_event_types`.
+/// The routing handler enforces `allowed_event_types` from the matching
+/// [`ProviderConfig`] entry when present. [`WebhookConfig`] is retained for
+/// settings that do not yet have a per-provider equivalent
+/// (e.g. `store_payloads`, `rate_limit_per_repo`).
+///
+/// > **Note**: `require_signature` in `WebhookConfig` and `ProviderConfig` is
+/// > **not** enforced by the routing layer. Signature validation is delegated
+/// > entirely to the processor's [`SignatureValidator`]. The field is present for
+/// > documentation and future use only.
+///
+/// [`SignatureValidator`]: queue_keeper_core::webhook::SignatureValidator
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebhookConfig {
     /// Webhook endpoint path

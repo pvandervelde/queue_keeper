@@ -42,7 +42,11 @@ use queue_keeper_core::{
     webhook::{WebhookHeaders, WebhookRequest},
     EventId, SessionId, Timestamp,
 };
-use std::{collections::HashMap, net::SocketAddr, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    net::SocketAddr,
+    sync::Arc,
+};
 use tower::ServiceBuilder;
 use tower_http::{compression::CompressionLayer, cors::CorsLayer, trace::TraceLayer};
 use tracing::{error, info, instrument, warn};
@@ -85,6 +89,13 @@ pub struct AppState {
 
     /// OpenTelemetry configuration for tracing
     pub telemetry_config: Arc<TelemetryConfig>,
+
+    /// Set of provider IDs that are generic (non-GitHub) providers.
+    ///
+    /// Pre-built at startup from [`ServiceConfig::generic_providers`] to enable
+    /// O(1) lookup in the hot request path instead of scanning the full list
+    /// on every webhook request.
+    pub generic_provider_ids: Arc<HashSet<String>>,
 }
 
 impl AppState {
@@ -96,6 +107,7 @@ impl AppState {
         event_store: Arc<dyn EventStore>,
         metrics: Arc<ServiceMetrics>,
         telemetry_config: Arc<TelemetryConfig>,
+        generic_provider_ids: HashSet<String>,
     ) -> Self {
         Self {
             config,
@@ -104,6 +116,7 @@ impl AppState {
             event_store,
             metrics,
             telemetry_config,
+            generic_provider_ids: Arc::new(generic_provider_ids),
         }
     }
 }
@@ -168,6 +181,7 @@ pub async fn start_server(
     provider_registry: ProviderRegistry,
     health_checker: Arc<dyn HealthChecker>,
     event_store: Arc<dyn EventStore>,
+    generic_provider_ids: HashSet<String>,
 ) -> Result<(), ServiceError> {
     // Validate configuration before initializing any infrastructure
     config.validate().map_err(ServiceError::Configuration)?;
@@ -204,6 +218,7 @@ pub async fn start_server(
         event_store,
         metrics,
         telemetry_config,
+        generic_provider_ids,
     );
     let app = create_router(state);
 
@@ -319,11 +334,13 @@ pub async fn handle_provider_webhook(
     // Determine whether this is a generic (non-GitHub) provider.
     // Generic providers do not send GitHub-specific headers, so we use a
     // relaxed parser that falls back to safe defaults instead of failing.
-    let is_generic_provider = state
-        .config
-        .generic_providers
-        .iter()
-        .any(|p| p.provider_id == provider);
+    //
+    // The set is pre-built at startup (O(1) lookup here vs. O(n) scan).
+    //
+    // Note: generic providers do not support `allowed_event_types` filtering
+    // — all event types are accepted regardless of configuration. If you need
+    // per-event filtering for a generic provider, implement it downstream.
+    let is_generic_provider = state.generic_provider_ids.contains(&provider);
 
     let webhook_headers = if is_generic_provider {
         // For generic providers, never fail on missing GitHub headers — the

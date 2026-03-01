@@ -103,7 +103,6 @@ impl WebhookHeaders {
     pub fn from_http_headers(headers: &HashMap<String, String>) -> Result<Self, ValidationError> {
         let event_type = headers
             .get("x-github-event")
-            .or_else(|| headers.get("X-GitHub-Event"))
             .ok_or_else(|| ValidationError::Required {
                 field: "X-GitHub-Event".to_string(),
             })?
@@ -111,25 +110,17 @@ impl WebhookHeaders {
 
         let delivery_id = headers
             .get("x-github-delivery")
-            .or_else(|| headers.get("X-GitHub-Delivery"))
             .ok_or_else(|| ValidationError::Required {
                 field: "X-GitHub-Delivery".to_string(),
             })?
             .clone();
 
-        let signature = headers
-            .get("x-hub-signature-256")
-            .or_else(|| headers.get("X-Hub-Signature-256"))
-            .cloned();
+        let signature = headers.get("x-hub-signature-256").cloned();
 
-        let user_agent = headers
-            .get("user-agent")
-            .or_else(|| headers.get("User-Agent"))
-            .cloned();
+        let user_agent = headers.get("user-agent").cloned();
 
         let content_type = headers
             .get("content-type")
-            .or_else(|| headers.get("Content-Type"))
             .unwrap_or(&"application/json".to_string())
             .clone();
 

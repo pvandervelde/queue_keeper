@@ -85,14 +85,14 @@ impl PayloadStorer for MockPayloadStorer {
 
 fn create_test_headers() -> HashMap<String, String> {
     let mut headers = HashMap::new();
-    headers.insert("X-GitHub-Event".to_string(), "push".to_string());
+    headers.insert("x-github-event".to_string(), "push".to_string());
     headers.insert(
-        "X-GitHub-Delivery".to_string(),
+        "x-github-delivery".to_string(),
         "12345678-1234-1234-1234-123456789abc".to_string(),
     );
-    headers.insert("Content-Type".to_string(), "application/json".to_string());
+    headers.insert("content-type".to_string(), "application/json".to_string());
     headers.insert(
-        "X-Hub-Signature-256".to_string(),
+        "x-hub-signature-256".to_string(),
         "sha256=test-signature".to_string(),
     );
     headers
@@ -156,7 +156,7 @@ mod webhook_request_tests {
     #[test]
     fn test_missing_event_type_header() {
         let mut headers = create_test_headers();
-        headers.remove("X-GitHub-Event");
+        headers.remove("x-github-event");
 
         let result = WebhookHeaders::from_http_headers(&headers);
         assert!(result.is_err());
@@ -171,7 +171,7 @@ mod webhook_request_tests {
     #[test]
     fn test_missing_delivery_id_header() {
         let mut headers = create_test_headers();
-        headers.remove("X-GitHub-Delivery");
+        headers.remove("x-github-delivery");
 
         let result = WebhookHeaders::from_http_headers(&headers);
         assert!(result.is_err());
@@ -186,7 +186,7 @@ mod webhook_request_tests {
     #[test]
     fn test_invalid_delivery_id_format() {
         let mut headers = create_test_headers();
-        headers.insert("X-GitHub-Delivery".to_string(), "not-a-uuid".to_string());
+        headers.insert("x-github-delivery".to_string(), "not-a-uuid".to_string());
 
         let result = WebhookHeaders::from_http_headers(&headers);
         assert!(result.is_err());
@@ -201,7 +201,7 @@ mod webhook_request_tests {
     #[test]
     fn test_missing_signature_for_non_ping_event() {
         let mut headers = create_test_headers();
-        headers.remove("X-Hub-Signature-256");
+        headers.remove("x-hub-signature-256");
 
         let result = WebhookHeaders::from_http_headers(&headers);
         assert!(result.is_err());
@@ -216,8 +216,8 @@ mod webhook_request_tests {
     #[test]
     fn test_ping_event_without_signature() {
         let mut headers = create_test_headers();
-        headers.insert("X-GitHub-Event".to_string(), "ping".to_string());
-        headers.remove("X-Hub-Signature-256");
+        headers.insert("x-github-event".to_string(), "ping".to_string());
+        headers.remove("x-hub-signature-256");
 
         let result = WebhookHeaders::from_http_headers(&headers);
         assert!(result.is_ok());
@@ -226,7 +226,7 @@ mod webhook_request_tests {
     #[test]
     fn test_invalid_content_type() {
         let mut headers = create_test_headers();
-        headers.insert("Content-Type".to_string(), "text/plain".to_string());
+        headers.insert("content-type".to_string(), "text/plain".to_string());
 
         let result = WebhookHeaders::from_http_headers(&headers);
         assert!(result.is_err());
@@ -239,7 +239,7 @@ mod webhook_request_tests {
     }
 
     #[test]
-    fn test_case_insensitive_header_parsing() {
+    fn test_lowercase_header_parsing() {
         let mut headers = HashMap::new();
         headers.insert("x-github-event".to_string(), "push".to_string());
         headers.insert(
@@ -336,7 +336,7 @@ mod event_normalization_tests {
     async fn test_pull_request_event_normalization() {
         let processor = WebhookProcessorImpl::new(None, None, None);
         let mut headers = create_test_headers();
-        headers.insert("X-GitHub-Event".to_string(), "pull_request".to_string());
+        headers.insert("x-github-event".to_string(), "pull_request".to_string());
         let webhook_headers = WebhookHeaders::from_http_headers(&headers).unwrap();
         let payload = create_pr_payload();
         let body = Bytes::from(serde_json::to_vec(&payload).unwrap());
@@ -364,7 +364,7 @@ mod event_normalization_tests {
     async fn test_issue_event_normalization() {
         let processor = WebhookProcessorImpl::new(None, None, None);
         let mut headers = create_test_headers();
-        headers.insert("X-GitHub-Event".to_string(), "issues".to_string());
+        headers.insert("x-github-event".to_string(), "issues".to_string());
         let webhook_headers = WebhookHeaders::from_http_headers(&headers).unwrap();
 
         let payload = json!({
@@ -449,7 +449,7 @@ mod event_normalization_tests {
     async fn test_release_event_normalization() {
         let processor = WebhookProcessorImpl::new(None, None, None);
         let mut headers = create_test_headers();
-        headers.insert("X-GitHub-Event".to_string(), "release".to_string());
+        headers.insert("x-github-event".to_string(), "release".to_string());
         let webhook_headers = WebhookHeaders::from_http_headers(&headers).unwrap();
 
         let payload = json!({
@@ -493,7 +493,7 @@ mod event_normalization_tests {
     async fn test_repository_event_normalization() {
         let processor = WebhookProcessorImpl::new(None, None, None);
         let mut headers = create_test_headers();
-        headers.insert("X-GitHub-Event".to_string(), "repository".to_string());
+        headers.insert("x-github-event".to_string(), "repository".to_string());
         let webhook_headers = WebhookHeaders::from_http_headers(&headers).unwrap();
 
         let payload = json!({
@@ -534,7 +534,7 @@ mod event_normalization_tests {
     async fn test_unknown_event_type_normalization() {
         let processor = WebhookProcessorImpl::new(None, None, None);
         let mut headers = create_test_headers();
-        headers.insert("X-GitHub-Event".to_string(), "unknown_event".to_string());
+        headers.insert("x-github-event".to_string(), "unknown_event".to_string());
         let webhook_headers = WebhookHeaders::from_http_headers(&headers).unwrap();
 
         let payload = json!({
@@ -872,7 +872,7 @@ mod integration_tests {
         let processor = WebhookProcessorImpl::new(Some(validator), Some(storer), None);
 
         let mut headers = create_test_headers();
-        headers.insert("X-GitHub-Event".to_string(), "pull_request".to_string());
+        headers.insert("x-github-event".to_string(), "pull_request".to_string());
         let webhook_headers = WebhookHeaders::from_http_headers(&headers).unwrap();
         let payload = create_pr_payload();
         let body = Bytes::from(serde_json::to_vec(&payload).unwrap());

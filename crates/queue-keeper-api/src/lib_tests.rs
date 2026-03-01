@@ -121,6 +121,7 @@ fn test_app_state(registry: ProviderRegistry) -> AppState {
             "test-service".to_string(),
             "test".to_string(),
         )),
+        std::collections::HashSet::new(),
     )
 }
 

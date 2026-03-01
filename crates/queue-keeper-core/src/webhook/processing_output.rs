@@ -163,6 +163,56 @@ impl WrappedEvent {
             payload,
         }
     }
+
+    /// Create a new [`WrappedEvent`] with a caller-supplied `received_at` timestamp.
+    ///
+    /// Use this constructor when you have the actual receive time available
+    /// (e.g. from [`WebhookRequest::received_at`]) so that latency metrics
+    /// recorded in `received_at` reflect wall-clock receipt rather than the
+    /// moment normalization began.
+    ///
+    /// # Arguments
+    ///
+    /// * `received_at` - The UTC timestamp at which the webhook was first
+    ///   received by the HTTP layer.
+    /// * Other arguments — same as [`Self::new`].
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use queue_keeper_core::{webhook::WrappedEvent, Timestamp};
+    ///
+    /// let received = Timestamp::now();
+    /// let event = WrappedEvent::with_received_at(
+    ///     received,
+    ///     "jira".to_string(),
+    ///     "issue_updated".to_string(),
+    ///     Some("created".to_string()),
+    ///     None,
+    ///     serde_json::json!({}),
+    /// );
+    /// assert_eq!(event.event_type, "issue_updated");
+    /// ```
+    pub fn with_received_at(
+        received_at: Timestamp,
+        provider: String,
+        event_type: String,
+        action: Option<String>,
+        session_id: Option<SessionId>,
+        payload: serde_json::Value,
+    ) -> Self {
+        Self {
+            event_id: EventId::new(),
+            provider,
+            event_type,
+            action,
+            session_id,
+            correlation_id: CorrelationId::new(),
+            received_at,
+            processed_at: Timestamp::now(),
+            payload,
+        }
+    }
 }
 
 // ============================================================================

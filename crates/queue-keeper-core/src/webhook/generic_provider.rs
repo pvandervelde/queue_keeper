@@ -70,7 +70,7 @@ use tracing::{instrument, warn};
 ///
 /// [`WebhookSecretConfig::Literal`] is provided for development and testing
 /// only. A startup `WARN` is emitted when a literal secret is active.
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum WebhookSecretConfig {
     /// Secret fetched from Azure Key Vault at validation time.
@@ -100,6 +100,26 @@ impl std::fmt::Debug for WebhookSecretConfig {
                 .debug_struct("WebhookSecretConfig::Literal")
                 .field("value", &"<REDACTED>")
                 .finish(),
+        }
+    }
+}
+
+impl serde::Serialize for WebhookSecretConfig {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        match self {
+            Self::KeyVault { secret_name } => {
+                let mut map = serializer.serialize_map(Some(2))?;
+                map.serialize_entry("type", "key_vault")?;
+                map.serialize_entry("secret_name", secret_name)?;
+                map.end()
+            }
+            Self::Literal { .. } => {
+                let mut map = serializer.serialize_map(Some(2))?;
+                map.serialize_entry("type", "literal")?;
+                map.serialize_entry("value", "<REDACTED>")?;
+                map.end()
+            }
         }
     }
 }
@@ -790,18 +810,11 @@ fn resolve_field_source(
 
 /// Constant-time byte comparison to prevent timing attacks.
 ///
-/// Both slices must have the same length; returns `false` immediately if they
-/// differ in length (this is not length-constant but length disclosure is
-/// acceptable for bearer token validation where token length is known).
+/// Delegates to [`subtle::ConstantTimeEq`] to ensure the comparison cannot be
+/// short-circuited by the compiler or CPU branch-predictor.
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut diff: u8 = 0;
-    for (x, y) in a.iter().zip(b.iter()) {
-        diff |= x ^ y;
-    }
-    diff == 0
+    use subtle::ConstantTimeEq;
+    a.ct_eq(b).into()
 }
 
 // ============================================================================
@@ -853,14 +866,24 @@ impl WebhookProcessor for GenericWebhookProvider {
 
         // 2. Parse the body as JSON (needed for event_type extraction in both modes and
         //    for field extraction in wrap mode). In direct mode we retain the original bytes.
-        let payload: serde_json::Value = if self.config.processing_mode == ProcessingMode::Wrap
+        //
+        //    We fail immediately on parse errors here rather than swallowing them with
+        //    `unwrap_or(Value::Null)`, which would make a valid JSON `null` body
+        //    indistinguishable from a malformed body in the downstream checks.
+        let needs_json = self.config.processing_mode == ProcessingMode::Wrap
             || self
                 .config
                 .event_type_source
                 .as_ref()
-                .map_or(false, |s| matches!(s, FieldSource::JsonPath { .. }))
-        {
-            serde_json::from_slice(&request.body).unwrap_or(serde_json::Value::Null)
+                .map_or(false, |s| matches!(s, FieldSource::JsonPath { .. }));
+
+        let payload: serde_json::Value = if needs_json {
+            serde_json::from_slice(&request.body).map_err(|e| WebhookError::MalformedPayload {
+                message: format!(
+                    "provider '{}': invalid JSON body: {}",
+                    self.config.provider_id, e
+                ),
+            })?
         } else {
             serde_json::Value::Null
         };
@@ -1007,6 +1030,12 @@ impl WebhookProcessor for GenericWebhookProvider {
         request: &WebhookRequest,
         _validation_status: ValidationStatus,
     ) -> Result<StorageReference, StorageError> {
+        warn!(
+            provider = %self.config.provider_id,
+            delivery_id = %request.delivery_id(),
+            "store_raw_payload: blob-storage adapter not yet wired for generic providers; \
+             payload will not be persisted for audit or replay"
+        );
         Ok(StorageReference {
             blob_path: format!("not-stored/{}", request.delivery_id()),
             stored_at: crate::Timestamp::now(),
@@ -1019,6 +1048,14 @@ impl WebhookProcessor for GenericWebhookProvider {
     /// Only valid in **wrap mode**. Extracts the repository identifier,
     /// optional entity ID, and optional action from the JSON body via the
     /// paths configured in [`FieldExtractionConfig`].
+    ///
+    /// # Design note
+    ///
+    /// This method re-parses the JSON body independently from [`process_wrap_mode`],
+    /// because `normalize_event` is part of the [`WebhookProcessor`] trait contract
+    /// and may be called outside of the normal `process_webhook` flow (e.g. during
+    /// event replay).  Keeping the two paths self-contained avoids hidden temporal
+    /// coupling between them.  The extra parse is negligible for typical payloads.
     ///
     /// # Errors
     ///
@@ -1050,7 +1087,8 @@ impl WebhookProcessor for GenericWebhookProvider {
             .and_then(|v| v.as_str())
             .map(String::from);
 
-        let event = WrappedEvent::new(
+        let event = WrappedEvent::with_received_at(
+            request.received_at,
             self.config.provider_id.clone(),
             event_type,
             action,
@@ -1081,17 +1119,6 @@ impl GenericWebhookProvider {
         payload: serde_json::Value,
         event_type: &str,
     ) -> Result<ProcessingOutput, WebhookError> {
-        // In wrap mode the body must be valid JSON (checked during process_webhook).
-        // If the caller passed Null it means JSON parsing already failed.
-        if payload.is_null() && !request.body.is_empty() {
-            return Err(WebhookError::MalformedPayload {
-                message: format!(
-                    "provider '{}': wrap mode requires a valid JSON body",
-                    self.config.provider_id
-                ),
-            });
-        }
-
         let extraction = self
             .config
             .field_extraction
@@ -1106,8 +1133,10 @@ impl GenericWebhookProvider {
             .and_then(|v| v.as_str())
             .map(String::from);
 
-        // Build the WrappedEvent.
-        let event = WrappedEvent::new(
+        // Build the WrappedEvent, propagating the HTTP-layer receive time so that
+        // latency metrics distinguish actual receive time from processing time.
+        let event = WrappedEvent::with_received_at(
+            request.received_at,
             self.config.provider_id.clone(),
             event_type.to_string(),
             action,

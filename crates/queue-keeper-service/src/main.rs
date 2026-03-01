@@ -86,14 +86,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    let service_config: ServiceConfig = match config.try_deserialize() {
+    let mut service_config: ServiceConfig = match config.try_deserialize() {
         Ok(sc) => sc,
         Err(e) => {
-            warn!(
+            error!(
                 error = %e,
-                "Could not deserialize configuration, using service defaults"
+                "Could not deserialize service configuration; aborting. \
+                 Fix the configuration and restart."
             );
-            ServiceConfig::default()
+            std::process::exit(3);
         }
     };
 
@@ -150,8 +151,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     //
     // Each [`GenericProviderConfig`] entry in `service_config.generic_providers`
     // becomes a [`GenericWebhookProvider`] registered under its provider ID.
+    //
+    // We drain the vec here using `mem::take` so each config is consumed directly
+    // by `with_signature_validator` without an extra clone.  The provider IDs are
+    // collected first for the `generic_provider_ids` HashSet passed to
+    // `start_server`.
     // -------------------------------------------------------------------------
-    for generic_config in service_config.generic_providers.clone() {
+    let generic_provider_ids: std::collections::HashSet<String> = service_config
+        .generic_providers
+        .iter()
+        .map(|p| p.provider_id.clone())
+        .collect();
+
+    for generic_config in std::mem::take(&mut service_config.generic_providers) {
         let provider_id_str = generic_config.provider_id.clone();
 
         match ProviderId::new(&provider_id_str) {
@@ -209,6 +221,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         provider_registry,
         health_checker,
         event_store,
+        generic_provider_ids,
     )
     .await
     {
