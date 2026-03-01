@@ -2,6 +2,50 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.0] - 2026-03-01
+
+### Bug Fixes
+
+- Fix changelog extraction and add docker image link to release notes
+- Fix release notes changelog extraction and add docker image link (#152)
+- Address PR review comments and e2e test failures
+- Address second-round PR review findings (auto via agent)
+- Update stale /webhook paths to /webhook/github (auto via agent)
+- Address PR review findings for generic webhook provider
+- Add #[serde(default)] to ServiceConfig fields to fix e2e container startup
+
+### CI/CD
+
+- Don't allow claude review for PRs from renovate or forked repo's
+- Don't allow claude review for PRs from renovate or forked repo's (#157)
+
+### Features
+
+- Add types, docs, and tests for provider-specific webhook routing (auto via agent)
+- Implement provider-specific webhook routing (auto via agent)
+- Add GithubWebhookProvider with tests and docs (auto via agent)
+- Add ProviderConfig and ProviderSecretConfig types with tests (auto via agent)
+- Wire provider validation at startup and update integration tests (auto via agent)
+- Add provider-specific URL routing and configuration (#154)
+- Add generic_providers to ServiceConfig with target_queue routing
+- Add WebhookSecretConfig, LiteralSignatureValidator, and relaxed header parsing
+- Load ServiceConfig from YAML/env and wire SignatureValidator for all providers
+- Add configuration-driven generic webhook provider with multi-source signature validation (#156)
+
+### Miscellaneous
+
+- Rust formatting
+- Fix Rust formatting
+
+### Refactoring
+
+- Replace EventEnvelope with WrappedEvent throughout codebase
+
+### Testing
+
+- Update webhook e2e tests to use /webhook/github endpoint (auto via agent)
+- Add integration tests for provider endpoint routing
+
 ## [0.1.0] - 2026-02-20
 
 ### Bug Fixes
