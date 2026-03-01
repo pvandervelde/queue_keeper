@@ -631,3 +631,78 @@ mod serialization_tests {
         );
     }
 }
+
+// ============================================================================
+// ServiceConfig empty-document deserialization tests
+// ============================================================================
+
+mod service_config_empty_deserialization_tests {
+    use super::*;
+
+    /// Verify that an empty JSON document (`{}`) deserializes into
+    /// `ServiceConfig` using all struct-level defaults.
+    ///
+    /// This is the key regression test for the e2e container startup
+    /// failure: when no configuration files or environment variables are
+    /// provided, the service must start with built-in defaults rather than
+    /// exiting with a deserialization error.
+    #[test]
+    fn test_empty_json_produces_default_service_config() {
+        let result: Result<ServiceConfig, _> = serde_json::from_str("{}");
+        assert!(
+            result.is_ok(),
+            "Deserializing an empty JSON document must succeed: {:?}",
+            result.err()
+        );
+        let config = result.unwrap();
+        let expected = ServiceConfig::default();
+        // Spot-check a few fields rather than doing a full PartialEq
+        assert_eq!(config.server.port, expected.server.port);
+        assert_eq!(
+            config.webhooks.require_signature,
+            expected.webhooks.require_signature
+        );
+        assert!(config.providers.is_empty());
+        assert!(config.generic_providers.is_empty());
+        assert!(config.validate().is_ok());
+    }
+
+    /// Verify that a TOML document with only a `[server]` port override
+    /// deserializes correctly.  Other sections must come from their defaults.
+    ///
+    /// This mirrors the common operator pattern of only overriding the port
+    /// while leaving all other settings at their built-in defaults.
+    #[test]
+    fn test_server_only_toml_deserializes() {
+        // Build a minimal TOML that provides only the port.  All other
+        // ServerConfig fields come from ServerConfig::default(), and all
+        // other top-level sections come from their own defaults.
+        let full_server_toml = r#"
+[server]
+host = "0.0.0.0"
+port = 9090
+timeout_seconds = 30
+shutdown_timeout_seconds = 30
+max_body_size = 10485760
+enable_cors = true
+enable_compression = true
+"#;
+        let result: Result<ServiceConfig, _> = toml::from_str(full_server_toml);
+        assert!(
+            result.is_ok(),
+            "TOML with only a [server] section must deserialize: {:?}",
+            result.err()
+        );
+        let config = result.unwrap();
+        assert_eq!(
+            config.server.port, 9090,
+            "overridden port should take effect"
+        );
+        let expected = ServiceConfig::default();
+        assert_eq!(
+            config.webhooks.require_signature, expected.webhooks.require_signature,
+            "unspecified sections must use defaults"
+        );
+        assert!(config.validate().is_ok());
+    }
+}

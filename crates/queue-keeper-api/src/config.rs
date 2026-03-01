@@ -10,15 +10,19 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ServiceConfig {
     /// HTTP server settings
+    #[serde(default)]
     pub server: ServerConfig,
 
     /// Webhook processing settings
+    #[serde(default)]
     pub webhooks: WebhookConfig,
 
     /// Security settings
+    #[serde(default)]
     pub security: SecurityConfig,
 
     /// Logging configuration
+    #[serde(default)]
     pub logging: LoggingConfig,
 
     /// Per-provider webhook configuration.

@@ -47,9 +47,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     //  4. Environment variables prefixed QK__ (double-underscore separator)
     //     e.g. QK__SERVER__PORT=9090 sets server.port = 9090
     //
-    // An absent or unparseable configuration file is not an error; the service
-    // falls back to defaults for missing fields.  An unparseable environment
-    // variable *is* a hard error because it indicates operator misconfiguration.
+    // All service configuration fields carry serde defaults, so absent files
+    // or an entirely unconfigured environment produces a valid service config
+    // with built-in defaults.  A malformed file or an environment variable
+    // that cannot be coerced to the correct type IS a hard error because it
+    // indicates deliberate-but-broken operator configuration.
     // -------------------------------------------------------------------------
     let mut config_builder = config::Config::builder()
         .add_source(
