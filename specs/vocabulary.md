@@ -29,11 +29,14 @@ A normalized representation of a GitHub webhook after validation and transformat
 
 The primary GitHub object that an event relates to, used for session-based ordering.
 
-- **Pull Request**: Identified by PR number, enables sequential processing of PR lifecycle
-- **Issue**: Identified by issue number, enables sequential processing of issue lifecycle
-- **Branch**: Identified by branch name, enables sequential processing of branch events
-- **Repository**: The repository itself, used for repository-level events
-- **Release**: Identified by release tag, used for release management events
+- **Pull Request**: Identified by PR number, enables sequential processing of PR lifecycle (e.g. session ID: `owner/repo/pull_request/123`)
+- **Issue**: Identified by issue number, enables sequential processing of issue lifecycle (e.g. session ID: `owner/repo/issue/456`)
+- **Branch**: Identified by branch name, enables sequential processing of branch events (e.g. session ID: `owner/repo/branch/main`)
+- **Repository**: The repository itself, used for repository-level events (e.g. session ID: `owner/repo/repository/repository`)
+- **Release**: Identified by release tag, used for release management events (e.g. session ID: `owner/repo/release/v1.2.0`)
+- **Discussion**: Identified by discussion number, enables sequential processing of discussion thread lifecycle (e.g. session ID: `owner/repo/discussion/42`)
+- **WorkflowRun**: Identified by workflow run ID, enables sequential processing of CI/CD workflow and job events belonging to the same run (e.g. session ID: `owner/repo/workflow_run/9999`)
+- **Team**: Identified by team slug, enables sequential processing of team membership and permission events (e.g. session ID: `owner/repo/team/backend`)
 - **Unknown**: Fallback for unrecognized or entity-less events
 
 ### Session

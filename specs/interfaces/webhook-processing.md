@@ -102,25 +102,92 @@ pub enum EventEntity {
     Issue { number: u32 },
     Branch { name: String },
     Release { tag: String },
+    Discussion { number: u32 },
+    WorkflowRun { id: u64 },
+    Team { slug: String },
     Repository,
     Unknown,
 }
 
 impl EventEntity {
     pub fn from_payload(event_type: &str, payload: &serde_json::Value) -> Self;
+
+    /// Returns a static string identifying the entity type:
+    ///
+    /// | Variant         | Returns           |
+    /// |-----------------|-------------------|
+    /// | PullRequest     | `"pull_request"`  |
+    /// | Issue           | `"issue"`         |
+    /// | Branch          | `"branch"`        |
+    /// | Release         | `"release"`       |
+    /// | Discussion      | `"discussion"`    |
+    /// | WorkflowRun     | `"workflow_run"`  |
+    /// | Team            | `"team"`          |
+    /// | Repository      | `"repository"`    |
+    /// | Unknown         | `"unknown"`       |
     pub fn entity_type(&self) -> &'static str;
+
+    /// Returns the entity's unique identifier as a string:
+    ///
+    /// | Variant                   | Returns                    |
+    /// |---------------------------|----------------------------|
+    /// | PullRequest { number }    | `number.to_string()`       |
+    /// | Issue { number }          | `number.to_string()`       |
+    /// | Branch { name }           | `name.clone()`             |
+    /// | Release { tag }           | `tag.clone()`              |
+    /// | Discussion { number }     | `number.to_string()`       |
+    /// | WorkflowRun { id }        | `id.to_string()`           |
+    /// | Team { slug }             | `slug.clone()`             |
+    /// | Repository                | `"repository".to_string()` |
+    /// | Unknown                   | `"unknown".to_string()`    |
     pub fn entity_id(&self) -> String;
 }
 ```
 
 **Entity Extraction Rules**:
 
-- Pull Request events → `PullRequest { number }`
-- Issue events → `Issue { number }`
-- Push events → `Branch { name }`
-- Release events → `Release { tag }`
-- Repository events → `Repository`
-- Unknown events → `Unknown`
+For each GitHub event type, `from_payload()` returns the entity below. If a required
+payload field is absent the function falls back to `Self::Unknown` (never silently
+returns `Self::Repository` for a field-dependent variant).
+
+| Event type                     | Entity                         | Payload path for entity ID          | Notes |
+|--------------------------------|--------------------------------|-------------------------------------|-------|
+| `pull_request`                 | `PullRequest { number }`       | `payload["pull_request"]["number"]` | |
+| `pull_request_review`          | `PullRequest { number }`       | `payload["pull_request"]["number"]` | |
+| `pull_request_review_comment`  | `PullRequest { number }`       | `payload["pull_request"]["number"]` | |
+| `issues`                       | `Issue { number }`             | `payload["issue"]["number"]`        | |
+| `issue_comment`                | `Issue { number }`             | `payload["issue"]["number"]`        | |
+| `issue_dependencies`           | `Issue { number }`             | `payload["issue"]["number"]`        | |
+| `push`                         | `Branch { name }`              | `payload["ref"]` strip `refs/heads/` prefix | Falls back to `Unknown` if ref is not a branch |
+| `create`                       | `Branch { name }`              | `payload["ref"]` strip `refs/heads/` prefix | Falls back to `Unknown` if ref is not a branch |
+| `delete`                       | `Branch { name }`              | `payload["ref"]` strip `refs/heads/` prefix | Falls back to `Unknown` if ref is not a branch |
+| `release`                      | `Release { tag }`              | `payload["release"]["tag_name"]`    | |
+| `discussion`                   | `Discussion { number }`        | `payload["discussion"]["number"]`   | |
+| `discussion_comment`           | `Discussion { number }`        | `payload["discussion"]["number"]`   | |
+| `workflow_run`                 | `WorkflowRun { id }`           | `payload["workflow_run"]["id"]`     | |
+| `workflow_job`                 | `WorkflowRun { id }`           | `payload["workflow_run"]["id"]` first, then `payload["workflow_job"]["run_id"]` | Falls back to `Unknown` if both absent |
+| `team`                         | `Team { slug }`                | `payload["team"]["slug"]`           | |
+| `repository`                   | `Repository`                   | n/a                                 | |
+| `commit_comment`               | `Repository`                   | n/a                                 | |
+| `status`                       | `Repository`                   | n/a                                 | |
+| `custom_property`              | `Repository`                   | n/a                                 | |
+| `custom_property_values`       | `Repository`                   | n/a                                 | |
+| `label`                        | `Repository`                   | n/a                                 | |
+| `milestone`                    | `Repository`                   | n/a                                 | |
+| `projects_v2`                  | `Repository`                   | n/a                                 | |
+| `projects_v2_item`             | `Repository`                   | n/a                                 | |
+| `projects_v2_status_update`    | `Repository`                   | n/a                                 | |
+| `workflow_dispatch`            | `Repository`                   | n/a                                 | No run ID available at dispatch time |
+| `deploy_key`                   | `Repository`                   | n/a                                 | |
+| `deployment`                   | `Repository`                   | n/a                                 | |
+| `repository_ruleset`           | `Repository`                   | n/a                                 | |
+| `github_app_authorization`     | `Repository`                   | n/a                                 | |
+| `installation`                 | `Repository`                   | n/a                                 | |
+| `installation_repositories`    | `Repository`                   | n/a                                 | |
+| `installation_target`          | `Repository`                   | n/a                                 | |
+| `ping`                         | `Repository`                   | n/a                                 | |
+| `team_add`                     | `Repository`                   | n/a                                 | Team added to a repository — no team-level grouping needed |
+| _(anything else)_              | `Unknown`                      | n/a                                 | Catch-all for unrecognised event types |
 
 ## Core Operations
 
