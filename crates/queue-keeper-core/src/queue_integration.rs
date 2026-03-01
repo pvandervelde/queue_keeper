@@ -11,8 +11,8 @@
 use crate::{
     audit_logging::{AuditContext, AuditLogger, AuditResult, WebhookProcessingAction},
     bot_config::{BotConfiguration, BotSubscription},
-    webhook::EventEnvelope,
-    BotName, EventId,
+    webhook::WrappedEvent,
+    BotName, EventId, Repository, RepositoryId, SessionId as CoreSessionId, User, UserId, UserType,
 };
 use async_trait::async_trait;
 
@@ -161,7 +161,7 @@ pub trait EventRouter: Send + Sync {
     /// - Configuration is invalid
     async fn route_event(
         &self,
-        event: &EventEnvelope,
+        event: &WrappedEvent,
         config: &BotConfiguration,
         queue_client: &dyn QueueClient,
     ) -> Result<DeliveryResult, QueueDeliveryError>;
@@ -197,10 +197,10 @@ impl DefaultEventRouter {
     /// Serializes event to JSON and creates Message with appropriate metadata.
     fn create_queue_message(
         &self,
-        event: &EventEnvelope,
+        event: &WrappedEvent,
         bot: &BotSubscription,
     ) -> Result<Message, QueueDeliveryError> {
-        // Serialize event envelope to JSON
+        // Serialize event to JSON
         let body = serde_json::to_vec(event)
             .map_err(|e| QueueDeliveryError::SerializationError(e.to_string()))?;
 
@@ -209,12 +209,14 @@ impl DefaultEventRouter {
 
         // Add session ID for ordered processing
         if bot.ordered {
-            // Convert core SessionId to queue-runtime SessionId
-            let session_id =
-                SessionId::new(event.session_id.as_str().to_string()).map_err(|e| {
-                    QueueDeliveryError::SerializationError(format!("Invalid session ID: {}", e))
-                })?;
-            message = message.with_session_id(session_id);
+            if let Some(ref core_session) = event.session_id {
+                // Convert core SessionId to queue-runtime SessionId
+                let queue_session_id =
+                    SessionId::new(core_session.as_str().to_string()).map_err(|e| {
+                        QueueDeliveryError::SerializationError(format!("Invalid session ID: {}", e))
+                    })?;
+                message = message.with_session_id(queue_session_id);
+            }
         }
 
         // Add correlation ID for tracing
@@ -260,7 +262,7 @@ impl Default for DefaultEventRouter {
 impl EventRouter for DefaultEventRouter {
     async fn route_event(
         &self,
-        event: &EventEnvelope,
+        event: &WrappedEvent,
         config: &BotConfiguration,
         queue_client: &dyn QueueClient,
     ) -> Result<DeliveryResult, QueueDeliveryError> {
@@ -284,11 +286,33 @@ impl EventRouter for DefaultEventRouter {
                     ..Default::default()
                 };
 
+                let audit_session_id = event
+                    .session_id
+                    .clone()
+                    .unwrap_or_else(|| CoreSessionId::from_parts("none", "none", "none", "0"));
+                let audit_repository = event
+                    .payload
+                    .get("repository")
+                    .and_then(|r| serde_json::from_value::<Repository>(r.clone()).ok())
+                    .unwrap_or_else(|| {
+                        Repository::new(
+                            RepositoryId::new(0),
+                            "unknown".to_string(),
+                            "unknown/unknown".to_string(),
+                            User {
+                                id: UserId::new(0),
+                                login: "unknown".to_string(),
+                                user_type: UserType::User,
+                            },
+                            false,
+                        )
+                    });
+
                 let _ = audit_logger
                     .log_webhook_processing(
                         event.event_id,
-                        event.session_id.clone(),
-                        event.repository.clone(),
+                        audit_session_id,
+                        audit_repository,
                         WebhookProcessingAction::BotRouting {
                             matched_bots: vec![],
                             routing_duration_ms: routing_time.as_millis() as u64,
@@ -383,11 +407,33 @@ impl EventRouter for DefaultEventRouter {
                 ..Default::default()
             };
 
+            let audit_session_id = event
+                .session_id
+                .clone()
+                .unwrap_or_else(|| CoreSessionId::from_parts("none", "none", "none", "0"));
+            let audit_repository = event
+                .payload
+                .get("repository")
+                .and_then(|r| serde_json::from_value::<Repository>(r.clone()).ok())
+                .unwrap_or_else(|| {
+                    Repository::new(
+                        RepositoryId::new(0),
+                        "unknown".to_string(),
+                        "unknown/unknown".to_string(),
+                        User {
+                            id: UserId::new(0),
+                            login: "unknown".to_string(),
+                            user_type: UserType::User,
+                        },
+                        false,
+                    )
+                });
+
             let _ = audit_logger
                 .log_webhook_processing(
                     event.event_id,
-                    event.session_id.clone(),
-                    event.repository.clone(),
+                    audit_session_id,
+                    audit_repository,
                     WebhookProcessingAction::BotRouting {
                         matched_bots: matched_bot_names,
                         routing_duration_ms: routing_time.as_millis() as u64,

@@ -9,41 +9,32 @@
 mod common;
 
 use queue_keeper_api::queue_delivery::QueueDeliveryConfig;
-use queue_keeper_core::webhook::{EventEntity, EventEnvelope};
-use queue_keeper_core::{
-    CorrelationId, EventId, Repository, RepositoryId, SessionId, Timestamp, User, UserId, UserType,
-};
+use queue_keeper_core::webhook::WrappedEvent;
+use queue_keeper_core::SessionId;
 use std::time::Duration;
 
-/// Helper to create a test event envelope
-fn create_test_event() -> EventEnvelope {
-    let repository = Repository::new(
-        RepositoryId::new(12345),
-        "test-repo".to_string(),
-        "test-owner/test-repo".to_string(),
-        User {
-            id: UserId::new(1),
-            login: "test-owner".to_string(),
-            user_type: UserType::User,
-        },
-        false,
-    );
-
-    EventEnvelope {
-        event_id: EventId::new(),
-        event_type: "pull_request".to_string(),
-        action: Some("opened".to_string()),
-        repository,
-        entity: EventEntity::PullRequest { number: 123 },
-        session_id: SessionId::from_parts("owner", "repo", "pull_request", "123"),
-        correlation_id: CorrelationId::new(),
-        occurred_at: Timestamp::now(),
-        processed_at: Timestamp::now(),
-        payload: serde_json::json!({
+/// Helper to create a test wrapped event
+fn create_test_event() -> WrappedEvent {
+    WrappedEvent::new(
+        "github".to_string(),
+        "pull_request".to_string(),
+        Some("opened".to_string()),
+        Some(SessionId::from_parts(
+            "owner",
+            "repo",
+            "pull_request",
+            "123",
+        )),
+        serde_json::json!({
             "action": "opened",
-            "number": 123
+            "number": 123,
+            "repository": {
+                "name": "test-repo",
+                "full_name": "test-owner/test-repo",
+                "owner": {"login": "test-owner"}
+            }
         }),
-    }
+    )
 }
 
 /// Verify that queue delivery succeeds when all queues accept events

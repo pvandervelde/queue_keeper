@@ -289,11 +289,12 @@ impl PayloadStorer for BlobStorageAdapter {
                 .unwrap_or_else(|| "application/json".to_string()),
         };
 
-        // Reconstruct WebhookRequest
+        // Reconstruct WebhookRequest (no raw headers available from blob storage)
         Ok(WebhookRequest {
             headers,
             body: stored.payload.body,
             received_at: stored.payload.metadata.received_at,
+            raw_headers: std::collections::HashMap::new(),
         })
     }
 

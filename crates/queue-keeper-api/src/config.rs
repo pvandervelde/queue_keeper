@@ -1,21 +1,28 @@
 //! Configuration types for the HTTP service
 
 use crate::errors::ConfigError;
+use queue_keeper_core::webhook::generic_provider::{
+    GenericProviderConfig, GenericProviderConfigError,
+};
 use serde::{Deserialize, Serialize};
 
 /// Service configuration
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ServiceConfig {
     /// HTTP server settings
+    #[serde(default)]
     pub server: ServerConfig,
 
     /// Webhook processing settings
+    #[serde(default)]
     pub webhooks: WebhookConfig,
 
     /// Security settings
+    #[serde(default)]
     pub security: SecurityConfig,
 
     /// Logging configuration
+    #[serde(default)]
     pub logging: LoggingConfig,
 
     /// Per-provider webhook configuration.
@@ -25,6 +32,18 @@ pub struct ServiceConfig {
     /// requests to unknown providers will receive `404 Not Found`.
     #[serde(default)]
     pub providers: Vec<ProviderConfig>,
+
+    /// Configuration-driven generic webhook providers.
+    ///
+    /// Each entry registers a non-GitHub provider (e.g. `jira`, `slack`)
+    /// using [`GenericProviderConfig`]. These providers are fully
+    /// configuration-driven — no Rust code changes are needed to add
+    /// a new source. An empty list is valid.
+    ///
+    /// Provider IDs in this list must be unique and must not conflict
+    /// with IDs in the [`providers`](Self::providers) list.
+    #[serde(default)]
+    pub generic_providers: Vec<GenericProviderConfig>,
 }
 
 impl ServiceConfig {
@@ -57,7 +76,19 @@ impl ServiceConfig {
             provider.validate()?;
         }
 
-        // Detect duplicate provider IDs
+        // Validate each generic provider individually
+        for generic in &self.generic_providers {
+            generic.validate().map_err(|e| match e {
+                GenericProviderConfigError::InvalidProviderId { message } => {
+                    ConfigError::ProviderValidation { message }
+                }
+                other => ConfigError::ProviderValidation {
+                    message: other.to_string(),
+                },
+            })?;
+        }
+
+        // Detect duplicate provider IDs (across both lists)
         let mut seen = std::collections::HashSet::new();
         for provider in &self.providers {
             if !seen.insert(provider.id.as_str()) {
@@ -65,6 +96,16 @@ impl ServiceConfig {
                     message: format!(
                         "duplicate provider ID '{}': each provider ID must be unique",
                         provider.id
+                    ),
+                });
+            }
+        }
+        for generic in &self.generic_providers {
+            if !seen.insert(generic.provider_id.as_str()) {
+                return Err(ConfigError::ProviderValidation {
+                    message: format!(
+                        "duplicate provider ID '{}': each provider ID must be unique across providers and generic_providers",
+                        generic.provider_id
                     ),
                 });
             }
@@ -325,12 +366,18 @@ impl Default for ServerConfig {
 ///
 /// # Relationship to [`ProviderConfig`]
 ///
-/// [`ProviderConfig`] introduces per-provider overrides for
-/// `require_signature` and `allowed_event_types`. When a matching
-/// [`ProviderConfig`] entry exists, its values take precedence over
-/// the global defaults defined here. [`WebhookConfig`] is retained
-/// for backward compatibility and for settings that do not yet have
-/// a per-provider equivalent (e.g. `store_payloads`, `rate_limit_per_repo`).
+/// [`ProviderConfig`] holds per-provider settings such as `allowed_event_types`.
+/// The routing handler enforces `allowed_event_types` from the matching
+/// [`ProviderConfig`] entry when present. [`WebhookConfig`] is retained for
+/// settings that do not yet have a per-provider equivalent
+/// (e.g. `store_payloads`, `rate_limit_per_repo`).
+///
+/// > **Note**: `require_signature` in `WebhookConfig` and `ProviderConfig` is
+/// > **not** enforced by the routing layer. Signature validation is delegated
+/// > entirely to the processor's [`SignatureValidator`]. The field is present for
+/// > documentation and future use only.
+///
+/// [`SignatureValidator`]: queue_keeper_core::webhook::SignatureValidator
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebhookConfig {
     /// Webhook endpoint path

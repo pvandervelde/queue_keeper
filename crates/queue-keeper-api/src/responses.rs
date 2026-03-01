@@ -1,6 +1,6 @@
 //! Response types, query parameters, and supporting types for the API.
 
-use queue_keeper_core::webhook::EventEnvelope;
+use queue_keeper_core::webhook::WrappedEvent;
 use queue_keeper_core::{EventId, QueueKeeperError, Repository, SessionId, Timestamp};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -13,7 +13,7 @@ use std::collections::HashMap;
 #[derive(Debug, Serialize)]
 pub struct WebhookResponse {
     pub event_id: EventId,
-    pub session_id: SessionId,
+    pub session_id: Option<SessionId>,
     pub status: String,
     pub message: String,
 }
@@ -54,7 +54,7 @@ pub struct EventListResponse {
 /// Event detail response
 #[derive(Debug, Serialize)]
 pub struct EventDetailResponse {
-    pub event: EventEnvelope,
+    pub event: WrappedEvent,
 }
 
 /// Session list response
@@ -251,7 +251,7 @@ pub trait EventStore: Send + Sync {
     ) -> Result<EventListResponse, QueueKeeperError>;
 
     /// Get event by ID
-    async fn get_event(&self, event_id: &EventId) -> Result<EventEnvelope, QueueKeeperError>;
+    async fn get_event(&self, event_id: &EventId) -> Result<WrappedEvent, QueueKeeperError>;
 
     /// List sessions with filters
     async fn list_sessions(
@@ -352,7 +352,7 @@ impl EventStore for DefaultEventStore {
         })
     }
 
-    async fn get_event(&self, event_id: &EventId) -> Result<EventEnvelope, QueueKeeperError> {
+    async fn get_event(&self, event_id: &EventId) -> Result<WrappedEvent, QueueKeeperError> {
         // For now, return not found - implementation will come with storage integration
         Err(QueueKeeperError::NotFound {
             resource: "event".to_string(),

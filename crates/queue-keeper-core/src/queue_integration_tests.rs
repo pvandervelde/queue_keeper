@@ -3,8 +3,8 @@
 use super::*;
 use crate::{
     bot_config::{BotConfigurationSettings, BotSpecificConfig, EventTypePattern},
-    webhook::EventEntity,
-    Repository, RepositoryId, User, UserId, UserType,
+    webhook::WrappedEvent,
+    Repository,
 };
 use async_trait::async_trait;
 use chrono::{Duration as ChronoDuration, TimeDelta};
@@ -157,25 +157,29 @@ impl QueueClient for MockQueueClient {
 // Test Helpers
 // ============================================================================
 
-fn create_test_event() -> EventEnvelope {
-    let repository = Repository::new(
-        RepositoryId::new(12345),
-        "test-repo".to_string(),
-        "owner/test-repo".to_string(),
-        User {
-            id: UserId::new(1),
-            login: "owner".to_string(),
-            user_type: UserType::User,
-        },
-        false,
-    );
-
-    EventEnvelope::new(
+fn create_test_event() -> WrappedEvent {
+    WrappedEvent::new(
+        "github".to_string(),
         "pull_request".to_string(),
         Some("opened".to_string()),
-        repository,
-        EventEntity::PullRequest { number: 1 },
-        serde_json::json!({"test": "payload"}),
+        Some(crate::SessionId::from_parts(
+            "owner",
+            "test-repo",
+            "pull_request",
+            "1",
+        )),
+        serde_json::json!({
+            "action": "opened",
+            "pull_request": {"number": 1},
+            "test": "payload",
+            "repository": {
+                "id": 12345,
+                "name": "test-repo",
+                "full_name": "owner/test-repo",
+                "private": false,
+                "owner": {"id": 1, "login": "owner", "type": "User"}
+            }
+        }),
     )
 }
 
@@ -462,7 +466,7 @@ async fn test_route_event_session_id_propagated_for_ordered_bots() {
     );
     assert_eq!(
         message.session_id.as_ref().unwrap().as_str(),
-        event.session_id.as_str()
+        event.session_id.as_ref().unwrap().as_str()
     );
 }
 
@@ -562,8 +566,8 @@ async fn test_route_event_message_body_contains_serialized_event() {
     let (_queue, message) = &messages[0];
 
     // Deserialize and verify
-    let deserialized: EventEnvelope = serde_json::from_slice(&message.body)
-        .expect("Message body should be valid EventEnvelope JSON");
+    let deserialized: WrappedEvent = serde_json::from_slice(&message.body)
+        .expect("Message body should be valid WrappedEvent JSON");
 
     assert_eq!(deserialized.event_id, event.event_id);
     assert_eq!(deserialized.event_type, event.event_type);

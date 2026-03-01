@@ -16,11 +16,10 @@ use queue_keeper_core::{
         AuditResource, AuditResult, SecurityAuditEvent, WebhookProcessingAction,
     },
     webhook::{
-        EventEntity, EventEnvelope, NormalizationError, StorageError, StorageReference,
-        ValidationStatus, WebhookError, WebhookProcessor, WebhookRequest,
+        NormalizationError, ProcessingOutput, StorageError, StorageReference, ValidationStatus,
+        WebhookError, WebhookProcessor, WebhookRequest, WrappedEvent,
     },
-    CorrelationId, EventId, QueueKeeperError, Repository, RepositoryId, SessionId, Timestamp, User,
-    UserId, UserType, ValidationError,
+    EventId, QueueKeeperError, Repository, SessionId, Timestamp, ValidationError,
 };
 use std::sync::{Arc, Mutex};
 use tokio::time::{sleep, Duration};
@@ -36,26 +35,26 @@ use tokio::time::{sleep, Duration};
 pub struct MockWebhookProcessor {
     process_calls: Arc<Mutex<Vec<WebhookRequest>>>,
     process_result_factory:
-        Arc<Mutex<Box<dyn Fn() -> Result<EventEnvelope, WebhookError> + Send + Sync>>>,
+        Arc<Mutex<Box<dyn Fn() -> Result<WrappedEvent, WebhookError> + Send + Sync>>>,
     process_delay: Arc<Mutex<Option<Duration>>>,
 }
 
 impl MockWebhookProcessor {
     #[allow(dead_code)]
     pub fn new() -> Self {
-        let default_envelope = create_default_event_envelope();
+        let default_event = create_default_wrapped_event();
 
         Self {
             process_calls: Arc::new(Mutex::new(Vec::new())),
             process_result_factory: Arc::new(Mutex::new(Box::new(move || {
-                Ok(default_envelope.clone())
+                Ok(default_event.clone())
             }))),
             process_delay: Arc::new(Mutex::new(None)),
         }
     }
 
     #[allow(dead_code)]
-    pub fn set_result(&self, result: EventEnvelope) {
+    pub fn set_result(&self, result: WrappedEvent) {
         let r = result.clone();
         *self.process_result_factory.lock().unwrap() = Box::new(move || Ok(r.clone()));
     }
@@ -87,7 +86,7 @@ impl WebhookProcessor for MockWebhookProcessor {
     async fn process_webhook(
         &self,
         request: WebhookRequest,
-    ) -> Result<EventEnvelope, WebhookError> {
+    ) -> Result<ProcessingOutput, WebhookError> {
         // Record the call
         self.process_calls.lock().unwrap().push(request.clone());
 
@@ -98,7 +97,8 @@ impl WebhookProcessor for MockWebhookProcessor {
         }
 
         // Return configured result by calling factory
-        (self.process_result_factory.lock().unwrap())()
+        let event = (self.process_result_factory.lock().unwrap())()?;
+        Ok(ProcessingOutput::Wrapped(event))
     }
 
     async fn validate_signature(
@@ -125,7 +125,7 @@ impl WebhookProcessor for MockWebhookProcessor {
     async fn normalize_event(
         &self,
         _request: &WebhookRequest,
-    ) -> Result<EventEnvelope, NormalizationError> {
+    ) -> Result<WrappedEvent, NormalizationError> {
         (self.process_result_factory.lock().unwrap())().map_err(|e| {
             NormalizationError::MissingRequiredField {
                 field: e.to_string(),
@@ -193,7 +193,7 @@ impl HealthChecker for MockHealthChecker {
 #[derive(Clone)]
 #[allow(dead_code)]
 pub struct MockEventStore {
-    events: Arc<Mutex<Vec<EventEnvelope>>>,
+    events: Arc<Mutex<Vec<WrappedEvent>>>,
 }
 
 impl MockEventStore {
@@ -205,7 +205,7 @@ impl MockEventStore {
     }
 
     #[allow(dead_code)]
-    pub fn add_event(&self, event: EventEnvelope) {
+    pub fn add_event(&self, event: WrappedEvent) {
         self.events.lock().unwrap().push(event);
     }
 
@@ -217,7 +217,7 @@ impl MockEventStore {
 
 #[async_trait::async_trait]
 impl EventStore for MockEventStore {
-    async fn get_event(&self, event_id: &EventId) -> Result<EventEnvelope, QueueKeeperError> {
+    async fn get_event(&self, event_id: &EventId) -> Result<WrappedEvent, QueueKeeperError> {
         let events = self.events.lock().unwrap();
         events
             .iter()
@@ -244,9 +244,18 @@ impl EventStore for MockEventStore {
             .map(|e| queue_keeper_api::EventSummary {
                 event_id: e.event_id,
                 event_type: e.event_type.clone(),
-                repository: e.repository.full_name.clone(),
-                session_id: e.session_id.clone(),
-                occurred_at: e.occurred_at,
+                repository: e
+                    .payload
+                    .get("repository")
+                    .and_then(|r| r.get("full_name"))
+                    .and_then(|n| n.as_str())
+                    .unwrap_or("unknown")
+                    .to_string(),
+                session_id: e
+                    .session_id
+                    .clone()
+                    .unwrap_or_else(|| SessionId::from_parts("none", "none", "none", "0")),
+                occurred_at: e.received_at,
                 status: "processed".to_string(),
             })
             .collect();
@@ -307,6 +316,18 @@ pub fn create_test_app_state() -> AppState {
 /// `"github"` provider ID so that the `/webhook/github` route resolves it.
 #[allow(dead_code)]
 pub fn create_test_app_state_with_processor(processor: Arc<dyn WebhookProcessor>) -> AppState {
+    create_test_app_state_with_providers(vec![("github".to_string(), processor)])
+}
+
+/// Create a test AppState with multiple named webhook processors.
+///
+/// Each entry in `providers` is `(provider_id, processor)`.  The registry will have
+/// exactly those providers registered; no default "github" entry is added unless
+/// explicitly included.
+#[allow(dead_code)]
+pub fn create_test_app_state_with_providers(
+    providers: Vec<(String, Arc<dyn WebhookProcessor>)>,
+) -> AppState {
     let config = ServiceConfig::default();
     let health_checker = Arc::new(MockHealthChecker::new());
     let event_store = Arc::new(MockEventStore::new());
@@ -314,7 +335,9 @@ pub fn create_test_app_state_with_processor(processor: Arc<dyn WebhookProcessor>
     let telemetry_config = Arc::new(TelemetryConfig::default());
 
     let mut registry = ProviderRegistry::new();
-    registry.register(ProviderId::new("github").unwrap(), processor);
+    for (id, processor) in providers {
+        registry.register(ProviderId::new(&id).unwrap(), processor);
+    }
 
     AppState::new(
         config,
@@ -323,6 +346,7 @@ pub fn create_test_app_state_with_processor(processor: Arc<dyn WebhookProcessor>
         event_store,
         metrics,
         telemetry_config,
+        std::collections::HashSet::new(),
     )
 }
 
@@ -343,31 +367,28 @@ pub fn create_valid_webhook_headers() -> HeaderMap {
     headers
 }
 
-/// Create a default EventEnvelope for testing
+/// Create a default WrappedEvent for testing
 #[allow(dead_code)]
-pub fn create_default_event_envelope() -> EventEnvelope {
-    EventEnvelope {
-        event_id: EventId::new(),
-        event_type: "pull_request".to_string(),
-        action: Some("opened".to_string()),
-        repository: Repository::new(
-            RepositoryId::new(1),
-            "repo".to_string(),
-            "owner/repo".to_string(),
-            User {
-                id: UserId::new(1),
-                login: "owner".to_string(),
-                user_type: UserType::User,
-            },
-            false,
-        ),
-        entity: EventEntity::PullRequest { number: 123 },
-        session_id: SessionId::from_parts("owner", "repo", "pull_request", "123"),
-        correlation_id: CorrelationId::new(),
-        occurred_at: Timestamp::now(),
-        processed_at: Timestamp::now(),
-        payload: serde_json::json!({"test": "data"}),
-    }
+pub fn create_default_wrapped_event() -> WrappedEvent {
+    WrappedEvent::new(
+        "github".to_string(),
+        "pull_request".to_string(),
+        Some("opened".to_string()),
+        Some(SessionId::from_parts(
+            "owner",
+            "repo",
+            "pull_request",
+            "123",
+        )),
+        serde_json::json!({
+            "test": "data",
+            "repository": {
+                "name": "repo",
+                "full_name": "owner/repo",
+                "owner": {"login": "owner"}
+            }
+        }),
+    )
 }
 
 // ============================================================================

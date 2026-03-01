@@ -42,7 +42,11 @@ use queue_keeper_core::{
     webhook::{WebhookHeaders, WebhookRequest},
     EventId, SessionId, Timestamp,
 };
-use std::{collections::HashMap, net::SocketAddr, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    net::SocketAddr,
+    sync::Arc,
+};
 use tower::ServiceBuilder;
 use tower_http::{compression::CompressionLayer, cors::CorsLayer, trace::TraceLayer};
 use tracing::{error, info, instrument, warn};
@@ -85,6 +89,13 @@ pub struct AppState {
 
     /// OpenTelemetry configuration for tracing
     pub telemetry_config: Arc<TelemetryConfig>,
+
+    /// Set of provider IDs that are generic (non-GitHub) providers.
+    ///
+    /// Pre-built at startup from [`ServiceConfig::generic_providers`] to enable
+    /// O(1) lookup in the hot request path instead of scanning the full list
+    /// on every webhook request.
+    pub generic_provider_ids: Arc<HashSet<String>>,
 }
 
 impl AppState {
@@ -96,6 +107,7 @@ impl AppState {
         event_store: Arc<dyn EventStore>,
         metrics: Arc<ServiceMetrics>,
         telemetry_config: Arc<TelemetryConfig>,
+        generic_provider_ids: HashSet<String>,
     ) -> Self {
         Self {
             config,
@@ -104,6 +116,7 @@ impl AppState {
             event_store,
             metrics,
             telemetry_config,
+            generic_provider_ids: Arc::new(generic_provider_ids),
         }
     }
 }
@@ -168,6 +181,7 @@ pub async fn start_server(
     provider_registry: ProviderRegistry,
     health_checker: Arc<dyn HealthChecker>,
     event_store: Arc<dyn EventStore>,
+    generic_provider_ids: HashSet<String>,
 ) -> Result<(), ServiceError> {
     // Validate configuration before initializing any infrastructure
     config.validate().map_err(ServiceError::Configuration)?;
@@ -204,6 +218,7 @@ pub async fn start_server(
         event_store,
         metrics,
         telemetry_config,
+        generic_provider_ids,
     );
     let app = create_router(state);
 
@@ -305,7 +320,7 @@ pub async fn handle_provider_webhook(
     // Start timing for metrics
     let start = std::time::Instant::now();
 
-    // Convert headers to HashMap
+    // Convert headers to HashMap (lowercase keys for consistent lookup)
     let header_map: HashMap<String, String> = headers
         .iter()
         .map(|(k, v)| {
@@ -316,14 +331,31 @@ pub async fn handle_provider_webhook(
         })
         .collect();
 
-    // Parse webhook headers
-    let webhook_headers = match WebhookHeaders::from_http_headers(&header_map) {
-        Ok(h) => h,
-        Err(e) => {
-            let duration = start.elapsed();
-            state.metrics.record_webhook_request(duration, false);
-            state.metrics.record_webhook_validation_failure();
-            return Err(WebhookHandlerError::InvalidHeaders(e));
+    // Determine whether this is a generic (non-GitHub) provider.
+    // Generic providers do not send GitHub-specific headers, so we use a
+    // relaxed parser that falls back to safe defaults instead of failing.
+    //
+    // The set is pre-built at startup (O(1) lookup here vs. O(n) scan).
+    //
+    // Note: generic providers do not support `allowed_event_types` filtering
+    // — all event types are accepted regardless of configuration. If you need
+    // per-event filtering for a generic provider, implement it downstream.
+    let is_generic_provider = state.generic_provider_ids.contains(&provider);
+
+    let webhook_headers = if is_generic_provider {
+        // For generic providers, never fail on missing GitHub headers — the
+        // provider's own process_webhook will re-extract values from raw headers.
+        WebhookHeaders::from_http_headers_relaxed(&header_map)
+    } else {
+        // For GitHub and other strict providers, require all GitHub-specific headers.
+        match WebhookHeaders::from_http_headers(&header_map) {
+            Ok(h) => h,
+            Err(e) => {
+                let duration = start.elapsed();
+                state.metrics.record_webhook_request(duration, false);
+                state.metrics.record_webhook_validation_failure();
+                return Err(WebhookHandlerError::InvalidHeaders(e));
+            }
         }
     };
 
@@ -356,12 +388,13 @@ pub async fn handle_provider_webhook(
         }
     }
 
-    // Create webhook request
-    let webhook_request = WebhookRequest::new(webhook_headers, body);
+    // Create webhook request, carrying the full header map so generic providers
+    // can resolve FieldSource::Header values from any header name.
+    let webhook_request = WebhookRequest::with_raw_headers(webhook_headers, header_map, body);
 
     // Delegate to the provider-specific processor
-    let event_envelope = match processor.process_webhook(webhook_request).await {
-        Ok(envelope) => envelope,
+    let processing_output = match processor.process_webhook(webhook_request).await {
+        Ok(output) => output,
         Err(e) => {
             let duration = start.elapsed();
             state.metrics.record_webhook_request(duration, false);
@@ -370,10 +403,9 @@ pub async fn handle_provider_webhook(
     };
 
     info!(
-        event_id = %event_envelope.event_id,
-        event_type = %event_envelope.event_type,
-        repository = %event_envelope.repository.full_name,
-        session_id = %event_envelope.session_id,
+        event_id = %processing_output.event_id(),
+        event_type = processing_output.event_type().unwrap_or("unknown"),
+        session_id = ?processing_output.session_id(),
         provider = %provider,
         "Successfully processed webhook - returning immediate response"
     );
@@ -382,8 +414,8 @@ pub async fn handle_provider_webhook(
     state.metrics.record_webhook_request(duration, true);
 
     Ok(Json(WebhookResponse {
-        event_id: event_envelope.event_id,
-        session_id: event_envelope.session_id,
+        event_id: processing_output.event_id(),
+        session_id: processing_output.session_id().cloned(),
         status: "processed".to_string(),
         message: "Webhook processed successfully".to_string(),
     }))

@@ -85,14 +85,14 @@ impl PayloadStorer for MockPayloadStorer {
 
 fn create_test_headers() -> HashMap<String, String> {
     let mut headers = HashMap::new();
-    headers.insert("X-GitHub-Event".to_string(), "push".to_string());
+    headers.insert("x-github-event".to_string(), "push".to_string());
     headers.insert(
-        "X-GitHub-Delivery".to_string(),
+        "x-github-delivery".to_string(),
         "12345678-1234-1234-1234-123456789abc".to_string(),
     );
-    headers.insert("Content-Type".to_string(), "application/json".to_string());
+    headers.insert("content-type".to_string(), "application/json".to_string());
     headers.insert(
-        "X-Hub-Signature-256".to_string(),
+        "x-hub-signature-256".to_string(),
         "sha256=test-signature".to_string(),
     );
     headers
@@ -156,7 +156,7 @@ mod webhook_request_tests {
     #[test]
     fn test_missing_event_type_header() {
         let mut headers = create_test_headers();
-        headers.remove("X-GitHub-Event");
+        headers.remove("x-github-event");
 
         let result = WebhookHeaders::from_http_headers(&headers);
         assert!(result.is_err());
@@ -171,7 +171,7 @@ mod webhook_request_tests {
     #[test]
     fn test_missing_delivery_id_header() {
         let mut headers = create_test_headers();
-        headers.remove("X-GitHub-Delivery");
+        headers.remove("x-github-delivery");
 
         let result = WebhookHeaders::from_http_headers(&headers);
         assert!(result.is_err());
@@ -186,7 +186,7 @@ mod webhook_request_tests {
     #[test]
     fn test_invalid_delivery_id_format() {
         let mut headers = create_test_headers();
-        headers.insert("X-GitHub-Delivery".to_string(), "not-a-uuid".to_string());
+        headers.insert("x-github-delivery".to_string(), "not-a-uuid".to_string());
 
         let result = WebhookHeaders::from_http_headers(&headers);
         assert!(result.is_err());
@@ -201,7 +201,7 @@ mod webhook_request_tests {
     #[test]
     fn test_missing_signature_for_non_ping_event() {
         let mut headers = create_test_headers();
-        headers.remove("X-Hub-Signature-256");
+        headers.remove("x-hub-signature-256");
 
         let result = WebhookHeaders::from_http_headers(&headers);
         assert!(result.is_err());
@@ -216,8 +216,8 @@ mod webhook_request_tests {
     #[test]
     fn test_ping_event_without_signature() {
         let mut headers = create_test_headers();
-        headers.insert("X-GitHub-Event".to_string(), "ping".to_string());
-        headers.remove("X-Hub-Signature-256");
+        headers.insert("x-github-event".to_string(), "ping".to_string());
+        headers.remove("x-hub-signature-256");
 
         let result = WebhookHeaders::from_http_headers(&headers);
         assert!(result.is_ok());
@@ -226,7 +226,7 @@ mod webhook_request_tests {
     #[test]
     fn test_invalid_content_type() {
         let mut headers = create_test_headers();
-        headers.insert("Content-Type".to_string(), "text/plain".to_string());
+        headers.insert("content-type".to_string(), "text/plain".to_string());
 
         let result = WebhookHeaders::from_http_headers(&headers);
         assert!(result.is_err());
@@ -239,7 +239,7 @@ mod webhook_request_tests {
     }
 
     #[test]
-    fn test_case_insensitive_header_parsing() {
+    fn test_lowercase_header_parsing() {
         let mut headers = HashMap::new();
         headers.insert("x-github-event".to_string(), "push".to_string());
         headers.insert(
@@ -336,7 +336,7 @@ mod event_normalization_tests {
     async fn test_pull_request_event_normalization() {
         let processor = WebhookProcessorImpl::new(None, None, None);
         let mut headers = create_test_headers();
-        headers.insert("X-GitHub-Event".to_string(), "pull_request".to_string());
+        headers.insert("x-github-event".to_string(), "pull_request".to_string());
         let webhook_headers = WebhookHeaders::from_http_headers(&headers).unwrap();
         let payload = create_pr_payload();
         let body = Bytes::from(serde_json::to_vec(&payload).unwrap());
@@ -345,18 +345,26 @@ mod event_normalization_tests {
         let result = processor.normalize_event(&request).await;
         assert!(result.is_ok());
 
-        let envelope = result.unwrap();
-        assert_eq!(envelope.event_type, "pull_request");
-        assert_eq!(envelope.action, Some("opened".to_string()));
-        assert_eq!(envelope.entity, EventEntity::PullRequest { number: 123 });
-        assert_eq!(envelope.repository.name, "test-repo");
+        let event = result.unwrap();
+        assert_eq!(event.event_type, "pull_request");
+        assert_eq!(event.action, Some("opened".to_string()));
+        assert!(
+            event
+                .session_id
+                .as_ref()
+                .unwrap()
+                .as_str()
+                .contains("pull_request/123"),
+            "session_id should encode entity: {:?}",
+            event.session_id
+        );
     }
 
     #[tokio::test]
     async fn test_issue_event_normalization() {
         let processor = WebhookProcessorImpl::new(None, None, None);
         let mut headers = create_test_headers();
-        headers.insert("X-GitHub-Event".to_string(), "issues".to_string());
+        headers.insert("x-github-event".to_string(), "issues".to_string());
         let webhook_headers = WebhookHeaders::from_http_headers(&headers).unwrap();
 
         let payload = json!({
@@ -383,9 +391,18 @@ mod event_normalization_tests {
         let result = processor.normalize_event(&request).await;
         assert!(result.is_ok());
 
-        let envelope = result.unwrap();
-        assert_eq!(envelope.event_type, "issues");
-        assert_eq!(envelope.entity, EventEntity::Issue { number: 456 });
+        let event = result.unwrap();
+        assert_eq!(event.event_type, "issues");
+        assert!(
+            event
+                .session_id
+                .as_ref()
+                .unwrap()
+                .as_str()
+                .contains("issue/456"),
+            "session_id should encode entity: {:?}",
+            event.session_id
+        );
     }
 
     #[tokio::test]
@@ -415,12 +432,16 @@ mod event_normalization_tests {
         let result = processor.normalize_event(&request).await;
         assert!(result.is_ok());
 
-        let envelope = result.unwrap();
-        assert_eq!(
-            envelope.entity,
-            EventEntity::Branch {
-                name: "main".to_string()
-            }
+        let event = result.unwrap();
+        assert!(
+            event
+                .session_id
+                .as_ref()
+                .unwrap()
+                .as_str()
+                .contains("branch/main"),
+            "session_id should encode branch: {:?}",
+            event.session_id
         );
     }
 
@@ -428,7 +449,7 @@ mod event_normalization_tests {
     async fn test_release_event_normalization() {
         let processor = WebhookProcessorImpl::new(None, None, None);
         let mut headers = create_test_headers();
-        headers.insert("X-GitHub-Event".to_string(), "release".to_string());
+        headers.insert("x-github-event".to_string(), "release".to_string());
         let webhook_headers = WebhookHeaders::from_http_headers(&headers).unwrap();
 
         let payload = json!({
@@ -455,12 +476,16 @@ mod event_normalization_tests {
         let result = processor.normalize_event(&request).await;
         assert!(result.is_ok());
 
-        let envelope = result.unwrap();
-        assert_eq!(
-            envelope.entity,
-            EventEntity::Release {
-                tag: "v1.0.0".to_string()
-            }
+        let event = result.unwrap();
+        assert!(
+            event
+                .session_id
+                .as_ref()
+                .unwrap()
+                .as_str()
+                .contains("release/v1.0.0"),
+            "session_id should encode release: {:?}",
+            event.session_id
         );
     }
 
@@ -468,7 +493,7 @@ mod event_normalization_tests {
     async fn test_repository_event_normalization() {
         let processor = WebhookProcessorImpl::new(None, None, None);
         let mut headers = create_test_headers();
-        headers.insert("X-GitHub-Event".to_string(), "repository".to_string());
+        headers.insert("x-github-event".to_string(), "repository".to_string());
         let webhook_headers = WebhookHeaders::from_http_headers(&headers).unwrap();
 
         let payload = json!({
@@ -492,15 +517,24 @@ mod event_normalization_tests {
         let result = processor.normalize_event(&request).await;
         assert!(result.is_ok());
 
-        let envelope = result.unwrap();
-        assert_eq!(envelope.entity, EventEntity::Repository);
+        let event = result.unwrap();
+        assert!(
+            event
+                .session_id
+                .as_ref()
+                .unwrap()
+                .as_str()
+                .contains("repository/repository"),
+            "session_id should encode repository entity: {:?}",
+            event.session_id
+        );
     }
 
     #[tokio::test]
     async fn test_unknown_event_type_normalization() {
         let processor = WebhookProcessorImpl::new(None, None, None);
         let mut headers = create_test_headers();
-        headers.insert("X-GitHub-Event".to_string(), "unknown_event".to_string());
+        headers.insert("x-github-event".to_string(), "unknown_event".to_string());
         let webhook_headers = WebhookHeaders::from_http_headers(&headers).unwrap();
 
         let payload = json!({
@@ -523,8 +557,17 @@ mod event_normalization_tests {
         let result = processor.normalize_event(&request).await;
         assert!(result.is_ok());
 
-        let envelope = result.unwrap();
-        assert_eq!(envelope.entity, EventEntity::Unknown);
+        let event = result.unwrap();
+        assert!(
+            event
+                .session_id
+                .as_ref()
+                .unwrap()
+                .as_str()
+                .contains("unknown/unknown"),
+            "session_id should encode unknown entity: {:?}",
+            event.session_id
+        );
     }
 
     #[tokio::test]
@@ -560,8 +603,8 @@ mod event_normalization_tests {
         let result = processor.normalize_event(&request).await;
         assert!(result.is_ok());
 
-        let envelope = result.unwrap();
-        assert_eq!(envelope.action, Some("opened".to_string()));
+        let event = result.unwrap();
+        assert_eq!(event.action, Some("opened".to_string()));
     }
 
     #[tokio::test]
@@ -590,8 +633,8 @@ mod event_normalization_tests {
         let result = processor.normalize_event(&request).await;
         assert!(result.is_ok());
 
-        let envelope = result.unwrap();
-        assert_eq!(envelope.action, None);
+        let event = result.unwrap();
+        assert_eq!(event.action, None);
     }
 
     #[tokio::test]
@@ -605,9 +648,9 @@ mod event_normalization_tests {
         let result = processor.normalize_event(&request).await;
         assert!(result.is_ok());
 
-        let envelope = result.unwrap();
-        assert!(envelope.occurred_at.as_datetime() <= &chrono::Utc::now());
-        assert!(envelope.processed_at.as_datetime() <= &chrono::Utc::now());
+        let event = result.unwrap();
+        assert!(event.received_at.as_datetime() <= &chrono::Utc::now());
+        assert!(event.processed_at.as_datetime() <= &chrono::Utc::now());
     }
 
     #[tokio::test]
@@ -621,9 +664,9 @@ mod event_normalization_tests {
         let result = processor.normalize_event(&request).await;
         assert!(result.is_ok());
 
-        let envelope = result.unwrap();
+        let event = result.unwrap();
         // EventId is ULID format - should be parseable
-        let id_str = envelope.event_id.as_str();
+        let id_str = event.event_id.as_str();
         assert!(!id_str.is_empty());
     }
 
@@ -638,9 +681,9 @@ mod event_normalization_tests {
         let result = processor.normalize_event(&request).await;
         assert!(result.is_ok());
 
-        let envelope = result.unwrap();
+        let event = result.unwrap();
         // CorrelationId is UUID format
-        let id_str = envelope.correlation_id.as_str();
+        let id_str = event.correlation_id.as_str();
         assert!(!id_str.is_empty());
     }
 }
@@ -656,7 +699,7 @@ mod session_id_generation_tests {
     fn test_pull_request_session_id() {
         let repository = create_test_repository();
         let entity = EventEntity::PullRequest { number: 123 };
-        let session_id = EventEnvelope::generate_session_id(&repository, &entity);
+        let session_id = generate_session_id(&repository, &entity);
 
         assert_eq!(session_id.as_str(), "owner/test-repo/pull_request/123");
     }
@@ -665,7 +708,7 @@ mod session_id_generation_tests {
     fn test_issue_session_id() {
         let repository = create_test_repository();
         let entity = EventEntity::Issue { number: 456 };
-        let session_id = EventEnvelope::generate_session_id(&repository, &entity);
+        let session_id = generate_session_id(&repository, &entity);
 
         assert_eq!(session_id.as_str(), "owner/test-repo/issue/456");
     }
@@ -676,7 +719,7 @@ mod session_id_generation_tests {
         let entity = EventEntity::Branch {
             name: "main".to_string(),
         };
-        let session_id = EventEnvelope::generate_session_id(&repository, &entity);
+        let session_id = generate_session_id(&repository, &entity);
 
         assert_eq!(session_id.as_str(), "owner/test-repo/branch/main");
     }
@@ -687,7 +730,7 @@ mod session_id_generation_tests {
         let entity = EventEntity::Release {
             tag: "v1.0.0".to_string(),
         };
-        let session_id = EventEnvelope::generate_session_id(&repository, &entity);
+        let session_id = generate_session_id(&repository, &entity);
 
         assert_eq!(session_id.as_str(), "owner/test-repo/release/v1.0.0");
     }
@@ -696,7 +739,7 @@ mod session_id_generation_tests {
     fn test_repository_session_id() {
         let repository = create_test_repository();
         let entity = EventEntity::Repository;
-        let session_id = EventEnvelope::generate_session_id(&repository, &entity);
+        let session_id = generate_session_id(&repository, &entity);
 
         assert_eq!(session_id.as_str(), "owner/test-repo/repository/repository");
     }
@@ -705,7 +748,7 @@ mod session_id_generation_tests {
     fn test_unknown_session_id() {
         let repository = create_test_repository();
         let entity = EventEntity::Unknown;
-        let session_id = EventEnvelope::generate_session_id(&repository, &entity);
+        let session_id = generate_session_id(&repository, &entity);
 
         assert_eq!(session_id.as_str(), "owner/test-repo/unknown/unknown");
     }
@@ -714,7 +757,7 @@ mod session_id_generation_tests {
     fn test_session_id_max_length() {
         let repository = create_test_repository();
         let entity = EventEntity::PullRequest { number: 123 };
-        let session_id = EventEnvelope::generate_session_id(&repository, &entity);
+        let session_id = generate_session_id(&repository, &entity);
 
         // Session IDs must not exceed 128 characters
         assert!(session_id.as_str().len() <= 128);
@@ -829,7 +872,7 @@ mod integration_tests {
         let processor = WebhookProcessorImpl::new(Some(validator), Some(storer), None);
 
         let mut headers = create_test_headers();
-        headers.insert("X-GitHub-Event".to_string(), "pull_request".to_string());
+        headers.insert("x-github-event".to_string(), "pull_request".to_string());
         let webhook_headers = WebhookHeaders::from_http_headers(&headers).unwrap();
         let payload = create_pr_payload();
         let body = Bytes::from(serde_json::to_vec(&payload).unwrap());
@@ -838,10 +881,19 @@ mod integration_tests {
         let result = processor.process_webhook(request).await;
         assert!(result.is_ok());
 
-        let envelope = result.unwrap();
-        assert_eq!(envelope.event_type, "pull_request");
-        assert_eq!(envelope.entity, EventEntity::PullRequest { number: 123 });
-        assert_eq!(envelope.repository.name, "test-repo");
+        let output = result.unwrap();
+        let event = output.as_wrapped().expect("should be Wrapped output");
+        assert_eq!(event.event_type, "pull_request");
+        assert!(
+            event
+                .session_id
+                .as_ref()
+                .unwrap()
+                .as_str()
+                .contains("pull_request/123"),
+            "session_id should encode entity: {:?}",
+            event.session_id
+        );
     }
 
     #[tokio::test]

@@ -34,8 +34,11 @@ ulid = { workspace = true, features = ["serde"] }
 bytes = { workspace = true }
 
 # Cryptography
+hmac = { workspace = true }
 sha2 = "0.10"
+sha1 = "0.10"
 hex = "0.4"
+subtle = { workspace = true }
 
 # Azure SDK dependencies
 futures = { version = "0.3", optional = true }

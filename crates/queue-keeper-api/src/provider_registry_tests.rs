@@ -4,10 +4,10 @@ use super::*;
 use async_trait::async_trait;
 use queue_keeper_core::{
     webhook::{
-        EventEntity, EventEnvelope, NormalizationError, StorageError, StorageReference,
-        ValidationStatus, WebhookError, WebhookRequest,
+        NormalizationError, ProcessingOutput, StorageError, StorageReference, ValidationStatus,
+        WebhookError, WebhookRequest, WrappedEvent,
     },
-    Repository, RepositoryId, Timestamp, User, UserId, UserType, ValidationError,
+    Timestamp, ValidationError,
 };
 use std::sync::Arc;
 
@@ -22,8 +22,8 @@ impl WebhookProcessor for NoopWebhookProcessor {
     async fn process_webhook(
         &self,
         _request: WebhookRequest,
-    ) -> Result<EventEnvelope, WebhookError> {
-        Ok(test_event_envelope())
+    ) -> Result<ProcessingOutput, WebhookError> {
+        Ok(ProcessingOutput::Wrapped(test_wrapped_event()))
     }
 
     async fn validate_signature(
@@ -50,29 +50,17 @@ impl WebhookProcessor for NoopWebhookProcessor {
     async fn normalize_event(
         &self,
         _request: &WebhookRequest,
-    ) -> Result<EventEnvelope, NormalizationError> {
-        Ok(test_event_envelope())
+    ) -> Result<WrappedEvent, NormalizationError> {
+        Ok(test_wrapped_event())
     }
 }
 
-fn test_event_envelope() -> EventEnvelope {
-    let user = User {
-        id: UserId::new(1),
-        login: "owner".to_string(),
-        user_type: UserType::User,
-    };
-    let repo = Repository::new(
-        RepositoryId::new(1),
-        "repo".to_string(),
-        "owner/repo".to_string(),
-        user,
-        false,
-    );
-    EventEnvelope::new(
+fn test_wrapped_event() -> WrappedEvent {
+    WrappedEvent::new(
+        "github".to_string(),
         "ping".to_string(),
         None,
-        repo,
-        EventEntity::Repository,
+        None,
         serde_json::json!({}),
     )
 }
