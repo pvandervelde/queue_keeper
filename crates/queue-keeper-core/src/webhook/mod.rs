@@ -298,6 +298,24 @@ pub enum EventEntity {
     Issue { number: u32 },
     Branch { name: String },
     Release { tag: String },
+    /// A GitHub Discussions thread, identified by its number.
+    ///
+    /// Used for sequential processing of discussion lifecycle events
+    /// (`discussion`, `discussion_comment`).
+    /// Example session ID: `owner/repo/discussion/42`
+    Discussion { number: u32 },
+    /// A GitHub Actions workflow run, identified by its run ID.
+    ///
+    /// Used for sequential processing of CI/CD events belonging to the same run
+    /// (`workflow_run`, `workflow_job`).
+    /// Example session ID: `owner/repo/workflow_run/9999`
+    WorkflowRun { id: u64 },
+    /// A GitHub Team, identified by its slug.
+    ///
+    /// Used for sequential processing of team membership and permission events
+    /// (`team`).
+    /// Example session ID: `owner/repo/team/backend`
+    Team { slug: String },
     Repository,
     Unknown,
 }
@@ -351,25 +369,37 @@ impl EventEntity {
         Self::Unknown
     }
 
-    /// Get entity type string
+    /// Returns a static string identifying the entity type.
+    ///
+    /// Used as the third segment of the session ID:
+    /// `"{owner}/{repo}/{entity_type}/{entity_id}"`.
     pub fn entity_type(&self) -> &'static str {
         match self {
             Self::PullRequest { .. } => "pull_request",
             Self::Issue { .. } => "issue",
             Self::Branch { .. } => "branch",
             Self::Release { .. } => "release",
+            Self::Discussion { .. } => "discussion",
+            Self::WorkflowRun { .. } => "workflow_run",
+            Self::Team { .. } => "team",
             Self::Repository => "repository",
             Self::Unknown => "unknown",
         }
     }
 
-    /// Get entity ID string
+    /// Returns the entity's unique identifier as a string.
+    ///
+    /// Used as the fourth segment of the session ID:
+    /// `"{owner}/{repo}/{entity_type}/{entity_id}"`.
     pub fn entity_id(&self) -> String {
         match self {
             Self::PullRequest { number } => number.to_string(),
             Self::Issue { number } => number.to_string(),
             Self::Branch { name } => name.clone(),
             Self::Release { tag } => tag.clone(),
+            Self::Discussion { number } => number.to_string(),
+            Self::WorkflowRun { id } => id.to_string(),
+            Self::Team { slug } => slug.clone(),
             Self::Repository => "repository".to_string(),
             Self::Unknown => "unknown".to_string(),
         }
