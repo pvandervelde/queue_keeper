@@ -335,7 +335,10 @@ pub enum EventEntity {
 }
 
 impl EventEntity {
-    /// Extract entity from payload based on event type
+    /// Extract entity from payload based on event type.
+    ///
+    /// Returns `Self::Unknown` whenever a required payload field is absent —
+    /// it never silently returns `Self::Repository` for a field-dependent variant.
     pub fn from_payload(event_type: &str, payload: &serde_json::Value) -> Self {
         match event_type {
             "pull_request" | "pull_request_review" | "pull_request_review_comment" => {
@@ -348,6 +351,15 @@ impl EventEntity {
                 }
             }
             "issues" | "issue_comment" => {
+                if let Some(issue) = payload.get("issue") {
+                    if let Some(number) = issue.get("number").and_then(|n| n.as_u64()) {
+                        return Self::Issue {
+                            number: number as u32,
+                        };
+                    }
+                }
+            }
+            "issue_dependencies" => {
                 if let Some(issue) = payload.get("issue") {
                     if let Some(number) = issue.get("number").and_then(|n| n.as_u64()) {
                         return Self::Issue {
@@ -374,7 +386,68 @@ impl EventEntity {
                     }
                 }
             }
-            "repository" => {
+            "discussion" | "discussion_comment" => {
+                if let Some(discussion) = payload.get("discussion") {
+                    if let Some(number) = discussion.get("number").and_then(|n| n.as_u64()) {
+                        return Self::Discussion {
+                            number: number as u32,
+                        };
+                    }
+                }
+            }
+            "workflow_run" => {
+                if let Some(run) = payload.get("workflow_run") {
+                    if let Some(id) = run.get("id").and_then(|n| n.as_u64()) {
+                        return Self::WorkflowRun { id };
+                    }
+                }
+            }
+            "workflow_job" => {
+                // Primary: GitHub always includes workflow_run.id in workflow_job payloads.
+                // Fallback: use workflow_job.run_id when workflow_run object is absent.
+                let id = payload
+                    .get("workflow_run")
+                    .and_then(|r| r.get("id"))
+                    .and_then(|n| n.as_u64())
+                    .or_else(|| {
+                        payload
+                            .get("workflow_job")
+                            .and_then(|j| j.get("run_id"))
+                            .and_then(|n| n.as_u64())
+                    });
+                if let Some(id) = id {
+                    return Self::WorkflowRun { id };
+                }
+            }
+            "team" => {
+                if let Some(team) = payload.get("team") {
+                    if let Some(slug) = team.get("slug").and_then(|s| s.as_str()) {
+                        return Self::Team {
+                            slug: slug.to_string(),
+                        };
+                    }
+                }
+            }
+            "repository"
+            | "commit_comment"
+            | "status"
+            | "custom_property"
+            | "custom_property_values"
+            | "label"
+            | "milestone"
+            | "projects_v2"
+            | "projects_v2_item"
+            | "projects_v2_status_update"
+            | "workflow_dispatch"
+            | "deploy_key"
+            | "deployment"
+            | "repository_ruleset"
+            | "github_app_authorization"
+            | "installation"
+            | "installation_repositories"
+            | "installation_target"
+            | "ping"
+            | "team_add" => {
                 return Self::Repository;
             }
             _ => {}
