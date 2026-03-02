@@ -1237,3 +1237,246 @@ mod event_entity_new_variants_tests {
         assert_eq!(t.clone(), t);
     }
 }
+
+// ============================================================================
+// from_payload() for ~25 Additional GitHub Event Types (issue #82)
+// ============================================================================
+
+mod event_entity_new_events_tests {
+    use super::*;
+
+    // ------------------------------------------------------------------
+    // discussion / discussion_comment  →  Discussion { number }
+    // ------------------------------------------------------------------
+
+    /// Happy path: `discussion` event with discussion.number present.
+    #[test]
+    fn test_discussion_event_maps_to_discussion_entity() {
+        let payload = json!({ "discussion": { "number": 7 } });
+        assert_eq!(
+            EventEntity::from_payload("discussion", &payload),
+            EventEntity::Discussion { number: 7 }
+        );
+    }
+
+    /// Happy path: `discussion_comment` event uses the same discussion.number path.
+    #[test]
+    fn test_discussion_comment_event_maps_to_discussion_entity() {
+        let payload = json!({ "discussion": { "number": 42 } });
+        assert_eq!(
+            EventEntity::from_payload("discussion_comment", &payload),
+            EventEntity::Discussion { number: 42 }
+        );
+    }
+
+    /// Missing `discussion.number` must fall back to Unknown, not Repository.
+    #[test]
+    fn test_discussion_event_missing_number_returns_unknown() {
+        let payload = json!({ "discussion": {} });
+        assert_eq!(
+            EventEntity::from_payload("discussion", &payload),
+            EventEntity::Unknown
+        );
+    }
+
+    /// Entirely absent `discussion` key must fall back to Unknown.
+    #[test]
+    fn test_discussion_event_missing_discussion_key_returns_unknown() {
+        let payload = json!({});
+        assert_eq!(
+            EventEntity::from_payload("discussion", &payload),
+            EventEntity::Unknown
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // workflow_run  →  WorkflowRun { id }
+    // ------------------------------------------------------------------
+
+    /// Happy path: `workflow_run` event with workflow_run.id present.
+    #[test]
+    fn test_workflow_run_event_maps_to_workflow_run_entity() {
+        let payload = json!({ "workflow_run": { "id": 9999_u64 } });
+        assert_eq!(
+            EventEntity::from_payload("workflow_run", &payload),
+            EventEntity::WorkflowRun { id: 9999 }
+        );
+    }
+
+    /// Missing `workflow_run.id` must fall back to Unknown.
+    #[test]
+    fn test_workflow_run_event_missing_id_returns_unknown() {
+        let payload = json!({ "workflow_run": {} });
+        assert_eq!(
+            EventEntity::from_payload("workflow_run", &payload),
+            EventEntity::Unknown
+        );
+    }
+
+    /// Entirely absent `workflow_run` key must fall back to Unknown.
+    #[test]
+    fn test_workflow_run_event_missing_workflow_run_key_returns_unknown() {
+        let payload = json!({});
+        assert_eq!(
+            EventEntity::from_payload("workflow_run", &payload),
+            EventEntity::Unknown
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // workflow_job  →  WorkflowRun { id }  (dual-path fallback)
+    // ------------------------------------------------------------------
+
+    /// Primary path: `workflow_job` with workflow_run.id present.
+    #[test]
+    fn test_workflow_job_uses_workflow_run_id_primary() {
+        let payload = json!({
+            "workflow_run": { "id": 1111_u64 },
+            "workflow_job": { "run_id": 2222_u64 }
+        });
+        assert_eq!(
+            EventEntity::from_payload("workflow_job", &payload),
+            EventEntity::WorkflowRun { id: 1111 }
+        );
+    }
+
+    /// Fallback: `workflow_job` without workflow_run.id falls back to workflow_job.run_id.
+    #[test]
+    fn test_workflow_job_falls_back_to_run_id_when_workflow_run_absent() {
+        let payload = json!({ "workflow_job": { "run_id": 2222_u64 } });
+        assert_eq!(
+            EventEntity::from_payload("workflow_job", &payload),
+            EventEntity::WorkflowRun { id: 2222 }
+        );
+    }
+
+    /// Both absent: `workflow_job` with neither field present falls back to Unknown.
+    #[test]
+    fn test_workflow_job_returns_unknown_when_both_ids_absent() {
+        let payload = json!({ "workflow_job": {} });
+        assert_eq!(
+            EventEntity::from_payload("workflow_job", &payload),
+            EventEntity::Unknown
+        );
+    }
+
+    /// Both keys entirely missing falls back to Unknown.
+    #[test]
+    fn test_workflow_job_empty_payload_returns_unknown() {
+        let payload = json!({});
+        assert_eq!(
+            EventEntity::from_payload("workflow_job", &payload),
+            EventEntity::Unknown
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // team  →  Team { slug }
+    // ------------------------------------------------------------------
+
+    /// Happy path: `team` event with team.slug present.
+    #[test]
+    fn test_team_event_maps_to_team_entity() {
+        let payload = json!({ "team": { "slug": "backend" } });
+        assert_eq!(
+            EventEntity::from_payload("team", &payload),
+            EventEntity::Team {
+                slug: "backend".to_string()
+            }
+        );
+    }
+
+    /// Missing `team.slug` must fall back to Unknown.
+    #[test]
+    fn test_team_event_missing_slug_returns_unknown() {
+        let payload = json!({ "team": {} });
+        assert_eq!(
+            EventEntity::from_payload("team", &payload),
+            EventEntity::Unknown
+        );
+    }
+
+    /// Entirely absent `team` key must fall back to Unknown.
+    #[test]
+    fn test_team_event_missing_team_key_returns_unknown() {
+        let payload = json!({});
+        assert_eq!(
+            EventEntity::from_payload("team", &payload),
+            EventEntity::Unknown
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // issue_dependencies  →  Issue { number }
+    // ------------------------------------------------------------------
+
+    /// Happy path: `issue_dependencies` with issue.number present.
+    #[test]
+    fn test_issue_dependencies_maps_to_issue_entity() {
+        let payload = json!({ "issue": { "number": 88 } });
+        assert_eq!(
+            EventEntity::from_payload("issue_dependencies", &payload),
+            EventEntity::Issue { number: 88 }
+        );
+    }
+
+    /// Missing `issue.number` must fall back to Unknown.
+    #[test]
+    fn test_issue_dependencies_missing_number_returns_unknown() {
+        let payload = json!({ "issue": {} });
+        assert_eq!(
+            EventEntity::from_payload("issue_dependencies", &payload),
+            EventEntity::Unknown
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // All Repository-mapped event types
+    // ------------------------------------------------------------------
+
+    /// Every Repository-mapped event type must return Self::Repository regardless
+    /// of payload content (even empty payloads).
+    #[test]
+    fn test_repository_mapped_events_return_repository_entity() {
+        let repository_events = [
+            "commit_comment",
+            "status",
+            "custom_property",
+            "custom_property_values",
+            "label",
+            "milestone",
+            "projects_v2",
+            "projects_v2_item",
+            "projects_v2_status_update",
+            "workflow_dispatch",
+            "deploy_key",
+            "deployment",
+            "repository_ruleset",
+            "github_app_authorization",
+            "installation",
+            "installation_repositories",
+            "installation_target",
+            "ping",
+            "team_add",
+        ];
+
+        let empty_payload = json!({});
+        for event_type in &repository_events {
+            assert_eq!(
+                EventEntity::from_payload(event_type, &empty_payload),
+                EventEntity::Repository,
+                "expected Repository for event type '{event_type}'"
+            );
+        }
+    }
+
+    /// Unknown event types must fall through to Unknown, never Repository.
+    #[test]
+    fn test_completely_unknown_event_type_returns_unknown() {
+        let payload = json!({});
+        assert_eq!(
+            EventEntity::from_payload("some_future_github_event", &payload),
+            EventEntity::Unknown
+        );
+    }
+}
