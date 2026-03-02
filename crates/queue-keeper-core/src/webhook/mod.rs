@@ -294,28 +294,42 @@ pub(crate) fn generate_session_id(repository: &Repository, entity: &EventEntity)
 /// The primary GitHub object affected by the event (for session grouping)
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EventEntity {
-    PullRequest { number: u32 },
-    Issue { number: u32 },
-    Branch { name: String },
-    Release { tag: String },
+    PullRequest {
+        number: u32,
+    },
+    Issue {
+        number: u32,
+    },
+    Branch {
+        name: String,
+    },
+    Release {
+        tag: String,
+    },
     /// A GitHub Discussions thread, identified by its number.
     ///
     /// Used for sequential processing of discussion lifecycle events
     /// (`discussion`, `discussion_comment`).
     /// Example session ID: `owner/repo/discussion/42`
-    Discussion { number: u32 },
+    Discussion {
+        number: u32,
+    },
     /// A GitHub Actions workflow run, identified by its run ID.
     ///
     /// Used for sequential processing of CI/CD events belonging to the same run
     /// (`workflow_run`, `workflow_job`).
     /// Example session ID: `owner/repo/workflow_run/9999`
-    WorkflowRun { id: u64 },
+    WorkflowRun {
+        id: u64,
+    },
     /// A GitHub Team, identified by its slug.
     ///
     /// Used for sequential processing of team membership and permission events
     /// (`team`).
     /// Example session ID: `owner/repo/team/backend`
-    Team { slug: String },
+    Team {
+        slug: String,
+    },
     Repository,
     Unknown,
 }

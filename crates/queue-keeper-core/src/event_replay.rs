@@ -327,7 +327,7 @@ impl EventFilter {
                 .envelope
                 .session_id
                 .as_ref()
-                .map_or(false, |s| sessions.contains(s))
+                .is_some_and(|s| sessions.contains(s))
             {
                 return false;
             }
