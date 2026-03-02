@@ -1022,3 +1022,218 @@ mod entity_extraction_tests {
         assert_eq!(entity, EventEntity::Unknown);
     }
 }
+
+// ============================================================================
+// New EventEntity Variants: Discussion, WorkflowRun, Team
+// ============================================================================
+
+mod event_entity_new_variants_tests {
+    use super::*;
+
+    // ------------------------------------------------------------------
+    // Discussion variant
+    // ------------------------------------------------------------------
+
+    /// Verify Discussion entity_type() returns "discussion".
+    #[test]
+    fn test_discussion_entity_type() {
+        let entity = EventEntity::Discussion { number: 42 };
+        assert_eq!(entity.entity_type(), "discussion");
+    }
+
+    /// Verify Discussion entity_id() returns the discussion number as a string.
+    #[test]
+    fn test_discussion_entity_id() {
+        let entity = EventEntity::Discussion { number: 42 };
+        assert_eq!(entity.entity_id(), "42");
+    }
+
+    /// Verify Discussion produces the expected session ID format.
+    #[test]
+    fn test_discussion_session_id() {
+        let repository = create_test_repository();
+        let entity = EventEntity::Discussion { number: 42 };
+        let session_id = generate_session_id(&repository, &entity);
+        assert_eq!(session_id.as_str(), "owner/test-repo/discussion/42");
+    }
+
+    /// Verify Discussion number zero is represented correctly.
+    #[test]
+    fn test_discussion_entity_id_zero() {
+        let entity = EventEntity::Discussion { number: 0 };
+        assert_eq!(entity.entity_id(), "0");
+    }
+
+    /// Verify Discussion serializes and deserializes via serde without loss.
+    #[test]
+    fn test_discussion_serde_roundtrip() {
+        let entity = EventEntity::Discussion { number: 99 };
+        let json = serde_json::to_string(&entity).expect("serialization failed");
+        let round_tripped: EventEntity =
+            serde_json::from_str(&json).expect("deserialization failed");
+        assert_eq!(entity, round_tripped);
+    }
+
+    // ------------------------------------------------------------------
+    // WorkflowRun variant
+    // ------------------------------------------------------------------
+
+    /// Verify WorkflowRun entity_type() returns "workflow_run".
+    #[test]
+    fn test_workflow_run_entity_type() {
+        let entity = EventEntity::WorkflowRun { id: 9999 };
+        assert_eq!(entity.entity_type(), "workflow_run");
+    }
+
+    /// Verify WorkflowRun entity_id() returns the run ID as a string.
+    #[test]
+    fn test_workflow_run_entity_id() {
+        let entity = EventEntity::WorkflowRun { id: 9999 };
+        assert_eq!(entity.entity_id(), "9999");
+    }
+
+    /// Verify WorkflowRun produces the expected session ID format.
+    #[test]
+    fn test_workflow_run_session_id() {
+        let repository = create_test_repository();
+        let entity = EventEntity::WorkflowRun { id: 9999 };
+        let session_id = generate_session_id(&repository, &entity);
+        assert_eq!(session_id.as_str(), "owner/test-repo/workflow_run/9999");
+    }
+
+    /// Verify WorkflowRun handles large u64 IDs (GitHub run IDs can be very large).
+    #[test]
+    fn test_workflow_run_large_id() {
+        let large_id: u64 = 12_345_678_901;
+        let entity = EventEntity::WorkflowRun { id: large_id };
+        assert_eq!(entity.entity_id(), "12345678901");
+    }
+
+    /// Verify WorkflowRun serializes and deserializes via serde without loss.
+    #[test]
+    fn test_workflow_run_serde_roundtrip() {
+        let entity = EventEntity::WorkflowRun { id: 9999 };
+        let json = serde_json::to_string(&entity).expect("serialization failed");
+        let round_tripped: EventEntity =
+            serde_json::from_str(&json).expect("deserialization failed");
+        assert_eq!(entity, round_tripped);
+    }
+
+    // ------------------------------------------------------------------
+    // Team variant
+    // ------------------------------------------------------------------
+
+    /// Verify Team entity_type() returns "team".
+    #[test]
+    fn test_team_entity_type() {
+        let entity = EventEntity::Team {
+            slug: "backend".to_string(),
+        };
+        assert_eq!(entity.entity_type(), "team");
+    }
+
+    /// Verify Team entity_id() returns the team slug string.
+    #[test]
+    fn test_team_entity_id() {
+        let entity = EventEntity::Team {
+            slug: "backend".to_string(),
+        };
+        assert_eq!(entity.entity_id(), "backend");
+    }
+
+    /// Verify Team produces the expected session ID format.
+    #[test]
+    fn test_team_session_id() {
+        let repository = create_test_repository();
+        let entity = EventEntity::Team {
+            slug: "backend".to_string(),
+        };
+        let session_id = generate_session_id(&repository, &entity);
+        assert_eq!(session_id.as_str(), "owner/test-repo/team/backend");
+    }
+
+    /// Verify Team slug with hyphens is preserved exactly (common GitHub slug format).
+    #[test]
+    fn test_team_slug_with_hyphens() {
+        let entity = EventEntity::Team {
+            slug: "platform-engineering".to_string(),
+        };
+        assert_eq!(entity.entity_id(), "platform-engineering");
+    }
+
+    /// Verify Team serializes and deserializes via serde without loss.
+    #[test]
+    fn test_team_serde_roundtrip() {
+        let entity = EventEntity::Team {
+            slug: "backend".to_string(),
+        };
+        let json = serde_json::to_string(&entity).expect("serialization failed");
+        let round_tripped: EventEntity =
+            serde_json::from_str(&json).expect("deserialization failed");
+        assert_eq!(entity, round_tripped);
+    }
+
+    // ------------------------------------------------------------------
+    // PartialEq / Clone coverage for new variants
+    // ------------------------------------------------------------------
+
+    /// Verify Discussion equality works correctly.
+    #[test]
+    fn test_discussion_equality() {
+        assert_eq!(
+            EventEntity::Discussion { number: 1 },
+            EventEntity::Discussion { number: 1 }
+        );
+        assert_ne!(
+            EventEntity::Discussion { number: 1 },
+            EventEntity::Discussion { number: 2 }
+        );
+    }
+
+    /// Verify WorkflowRun equality works correctly.
+    #[test]
+    fn test_workflow_run_equality() {
+        assert_eq!(
+            EventEntity::WorkflowRun { id: 100 },
+            EventEntity::WorkflowRun { id: 100 }
+        );
+        assert_ne!(
+            EventEntity::WorkflowRun { id: 100 },
+            EventEntity::WorkflowRun { id: 200 }
+        );
+    }
+
+    /// Verify Team equality works correctly.
+    #[test]
+    fn test_team_equality() {
+        assert_eq!(
+            EventEntity::Team {
+                slug: "a".to_string()
+            },
+            EventEntity::Team {
+                slug: "a".to_string()
+            }
+        );
+        assert_ne!(
+            EventEntity::Team {
+                slug: "a".to_string()
+            },
+            EventEntity::Team {
+                slug: "b".to_string()
+            }
+        );
+    }
+
+    /// Verify new variants can be cloned.
+    #[test]
+    fn test_new_variants_clone() {
+        let d = EventEntity::Discussion { number: 1 };
+        let w = EventEntity::WorkflowRun { id: 2 };
+        let t = EventEntity::Team {
+            slug: "eng".to_string(),
+        };
+        assert_eq!(d.clone(), d);
+        assert_eq!(w.clone(), w);
+        assert_eq!(t.clone(), t);
+    }
+}
