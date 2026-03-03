@@ -350,16 +350,7 @@ impl EventEntity {
                     }
                 }
             }
-            "issues" | "issue_comment" => {
-                if let Some(issue) = payload.get("issue") {
-                    if let Some(number) = issue.get("number").and_then(|n| n.as_u64()) {
-                        return Self::Issue {
-                            number: number as u32,
-                        };
-                    }
-                }
-            }
-            "issue_dependencies" => {
+            "issues" | "issue_comment" | "issue_dependencies" => {
                 if let Some(issue) = payload.get("issue") {
                     if let Some(number) = issue.get("number").and_then(|n| n.as_u64()) {
                         return Self::Issue {

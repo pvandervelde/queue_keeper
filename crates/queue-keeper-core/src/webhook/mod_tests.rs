@@ -1350,6 +1350,19 @@ mod event_entity_new_events_tests {
         );
     }
 
+    /// Fallback: `workflow_run` key present but `id` field missing — must use workflow_job.run_id.
+    #[test]
+    fn test_workflow_job_falls_back_when_workflow_run_has_no_id() {
+        let payload = json!({
+            "workflow_run": {},
+            "workflow_job": { "run_id": 2222_u64 }
+        });
+        assert_eq!(
+            EventEntity::from_payload("workflow_job", &payload),
+            EventEntity::WorkflowRun { id: 2222 }
+        );
+    }
+
     /// Both absent: `workflow_job` with neither field present falls back to Unknown.
     #[test]
     fn test_workflow_job_returns_unknown_when_both_ids_absent() {
@@ -1430,6 +1443,16 @@ mod event_entity_new_events_tests {
         );
     }
 
+    /// Entirely absent `issue` key must fall back to Unknown.
+    #[test]
+    fn test_issue_dependencies_missing_issue_key_returns_unknown() {
+        let payload = json!({});
+        assert_eq!(
+            EventEntity::from_payload("issue_dependencies", &payload),
+            EventEntity::Unknown
+        );
+    }
+
     // ------------------------------------------------------------------
     // All Repository-mapped event types
     // ------------------------------------------------------------------
@@ -1439,6 +1462,7 @@ mod event_entity_new_events_tests {
     #[test]
     fn test_repository_mapped_events_return_repository_entity() {
         let repository_events = [
+            "repository",
             "commit_comment",
             "status",
             "custom_property",
