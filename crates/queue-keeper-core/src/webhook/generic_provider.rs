@@ -773,8 +773,7 @@ fn resolve_json_path<'a>(
     value: &'a serde_json::Value,
     path: &str,
 ) -> Option<&'a serde_json::Value> {
-    path.split('.')
-        .fold(Some(value), |current, key| current.and_then(|v| v.get(key)))
+    path.split('.').try_fold(value, |v, key| v.get(key))
 }
 
 /// Resolve a [`FieldSource`] against the current request's raw headers and parsed body.
@@ -792,15 +791,10 @@ fn resolve_field_source(
         }
         FieldSource::JsonPath { path } => {
             let node = resolve_json_path(payload, path)?;
-            if let Some(s) = node.as_str() {
-                Some(s.to_string())
-            } else if let Some(n) = node.as_i64() {
-                Some(n.to_string())
-            } else if let Some(n) = node.as_u64() {
-                Some(n.to_string())
-            } else {
-                None
-            }
+            node.as_str()
+                .map(ToString::to_string)
+                .or_else(|| node.as_i64().map(|n| n.to_string()))
+                .or_else(|| node.as_u64().map(|n| n.to_string()))
         }
         FieldSource::Static { value } => Some(value.clone()),
         // AutoGenerate: each call produces a fresh ULID.

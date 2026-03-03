@@ -294,16 +294,51 @@ pub(crate) fn generate_session_id(repository: &Repository, entity: &EventEntity)
 /// The primary GitHub object affected by the event (for session grouping)
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EventEntity {
-    PullRequest { number: u32 },
-    Issue { number: u32 },
-    Branch { name: String },
-    Release { tag: String },
+    PullRequest {
+        number: u32,
+    },
+    Issue {
+        number: u32,
+    },
+    Branch {
+        name: String,
+    },
+    Release {
+        tag: String,
+    },
+    /// A GitHub Discussions thread, identified by its number.
+    ///
+    /// Used for sequential processing of discussion lifecycle events
+    /// (`discussion`, `discussion_comment`).
+    /// Example session ID: `owner/repo/discussion/42`
+    Discussion {
+        number: u32,
+    },
+    /// A GitHub Actions workflow run, identified by its run ID.
+    ///
+    /// Used for sequential processing of CI/CD events belonging to the same run
+    /// (`workflow_run`, `workflow_job`).
+    /// Example session ID: `owner/repo/workflow_run/9999`
+    WorkflowRun {
+        id: u64,
+    },
+    /// A GitHub Team, identified by its slug.
+    ///
+    /// Used for sequential processing of team membership and permission events
+    /// (`team`).
+    /// Example session ID: `owner/repo/team/backend`
+    Team {
+        slug: String,
+    },
     Repository,
     Unknown,
 }
 
 impl EventEntity {
-    /// Extract entity from payload based on event type
+    /// Extract entity from payload based on event type.
+    ///
+    /// Returns `Self::Unknown` whenever a required payload field is absent —
+    /// it never silently returns `Self::Repository` for a field-dependent variant.
     pub fn from_payload(event_type: &str, payload: &serde_json::Value) -> Self {
         match event_type {
             "pull_request" | "pull_request_review" | "pull_request_review_comment" => {
@@ -315,7 +350,7 @@ impl EventEntity {
                     }
                 }
             }
-            "issues" | "issue_comment" => {
+            "issues" | "issue_comment" | "issue_dependencies" => {
                 if let Some(issue) = payload.get("issue") {
                     if let Some(number) = issue.get("number").and_then(|n| n.as_u64()) {
                         return Self::Issue {
@@ -342,7 +377,68 @@ impl EventEntity {
                     }
                 }
             }
-            "repository" => {
+            "discussion" | "discussion_comment" => {
+                if let Some(discussion) = payload.get("discussion") {
+                    if let Some(number) = discussion.get("number").and_then(|n| n.as_u64()) {
+                        return Self::Discussion {
+                            number: number as u32,
+                        };
+                    }
+                }
+            }
+            "workflow_run" => {
+                if let Some(run) = payload.get("workflow_run") {
+                    if let Some(id) = run.get("id").and_then(|n| n.as_u64()) {
+                        return Self::WorkflowRun { id };
+                    }
+                }
+            }
+            "workflow_job" => {
+                // Primary: GitHub always includes workflow_run.id in workflow_job payloads.
+                // Fallback: use workflow_job.run_id when workflow_run object is absent.
+                let id = payload
+                    .get("workflow_run")
+                    .and_then(|r| r.get("id"))
+                    .and_then(|n| n.as_u64())
+                    .or_else(|| {
+                        payload
+                            .get("workflow_job")
+                            .and_then(|j| j.get("run_id"))
+                            .and_then(|n| n.as_u64())
+                    });
+                if let Some(id) = id {
+                    return Self::WorkflowRun { id };
+                }
+            }
+            "team" => {
+                if let Some(team) = payload.get("team") {
+                    if let Some(slug) = team.get("slug").and_then(|s| s.as_str()) {
+                        return Self::Team {
+                            slug: slug.to_string(),
+                        };
+                    }
+                }
+            }
+            "repository"
+            | "commit_comment"
+            | "status"
+            | "custom_property"
+            | "custom_property_values"
+            | "label"
+            | "milestone"
+            | "projects_v2"
+            | "projects_v2_item"
+            | "projects_v2_status_update"
+            | "workflow_dispatch"
+            | "deploy_key"
+            | "deployment"
+            | "repository_ruleset"
+            | "github_app_authorization"
+            | "installation"
+            | "installation_repositories"
+            | "installation_target"
+            | "ping"
+            | "team_add" => {
                 return Self::Repository;
             }
             _ => {}
@@ -351,25 +447,37 @@ impl EventEntity {
         Self::Unknown
     }
 
-    /// Get entity type string
+    /// Returns a static string identifying the entity type.
+    ///
+    /// Used as the third segment of the session ID:
+    /// `"{owner}/{repo}/{entity_type}/{entity_id}"`.
     pub fn entity_type(&self) -> &'static str {
         match self {
             Self::PullRequest { .. } => "pull_request",
             Self::Issue { .. } => "issue",
             Self::Branch { .. } => "branch",
             Self::Release { .. } => "release",
+            Self::Discussion { .. } => "discussion",
+            Self::WorkflowRun { .. } => "workflow_run",
+            Self::Team { .. } => "team",
             Self::Repository => "repository",
             Self::Unknown => "unknown",
         }
     }
 
-    /// Get entity ID string
+    /// Returns the entity's unique identifier as a string.
+    ///
+    /// Used as the fourth segment of the session ID:
+    /// `"{owner}/{repo}/{entity_type}/{entity_id}"`.
     pub fn entity_id(&self) -> String {
         match self {
             Self::PullRequest { number } => number.to_string(),
             Self::Issue { number } => number.to_string(),
             Self::Branch { name } => name.clone(),
             Self::Release { tag } => tag.clone(),
+            Self::Discussion { number } => number.to_string(),
+            Self::WorkflowRun { id } => id.to_string(),
+            Self::Team { slug } => slug.clone(),
             Self::Repository => "repository".to_string(),
             Self::Unknown => "unknown".to_string(),
         }
