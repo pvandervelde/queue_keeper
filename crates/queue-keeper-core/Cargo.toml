@@ -52,7 +52,7 @@ queue-runtime = { workspace = true }
 
 [dev-dependencies]
 mockall = { workspace = true }
-tokio-test = "=0.4.4"
+tokio-test = "=0.4.5"
 tempfile = "=3.25.0"
 
 [features]
