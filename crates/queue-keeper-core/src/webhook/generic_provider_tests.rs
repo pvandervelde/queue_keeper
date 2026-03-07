@@ -521,7 +521,7 @@ field_extraction:
   entity_path: "object_attributes.iid"
 "#;
         let config: GenericProviderConfig =
-            serde_yaml::from_str(yaml).expect("YAML deserialisation");
+            serde_yml::from_str(yaml).expect("YAML deserialisation");
         assert_eq!(config.provider_id, "gitlab");
         assert_eq!(config.processing_mode, ProcessingMode::Wrap);
         assert!(config.validate().is_ok());
@@ -537,7 +537,7 @@ processing_mode: "direct"
 target_queue: "queue-keeper-slack"
 "#;
         let config: GenericProviderConfig =
-            serde_yaml::from_str(yaml).expect("YAML deserialisation");
+            serde_yml::from_str(yaml).expect("YAML deserialisation");
         assert_eq!(config.provider_id, "slack");
         assert_eq!(config.processing_mode, ProcessingMode::Direct);
         assert_eq!(config.target_queue.as_deref(), Some("queue-keeper-slack"));
