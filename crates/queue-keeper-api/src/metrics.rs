@@ -270,10 +270,20 @@ impl queue_keeper_core::monitoring::MetricsCollector for ServiceMetrics {
     }
 }
 
+/// `Default` implementation for `ServiceMetrics` — **test-only stub**.
+///
+/// Registers Prometheus counters/gauges/histograms with unique, process-scoped names
+/// so that concurrent test functions do not hit Prometheus duplicate-registration
+/// panics.
+///
+/// # ⚠ Do not use in production
+///
+/// In production code, call [`ServiceMetrics::new()`] instead, which registers
+/// well-known metric names against the default global registry.
 impl Default for ServiceMetrics {
     fn default() -> Self {
-        // This is a stub implementation for testing
-        // In production, use ServiceMetrics::new() instead
+        // This is a stub implementation for testing only.
+        // In production, use ServiceMetrics::new() instead.
         use prometheus::{
             register_gauge, register_histogram, register_int_counter, register_int_counter_vec,
             register_int_gauge, register_int_gauge_vec,

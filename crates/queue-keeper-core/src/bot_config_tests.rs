@@ -626,6 +626,22 @@ mod event_matcher_tests {
 
 mod configuration_loading_tests {
     use super::*;
+    use std::io::Write;
+
+    /// Build a minimal valid BotConfiguration for file-loading tests.
+    fn minimal_config() -> BotConfiguration {
+        BotConfiguration {
+            bots: vec![BotSubscription {
+                name: BotName::new("test-bot").unwrap(),
+                queue: QueueName::new("queue-keeper-test-bot").unwrap(),
+                events: vec![EventTypePattern::Exact("issues.opened".to_string())],
+                ordered: true,
+                repository_filter: None,
+                config: BotSpecificConfig::new(),
+            }],
+            settings: BotConfigurationSettings::default(),
+        }
+    }
 
     #[test]
     fn test_load_from_env_missing() {
@@ -638,5 +654,97 @@ mod configuration_loading_tests {
             Err(BotConfigError::SourceUnavailable(_)) => {}
             _ => panic!("Expected SourceUnavailable error"),
         }
+    }
+
+    /// Verify that a .yaml extension file is parsed as YAML.
+    #[test]
+    fn test_load_from_file_yaml_extension() {
+        let config = minimal_config();
+        let yaml_content = serde_yml::to_string(&config).expect("YAML serialization must succeed");
+
+        let mut temp_file = tempfile::Builder::new()
+            .suffix(".yaml")
+            .tempfile()
+            .expect("temp file creation must succeed");
+        temp_file
+            .write_all(yaml_content.as_bytes())
+            .expect("write must succeed");
+
+        let loaded = BotConfiguration::load_from_file(temp_file.path())
+            .expect("load must succeed for .yaml file");
+        assert_eq!(loaded, config);
+    }
+
+    /// Verify that a .json extension file is parsed as JSON.
+    #[test]
+    fn test_load_from_file_json_extension() {
+        let config = minimal_config();
+        let json_content = serde_json::to_string(&config).expect("JSON serialization must succeed");
+
+        let mut temp_file = tempfile::Builder::new()
+            .suffix(".json")
+            .tempfile()
+            .expect("temp file creation must succeed");
+        temp_file
+            .write_all(json_content.as_bytes())
+            .expect("write must succeed");
+
+        let loaded = BotConfiguration::load_from_file(temp_file.path())
+            .expect("load must succeed for .json file");
+        assert_eq!(loaded, config);
+    }
+
+    /// Verify the unknown-extension fallback path succeeds with JSON content.
+    ///
+    /// The `_` arm in `load_from_file` tries JSON first; this test exercises
+    /// that branch with valid JSON so it succeeds on the first attempt.
+    #[test]
+    fn test_load_from_file_unknown_extension_json_content() {
+        let config = minimal_config();
+        let json_content = serde_json::to_string(&config).expect("JSON serialization must succeed");
+
+        let mut temp_file = tempfile::Builder::new()
+            .suffix(".conf")
+            .tempfile()
+            .expect("temp file creation must succeed");
+        temp_file
+            .write_all(json_content.as_bytes())
+            .expect("write must succeed");
+
+        let loaded = BotConfiguration::load_from_file(temp_file.path())
+            .expect("load must succeed for unknown extension with JSON content");
+        assert_eq!(loaded, config);
+    }
+
+    /// Verify the unknown-extension fallback path falls through to YAML when
+    /// JSON parsing fails.
+    ///
+    /// The `_` arm in `load_from_file` tries JSON first, then YAML. This test
+    /// exercises the YAML fallback by writing content that is valid YAML but
+    /// not valid JSON.
+    #[test]
+    fn test_load_from_file_unknown_extension_yaml_content() {
+        let config = minimal_config();
+        let yaml_content = serde_yml::to_string(&config).expect("YAML serialization must succeed");
+
+        let mut temp_file = tempfile::Builder::new()
+            .suffix(".conf")
+            .tempfile()
+            .expect("temp file creation must succeed");
+        temp_file
+            .write_all(yaml_content.as_bytes())
+            .expect("write must succeed");
+
+        let loaded = BotConfiguration::load_from_file(temp_file.path())
+            .expect("load must succeed for unknown extension with YAML content");
+        assert_eq!(loaded, config);
+    }
+
+    /// Verify that a missing file returns FileNotFound.
+    #[test]
+    fn test_load_from_file_not_found() {
+        let result =
+            BotConfiguration::load_from_file(std::path::Path::new("/nonexistent/path/config.yaml"));
+        assert!(matches!(result, Err(BotConfigError::FileNotFound { .. })));
     }
 }
