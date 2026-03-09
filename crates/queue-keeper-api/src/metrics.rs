@@ -270,20 +270,31 @@ impl queue_keeper_core::monitoring::MetricsCollector for ServiceMetrics {
     }
 }
 
+/// `Default` implementation for `ServiceMetrics` — **test-only stub**.
+///
+/// Registers Prometheus counters/gauges/histograms with unique, process-scoped names
+/// so that concurrent test functions do not hit Prometheus duplicate-registration
+/// panics.
+///
+/// # ⚠ Do not use in production
+///
+/// In production code, call [`ServiceMetrics::new()`] instead, which registers
+/// well-known metric names against the default global registry.
 impl Default for ServiceMetrics {
     fn default() -> Self {
-        // This is a stub implementation for testing
-        // In production, use ServiceMetrics::new() instead
+        // This is a stub implementation for testing only.
+        // In production, use ServiceMetrics::new() instead.
         use prometheus::{
             register_gauge, register_histogram, register_int_counter, register_int_counter_vec,
             register_int_gauge, register_int_gauge_vec,
         };
+        use std::sync::atomic::{AtomicU64, Ordering};
 
-        // Use unique names with timestamp to avoid registration conflicts in tests
-        let suffix = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
+        // Use an atomic counter to generate unique metric names across concurrent tests.
+        // A timestamp-based suffix can collide when tests run in parallel at sub-nanosecond
+        // resolution; an atomically-incremented counter is strictly unique.
+        static TEST_METRIC_COUNTER: AtomicU64 = AtomicU64::new(0);
+        let suffix = TEST_METRIC_COUNTER.fetch_add(1, Ordering::Relaxed);
 
         Self {
             http_requests_total: register_int_counter!(

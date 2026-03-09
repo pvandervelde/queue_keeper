@@ -13,10 +13,10 @@ async-trait = { workspace = true }
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
-serde_yaml = "0.9"
+serde_yml = { workspace = true }
 
 # Pattern matching
-regex = "1.11"
+regex = { workspace = true }
 
 # Error handling
 thiserror = { workspace = true }
@@ -52,8 +52,8 @@ queue-runtime = { workspace = true }
 
 [dev-dependencies]
 mockall = { workspace = true }
-tokio-test = "=0.4.4"
-tempfile = "=3.25.0"
+tokio-test = { workspace = true }
+tempfile = { workspace = true }
 
 [features]
 default = []

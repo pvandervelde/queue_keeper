@@ -331,6 +331,9 @@ pub fn create_test_app_state_with_providers(
     let config = ServiceConfig::default();
     let health_checker = Arc::new(MockHealthChecker::new());
     let event_store = Arc::new(MockEventStore::new());
+    // ServiceMetrics::default() is intentionally used here to create a
+    // no-op test stub with unique metric names to avoid Prometheus
+    // duplicate-registration conflicts across concurrent tests.
     let metrics = Arc::new(ServiceMetrics::default());
     let telemetry_config = Arc::new(TelemetryConfig::default());
 

@@ -14,7 +14,7 @@ queue-runtime = { workspace = true }
 
 # Testing framework
 tokio = { workspace = true, features = ["full", "test-util"] }
-tokio-test = "=0.4.4"
+tokio-test = { workspace = true }
 
 # HTTP testing
 axum = "=0.8.8"

@@ -22,12 +22,13 @@ github-bot-sdk = { git = "https://github.com/pvandervelde/github-bot-sdk", rev =
 queue-runtime = { git = "https://github.com/pvandervelde/queue-runtime", rev = "62b32128" }
 
 # Async runtime
-tokio = { version = "1.49", features = ["full"] }
+tokio = { version = "1", features = ["full"] }
 async-trait = "0.1"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+serde_yml = "0.0.12"
 
 # HTTP and networking
 reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
@@ -53,6 +54,9 @@ opentelemetry-otlp = { version = "0.31", features = ["metrics", "trace"] }
 # Time handling
 chrono = { version = "0.4", features = ["serde"] }
 
+# Pattern matching
+regex = "1"
+
 # Cryptography
 jsonwebtoken = { version = "10.0", features = ["rust_crypto"] }
 hmac = "0.12"
@@ -70,12 +74,15 @@ config = { version = "0.15", default-features = false, features = [
     "convert-case",
     "async",
 ] }
-toml = "0.9"
+toml = "1"
 clap = { version = "4.4", features = ["derive", "env"] }
 
 # Azure integrations
-azure_core = "0.30"
-azure_identity = "0.30"
+# Note: azure_core and azure_identity are kept at 0.21 to match the version used
+# by queue-keeper-core's optional azure feature. The crate pins these directly
+# (not via workspace = true); both must be bumped together when upgrading.
+azure_core = "0.21"
+azure_identity = "0.21"
 azure_storage_blobs = "0.21"
 azure_security_keyvault = "0.21"
 azure_messaging_servicebus = "0.21"
@@ -96,6 +103,11 @@ hex = "0.4"
 # Testing
 mockall = "0.14"
 wiremock = "0.6"
+tempfile = "3"
+tokio-test = "0.4"
+assert_cmd = "2"
+predicates = "3"
+serial_test = "3"
 
 [profile.release]
 # Optimize for performance and size

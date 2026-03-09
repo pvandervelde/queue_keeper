@@ -51,7 +51,7 @@ opentelemetry = { workspace = true }
 opentelemetry-otlp = { workspace = true }
 
 # Retry logic
-rand = "0.8.5"
+rand = { workspace = true }
 
 [dev-dependencies]
-serial_test = "=3.2.0"
+serial_test = { workspace = true }
