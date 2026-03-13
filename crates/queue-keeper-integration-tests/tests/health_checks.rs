@@ -60,34 +60,69 @@ async fn test_health_endpoint_response_structure() {
     );
 }
 
-/// Verify that readiness endpoint exists
+/// Verify that readiness endpoint returns 200 when the service is ready
+///
+/// The readiness endpoint lives at `/ready` (not `/health/ready`).
+/// Kubernetes readiness probes use this to decide whether to route traffic
+/// to the pod.  With the default [`DefaultHealthChecker`] the service is
+/// always considered ready once the HTTP server is listening.
 #[tokio::test]
-#[ignore = "Readiness endpoint not yet implemented"]
-async fn test_readiness_endpoint_exists() {
+async fn test_readiness_endpoint_returns_200() {
     // Arrange
     let state = create_test_app_state();
     let app = create_router(state);
 
     let request = Request::builder()
-        .uri("/health/ready")
+        .uri("/ready")
         .body(Body::empty())
         .unwrap();
 
     // Act
     let response = app.oneshot(request).await.unwrap();
 
-    // Assert: Route exists (may return different status codes based on readiness)
-    assert_ne!(
+    // Assert
+    assert_eq!(
         response.status(),
-        StatusCode::NOT_FOUND,
-        "Readiness endpoint should exist"
+        StatusCode::OK,
+        "Readiness endpoint should return 200"
     );
 }
 
-/// Verify that liveness endpoint exists
+/// Verify that the readiness response body is valid JSON
 #[tokio::test]
-#[ignore = "Liveness endpoint not yet implemented"]
-async fn test_liveness_endpoint_exists() {
+async fn test_readiness_endpoint_returns_json() {
+    // Arrange
+    let state = create_test_app_state();
+    let app = create_router(state);
+
+    let request = Request::builder()
+        .uri("/ready")
+        .body(Body::empty())
+        .unwrap();
+
+    // Act
+    let response = app.oneshot(request).await.unwrap();
+
+    // Assert: status 200 and JSON content-type
+    assert_eq!(response.status(), StatusCode::OK);
+    let content_type = response
+        .headers()
+        .get("content-type")
+        .expect("content-type header should be present");
+    assert!(
+        content_type.to_str().unwrap().contains("application/json"),
+        "Readiness response should be application/json, got: {:?}",
+        content_type
+    );
+}
+
+/// Verify that liveness endpoint returns 200
+///
+/// The liveness endpoint lives at `/health/live`.
+/// A Kubernetes liveness probe uses this to decide whether to restart the
+/// pod.  If the process can handle any HTTP request it is considered alive.
+#[tokio::test]
+async fn test_liveness_endpoint_returns_200() {
     // Arrange
     let state = create_test_app_state();
     let app = create_router(state);
@@ -100,10 +135,40 @@ async fn test_liveness_endpoint_exists() {
     // Act
     let response = app.oneshot(request).await.unwrap();
 
-    // Assert: Route exists
-    assert_ne!(
+    // Assert
+    assert_eq!(
         response.status(),
-        StatusCode::NOT_FOUND,
-        "Liveness endpoint should exist"
+        StatusCode::OK,
+        "Liveness endpoint should return 200"
+    );
+}
+
+/// Verify that the liveness response body is valid JSON with status "alive"
+#[tokio::test]
+async fn test_liveness_endpoint_returns_alive_status() {
+    // Arrange
+    let state = create_test_app_state();
+    let app = create_router(state);
+
+    let request = Request::builder()
+        .uri("/health/live")
+        .body(Body::empty())
+        .unwrap();
+
+    // Act
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Extract body
+    let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+
+    // Assert: status field is "alive" (not "healthy" or "unhealthy")
+    assert_eq!(
+        body["status"].as_str().unwrap_or(""),
+        "alive",
+        "Liveness response 'status' field should be 'alive'"
     );
 }
