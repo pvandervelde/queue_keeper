@@ -55,7 +55,7 @@ impl BotConfiguration {
         // Parse based on file extension
         let config: BotConfiguration = match extension.to_lowercase().as_str() {
             "yaml" | "yml" => {
-                serde_yml::from_str(&contents).map_err(|e| BotConfigError::ParseError {
+                serde_yaml::from_str(&contents).map_err(|e| BotConfigError::ParseError {
                     message: format!("Invalid YAML: {}", e),
                 })?
             }
@@ -65,7 +65,7 @@ impl BotConfiguration {
             _ => {
                 // Try JSON first, then YAML
                 serde_json::from_str(&contents)
-                    .or_else(|_| serde_yml::from_str(&contents))
+                    .or_else(|_| serde_yaml::from_str(&contents))
                     .map_err(|e| BotConfigError::ParseError {
                         message: format!("Failed to parse as JSON or YAML: {}", e),
                     })?
