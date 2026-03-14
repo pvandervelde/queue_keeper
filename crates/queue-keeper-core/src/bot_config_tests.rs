@@ -660,7 +660,7 @@ mod configuration_loading_tests {
     #[test]
     fn test_load_from_file_yaml_extension() {
         let config = minimal_config();
-        let yaml_content = serde_yml::to_string(&config).expect("YAML serialization must succeed");
+        let yaml_content = serde_yaml::to_string(&config).expect("YAML serialization must succeed");
 
         let mut temp_file = tempfile::Builder::new()
             .suffix(".yaml")
@@ -725,7 +725,7 @@ mod configuration_loading_tests {
     #[test]
     fn test_load_from_file_unknown_extension_yaml_content() {
         let config = minimal_config();
-        let yaml_content = serde_yml::to_string(&config).expect("YAML serialization must succeed");
+        let yaml_content = serde_yaml::to_string(&config).expect("YAML serialization must succeed");
 
         let mut temp_file = tempfile::Builder::new()
             .suffix(".conf")

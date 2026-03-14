@@ -20,19 +20,34 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Copy workspace manifests first for better layer caching
+# Copy workspace manifests first for better layer caching.
+# ALL workspace members listed in the root Cargo.toml must be included here
+# so that `cargo build` can resolve the full workspace dependency graph.
+# If a new crate is added to [workspace.members], add its Cargo.toml here too.
 COPY Cargo.toml Cargo.lock ./
 COPY crates/queue-keeper-core/Cargo.toml ./crates/queue-keeper-core/
+COPY crates/queue-keeper-api/Cargo.toml ./crates/queue-keeper-api/
 COPY crates/queue-keeper-service/Cargo.toml ./crates/queue-keeper-service/
 COPY crates/queue-keeper-cli/Cargo.toml ./crates/queue-keeper-cli/
+COPY crates/queue-keeper-integration-tests/Cargo.toml ./crates/queue-keeper-integration-tests/
+COPY crates/queue-keeper-e2e-tests/Cargo.toml ./crates/queue-keeper-e2e-tests/
 
-# Create dummy source files to cache dependencies
+# Create dummy source files to cache dependencies.
+# Every workspace member needs a valid entry point so `cargo build` can parse
+# the workspace without actual source.  Binary crates get `fn main() {}`;
+# library and test-only crates get an empty `lib.rs`.
 RUN mkdir -p crates/queue-keeper-core/src \
+    crates/queue-keeper-api/src \
     crates/queue-keeper-service/src \
-    crates/queue-keeper-cli/src && \
+    crates/queue-keeper-cli/src \
+    crates/queue-keeper-integration-tests/src \
+    crates/queue-keeper-e2e-tests/src && \
+    echo "pub fn dummy() {}" > crates/queue-keeper-core/src/lib.rs && \
+    echo "pub fn dummy() {}" > crates/queue-keeper-api/src/lib.rs && \
     echo "fn main() {}" > crates/queue-keeper-service/src/main.rs && \
     echo "fn main() {}" > crates/queue-keeper-cli/src/main.rs && \
-    echo "pub fn dummy() {}" > crates/queue-keeper-core/src/lib.rs
+    echo "pub fn dummy() {}" > crates/queue-keeper-integration-tests/src/lib.rs && \
+    echo "pub fn dummy() {}" > crates/queue-keeper-e2e-tests/src/lib.rs
 
 # Build dependencies only (this layer will be cached)
 # Note: This will fail to link but will cache all external dependencies
