@@ -1,4 +1,4 @@
-//! Tests for [`LiteralSignatureValidator`].
+//! Tests for [`LiteralSignatureValidator`] and [`KeyVaultSignatureValidator`].
 //!
 //! Verifies HMAC-SHA256 validation behaviour, secret retrieval, and the
 //! constant-time comparison flag.
@@ -192,6 +192,168 @@ mod debug_formatting_tests {
             debug_str.contains("<REDACTED>"),
             "debug output should contain <REDACTED>; got: {}",
             debug_str
+        );
+    }
+}
+
+// ============================================================================
+// KeyVaultSignatureValidator tests
+// ============================================================================
+
+mod key_vault_signature_validator_tests {
+    use super::*;
+    use queue_keeper_core::adapters::memory_key_vault::InMemoryKeyVaultProvider;
+    use queue_keeper_core::key_vault::{KeyVaultError, SecretName, SecretValue};
+    use std::collections::HashMap;
+
+    fn secret_name(s: &str) -> SecretName {
+        SecretName::new(s).expect("test secret name must be valid")
+    }
+
+    fn provider_with_secret(name: &str, value: &str) -> Arc<dyn KeyVaultProvider> {
+        let mut secrets = HashMap::new();
+        secrets.insert(
+            secret_name(name),
+            SecretValue::from_string(value.to_string()),
+        );
+        Arc::new(InMemoryKeyVaultProvider::with_secrets(secrets))
+    }
+
+    fn empty_provider() -> Arc<dyn KeyVaultProvider> {
+        Arc::new(InMemoryKeyVaultProvider::new())
+    }
+
+    /// `get_webhook_secret` returns the value stored in Key Vault.
+    #[tokio::test]
+    async fn test_get_webhook_secret_returns_value_from_vault() {
+        let provider = provider_with_secret("my-secret", "super-secret-value");
+        let validator = KeyVaultSignatureValidator::new(provider, secret_name("my-secret"));
+
+        let result = validator.get_webhook_secret("push").await;
+
+        assert!(result.is_ok(), "expected Ok, got {:?}", result);
+        assert_eq!(result.unwrap(), "super-secret-value");
+    }
+
+    /// `get_webhook_secret` maps `SecretNotFound` to `SecretError::NotFound`.
+    #[tokio::test]
+    async fn test_get_webhook_secret_maps_not_found() {
+        let provider = empty_provider();
+        let validator =
+            KeyVaultSignatureValidator::new(provider, secret_name("nonexistent-secret"));
+
+        let result = validator.get_webhook_secret("push").await;
+
+        assert!(result.is_err());
+        assert!(
+            matches!(result, Err(SecretError::NotFound { .. })),
+            "expected NotFound, got {:?}",
+            result
+        );
+    }
+
+    /// `get_webhook_secret` maps `AccessDenied` to `SecretError::AccessDenied`.
+    #[tokio::test]
+    async fn test_get_webhook_secret_maps_access_denied() {
+        // Use the private helper directly to test the mapping function
+        let name = secret_name("my-secret");
+        let kv_error = KeyVaultError::AccessDenied {
+            name: name.clone(),
+            reason: "forbidden".to_string(),
+        };
+        let result = map_key_vault_error(kv_error, &name);
+        assert!(
+            matches!(result, SecretError::AccessDenied { .. }),
+            "expected AccessDenied, got {:?}",
+            result
+        );
+    }
+
+    /// `get_webhook_secret` maps `AuthenticationFailed` to `SecretError::AccessDenied`.
+    #[tokio::test]
+    async fn test_get_webhook_secret_maps_auth_failed_to_access_denied() {
+        let name = secret_name("my-secret");
+        let kv_error = KeyVaultError::AuthenticationFailed {
+            message: "token expired".to_string(),
+        };
+        let result = map_key_vault_error(kv_error, &name);
+        assert!(
+            matches!(result, SecretError::AccessDenied { .. }),
+            "expected AccessDenied, got {:?}",
+            result
+        );
+    }
+
+    /// `get_webhook_secret` maps `ServiceUnavailable` to `SecretError::ProviderUnavailable`.
+    #[tokio::test]
+    async fn test_get_webhook_secret_maps_service_unavailable() {
+        let name = secret_name("my-secret");
+        let kv_error = KeyVaultError::ServiceUnavailable {
+            message: "vault down".to_string(),
+        };
+        let result = map_key_vault_error(kv_error, &name);
+        assert!(
+            matches!(result, SecretError::ProviderUnavailable(_)),
+            "expected ProviderUnavailable, got {:?}",
+            result
+        );
+    }
+
+    /// `validate_signature` with a correct HMAC-SHA256 signature returns `Ok`.
+    #[tokio::test]
+    async fn test_validate_signature_with_correct_hmac_passes() {
+        let secret = "webhook-secret";
+        let payload = b"hello from webhook";
+        let signature = compute_sha256_signature(secret, payload);
+
+        let provider = provider_with_secret("my-secret", secret);
+        let validator = KeyVaultSignatureValidator::new(provider, secret_name("my-secret"));
+
+        let result = validator.validate_signature(payload, &signature, secret).await;
+        assert!(result.is_ok(), "valid signature should be accepted");
+    }
+
+    /// `validate_signature` with a wrong secret key returns an error.
+    #[tokio::test]
+    async fn test_validate_signature_with_wrong_key_fails() {
+        let correct_secret = "correct-secret";
+        let payload = b"some payload";
+        let signature = compute_sha256_signature(correct_secret, payload);
+
+        let provider = provider_with_secret("my-secret", correct_secret);
+        let validator = KeyVaultSignatureValidator::new(provider, secret_name("my-secret"));
+
+        // Validate with wrong key — same as Literal behaviour
+        let result = validator
+            .validate_signature(payload, &signature, "wrong-secret")
+            .await;
+        assert!(result.is_err(), "wrong key should fail validation");
+    }
+
+    /// `supports_constant_time_comparison` is always `true`.
+    #[test]
+    fn test_supports_constant_time_comparison_is_true() {
+        let provider = empty_provider();
+        let validator =
+            KeyVaultSignatureValidator::new(provider, secret_name("any-secret"));
+        assert!(validator.supports_constant_time_comparison());
+    }
+
+    /// `Debug` output shows the secret_name but not the secret value.
+    #[test]
+    fn test_debug_shows_secret_name_not_value() {
+        let provider = provider_with_secret("my-kv-secret", "top-secret");
+        let validator =
+            KeyVaultSignatureValidator::new(provider, secret_name("my-kv-secret"));
+        let debug_str = format!("{:?}", validator);
+
+        assert!(
+            debug_str.contains("my-kv-secret"),
+            "debug should show the KV lookup key (not sensitive): {debug_str}"
+        );
+        assert!(
+            !debug_str.contains("top-secret"),
+            "debug must never include the actual secret value: {debug_str}"
         );
     }
 }

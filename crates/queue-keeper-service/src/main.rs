@@ -17,10 +17,12 @@ use queue_keeper_api::{
     start_server, DefaultEventStore, DefaultHealthChecker, ProviderId, ProviderRegistry,
     ServiceConfig, ServiceError,
 };
+use queue_keeper_core::adapters::{memory_key_vault::InMemorySecretCache, AzureKeyVaultProvider};
+use queue_keeper_core::key_vault::{KeyVaultConfiguration, KeyVaultProvider, SecretName};
 use queue_keeper_core::webhook::{generic_provider::GenericWebhookProvider, GithubWebhookProvider};
-use signature_validator::LiteralSignatureValidator;
+use signature_validator::{KeyVaultSignatureValidator, LiteralSignatureValidator};
 use std::sync::Arc;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
@@ -106,6 +108,42 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // -------------------------------------------------------------------------
+    // Initialise Azure Key Vault provider (when Key Vault secrets are used).
+    //
+    // The AzureKeyVaultProvider fetches secrets lazily at request time and
+    // serves them from an in-memory cache for `cache_ttl_seconds` (default
+    // 300 s = 5 minutes), satisfying spec assertion #16 "Secret Caching".
+    //
+    // service_config.validate() already guarantees that `key_vault` is Some
+    // with a non-empty vault_url whenever any provider uses KeyVault secrets,
+    // so if we reach the `None` branch here no KV provider is needed.
+    // -------------------------------------------------------------------------
+    let key_vault_provider: Option<Arc<dyn KeyVaultProvider>> =
+        if let Some(kv_cfg) = &service_config.key_vault {
+            let core_config = KeyVaultConfiguration {
+                vault_url: kv_cfg.vault_url.clone(),
+                cache_ttl_seconds: kv_cfg.cache_ttl_seconds,
+                ..Default::default()
+            };
+            let cache = Arc::new(InMemorySecretCache::new());
+            match AzureKeyVaultProvider::new(core_config, cache).await {
+                Ok(provider) => {
+                    info!(
+                        vault_url = %kv_cfg.vault_url,
+                        "Azure Key Vault provider initialised"
+                    );
+                    Some(Arc::new(provider) as Arc<dyn KeyVaultProvider>)
+                }
+                Err(e) => {
+                    error!(error = %e, "Failed to initialise Azure Key Vault provider; aborting");
+                    std::process::exit(3);
+                }
+            }
+        } else {
+            None
+        };
+
+    // -------------------------------------------------------------------------
     // Build provider registry
     //
     // For every entry in `config.providers` we create a GithubWebhookProvider
@@ -121,7 +159,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for provider_config in &service_config.providers {
         match ProviderId::new(&provider_config.id) {
             Ok(provider_id) => {
-                let validator = build_validator_from_provider_config(provider_config);
+                let validator =
+                    build_validator_from_provider_config(provider_config, key_vault_provider.as_ref());
                 let processor = Arc::new(GithubWebhookProvider::new(validator, None, None));
                 provider_registry.register(provider_id, processor);
                 info!(provider = %provider_config.id, "Registered GitHub webhook provider from config");
@@ -170,10 +209,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         match ProviderId::new(&provider_id_str) {
             Ok(provider_id) => {
-                // Build a signature validator if the signature section carries a
-                // Literal secret.  Key Vault support will be added in a future
-                // release.
-                let validator = build_validator_from_generic_config(&generic_config);
+                // Build a signature validator for this generic provider.
+                let validator =
+                    build_validator_from_generic_config(&generic_config, key_vault_provider.as_ref());
 
                 let provider = GenericWebhookProvider::with_signature_validator(
                     generic_config,
@@ -248,10 +286,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 /// Build a [`SignatureValidator`] from a standard [`ProviderConfig`].
 ///
-/// Returns `None` when no secret is configured or when the secret source is
-/// Key Vault (not yet implemented).
+/// - `Literal` secret → [`LiteralSignatureValidator`] (dev/test only, emits `WARN`).
+/// - `KeyVault` secret → [`KeyVaultSignatureValidator`] backed by the provided
+///   [`KeyVaultProvider`]. `key_vault` must be `Some` here; `ServiceConfig::validate()`
+///   already guarantees this.
+/// - `None` secret → returns `None` (no signature validation).
 fn build_validator_from_provider_config(
     provider_config: &queue_keeper_api::ProviderConfig,
+    key_vault: Option<&Arc<dyn KeyVaultProvider>>,
 ) -> Option<Arc<dyn queue_keeper_core::webhook::SignatureValidator>> {
     use queue_keeper_api::ProviderSecretConfig;
 
@@ -260,24 +302,44 @@ fn build_validator_from_provider_config(
             Some(Arc::new(LiteralSignatureValidator::new(value.clone())))
         }
         ProviderSecretConfig::KeyVault { secret_name } => {
-            warn!(
-                provider = %provider_config.id,
-                secret_name = %secret_name,
-                "Key Vault–backed signature validation is not yet implemented; \
-                 signature validation will be SKIPPED for this provider. \
-                 Do not use in production."
-            );
-            None
+            let kv = match key_vault {
+                Some(kv) => kv,
+                None => {
+                    // Defensive guard — validate() prevents this in practice.
+                    error!(
+                        provider = %provider_config.id,
+                        secret_name = %secret_name,
+                        "Key Vault secret configured but no Key Vault provider is available; \
+                         signature validation will be SKIPPED"
+                    );
+                    return None;
+                }
+            };
+            match SecretName::new(secret_name.as_str()) {
+                Ok(name) => Some(Arc::new(KeyVaultSignatureValidator::new(
+                    Arc::clone(kv),
+                    name,
+                ))),
+                Err(e) => {
+                    error!(
+                        provider = %provider_config.id,
+                        secret_name = %secret_name,
+                        error = %e,
+                        "Invalid Key Vault secret name; signature validation will be SKIPPED"
+                    );
+                    None
+                }
+            }
         }
     }
 }
 
 /// Build a [`SignatureValidator`] from a [`GenericProviderConfig`] signature section.
 ///
-/// Returns `None` when the provider has no `webhook_secret` configuration, or when
-/// the secret source is Key Vault (not yet implemented).
+/// Follows the same logic as [`build_validator_from_provider_config`].
 fn build_validator_from_generic_config(
     generic_config: &queue_keeper_core::webhook::generic_provider::GenericProviderConfig,
+    key_vault: Option<&Arc<dyn KeyVaultProvider>>,
 ) -> Option<Arc<dyn queue_keeper_core::webhook::SignatureValidator>> {
     use queue_keeper_core::webhook::generic_provider::WebhookSecretConfig;
 
@@ -286,14 +348,33 @@ fn build_validator_from_generic_config(
             Some(Arc::new(LiteralSignatureValidator::new(value.clone())))
         }
         WebhookSecretConfig::KeyVault { secret_name } => {
-            warn!(
-                provider = %generic_config.provider_id,
-                secret_name = %secret_name,
-                "Key Vault-backed signature validation is not yet implemented for generic \
-                 providers; signature validation will be SKIPPED. \
-                 Do not use in production."
-            );
-            None
+            let kv = match key_vault {
+                Some(kv) => kv,
+                None => {
+                    error!(
+                        provider = %generic_config.provider_id,
+                        secret_name = %secret_name,
+                        "Key Vault secret configured but no Key Vault provider is available; \
+                         signature validation will be SKIPPED"
+                    );
+                    return None;
+                }
+            };
+            match SecretName::new(secret_name.as_str()) {
+                Ok(name) => Some(Arc::new(KeyVaultSignatureValidator::new(
+                    Arc::clone(kv),
+                    name,
+                ))),
+                Err(e) => {
+                    error!(
+                        provider = %generic_config.provider_id,
+                        secret_name = %secret_name,
+                        error = %e,
+                        "Invalid Key Vault secret name; signature validation will be SKIPPED"
+                    );
+                    None
+                }
+            }
         }
     }
 }

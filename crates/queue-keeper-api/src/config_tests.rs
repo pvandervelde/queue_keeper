@@ -332,9 +332,10 @@ mod service_config_validate_tests {
         assert!(config.validate().is_ok());
     }
 
-    /// Verify that one valid provider passes validation.
+    /// Verify that one valid provider (with Key Vault secret and key_vault config) passes validation.
     #[test]
     fn test_single_valid_provider_passes() {
+        use crate::azure_config::AzureKeyVaultConfig;
         let config = ServiceConfig {
             providers: vec![ProviderConfig {
                 id: "github".to_string(),
@@ -344,6 +345,11 @@ mod service_config_validate_tests {
                 }),
                 allowed_event_types: vec![],
             }],
+            key_vault: Some(AzureKeyVaultConfig {
+                vault_url: "https://my-vault.vault.azure.net".to_string(),
+                use_managed_identity: true,
+                cache_ttl_seconds: 300,
+            }),
             ..Default::default()
         };
         assert!(config.validate().is_ok());
@@ -703,6 +709,142 @@ enable_compression = true
             config.webhooks.require_signature, expected.webhooks.require_signature,
             "unspecified sections must use defaults"
         );
+        assert!(config.validate().is_ok());
+    }
+}
+
+// ============================================================================
+// Key Vault configuration validation tests
+// ============================================================================
+
+mod key_vault_config_validation_tests {
+    use super::*;
+    use crate::azure_config::AzureKeyVaultConfig;
+
+    fn kv_config(vault_url: &str) -> AzureKeyVaultConfig {
+        AzureKeyVaultConfig {
+            vault_url: vault_url.to_string(),
+            use_managed_identity: true,
+            cache_ttl_seconds: 300,
+        }
+    }
+
+    fn provider_with_kv_secret() -> ProviderConfig {
+        ProviderConfig {
+            id: "github".to_string(),
+            require_signature: true,
+            secret: Some(ProviderSecretConfig::KeyVault {
+                secret_name: "github-webhook-secret".to_string(),
+            }),
+            allowed_event_types: vec![],
+        }
+    }
+
+    /// Verify that a provider with a Key Vault secret and a valid `key_vault`
+    /// section passes validation.
+    #[test]
+    fn test_key_vault_provider_with_valid_kv_config_passes() {
+        let config = ServiceConfig {
+            providers: vec![provider_with_kv_secret()],
+            key_vault: Some(kv_config("https://my-vault.vault.azure.net")),
+            ..Default::default()
+        };
+        assert!(config.validate().is_ok());
+    }
+
+    /// Verify that a provider configured with a Key Vault secret fails
+    /// validation when the `key_vault` section is absent.
+    #[test]
+    fn test_key_vault_provider_without_kv_config_fails() {
+        let config = ServiceConfig {
+            providers: vec![provider_with_kv_secret()],
+            key_vault: None,
+            ..Default::default()
+        };
+        let result = config.validate();
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("key_vault"),
+            "error should mention key_vault section, got: {msg}"
+        );
+    }
+
+    /// Verify that an empty `vault_url` in the `key_vault` section fails.
+    #[test]
+    fn test_key_vault_provider_with_empty_vault_url_fails() {
+        let config = ServiceConfig {
+            providers: vec![provider_with_kv_secret()],
+            key_vault: Some(kv_config("")),
+            ..Default::default()
+        };
+        let result = config.validate();
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("vault_url"),
+            "error should mention vault_url, got: {msg}"
+        );
+    }
+
+    /// Verify that a generic provider with a Key Vault webhook secret also
+    /// requires the `key_vault` section.
+    #[test]
+    fn test_generic_provider_key_vault_without_kv_config_fails() {
+        use queue_keeper_core::webhook::generic_provider::{
+            GenericProviderConfig, ProcessingMode, WebhookSecretConfig,
+        };
+        let config = ServiceConfig {
+            generic_providers: vec![GenericProviderConfig {
+                provider_id: "jira".to_string(),
+                processing_mode: ProcessingMode::Direct,
+                target_queue: Some("queue-keeper-jira".to_string()),
+                event_type_source: None,
+                delivery_id_source: None,
+                signature: None,
+                webhook_secret: Some(WebhookSecretConfig::KeyVault {
+                    secret_name: "jira-secret".to_string(),
+                }),
+                field_extraction: None,
+            }],
+            key_vault: None,
+            ..Default::default()
+        };
+        let result = config.validate();
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("key_vault"),
+            "error should mention key_vault section, got: {msg}"
+        );
+    }
+
+    /// Verify that a service with no Key Vault providers does NOT require the
+    /// `key_vault` configuration section.
+    #[test]
+    fn test_no_key_vault_providers_no_kv_config_passes() {
+        let config = ServiceConfig {
+            providers: vec![ProviderConfig {
+                id: "github".to_string(),
+                require_signature: false,
+                secret: None,
+                allowed_event_types: vec![],
+            }],
+            key_vault: None,
+            ..Default::default()
+        };
+        assert!(config.validate().is_ok());
+    }
+
+    /// Verify that `key_vault` can be present even when no providers need it
+    /// (operators may configure it in advance).
+    #[test]
+    fn test_kv_config_present_without_kv_providers_passes() {
+        let config = ServiceConfig {
+            providers: vec![],
+            key_vault: Some(kv_config("https://my-vault.vault.azure.net")),
+            ..Default::default()
+        };
         assert!(config.validate().is_ok());
     }
 }
