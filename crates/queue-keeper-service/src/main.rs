@@ -159,8 +159,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for provider_config in &service_config.providers {
         match ProviderId::new(&provider_config.id) {
             Ok(provider_id) => {
-                let validator =
-                    build_validator_from_provider_config(provider_config, key_vault_provider.as_ref());
+                let validator = build_validator_from_provider_config(
+                    provider_config,
+                    key_vault_provider.as_ref(),
+                );
                 let processor = Arc::new(GithubWebhookProvider::new(validator, None, None));
                 provider_registry.register(provider_id, processor);
                 info!(provider = %provider_config.id, "Registered GitHub webhook provider from config");
@@ -210,8 +212,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         match ProviderId::new(&provider_id_str) {
             Ok(provider_id) => {
                 // Build a signature validator for this generic provider.
-                let validator =
-                    build_validator_from_generic_config(&generic_config, key_vault_provider.as_ref());
+                let validator = build_validator_from_generic_config(
+                    &generic_config,
+                    key_vault_provider.as_ref(),
+                );
 
                 let provider = GenericWebhookProvider::with_signature_validator(
                     generic_config,

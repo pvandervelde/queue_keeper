@@ -64,10 +64,11 @@ fn validate_hmac_sha256(
     })?;
     mac.update(payload);
 
-    mac.verify_slice(&sig_bytes).map_err(|_| ValidationError::InvalidFormat {
-        field: "signature".to_string(),
-        message: "HMAC-SHA256 digest does not match".to_string(),
-    })
+    mac.verify_slice(&sig_bytes)
+        .map_err(|_| ValidationError::InvalidFormat {
+            field: "signature".to_string(),
+            message: "HMAC-SHA256 digest does not match".to_string(),
+        })
 }
 
 /// Map a [`KeyVaultError`] to the [`SecretError`] type used by the webhook layer.

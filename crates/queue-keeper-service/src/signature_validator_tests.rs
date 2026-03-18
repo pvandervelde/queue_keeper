@@ -309,7 +309,9 @@ mod key_vault_signature_validator_tests {
         let provider = provider_with_secret("my-secret", secret);
         let validator = KeyVaultSignatureValidator::new(provider, secret_name("my-secret"));
 
-        let result = validator.validate_signature(payload, &signature, secret).await;
+        let result = validator
+            .validate_signature(payload, &signature, secret)
+            .await;
         assert!(result.is_ok(), "valid signature should be accepted");
     }
 
@@ -334,8 +336,7 @@ mod key_vault_signature_validator_tests {
     #[test]
     fn test_supports_constant_time_comparison_is_true() {
         let provider = empty_provider();
-        let validator =
-            KeyVaultSignatureValidator::new(provider, secret_name("any-secret"));
+        let validator = KeyVaultSignatureValidator::new(provider, secret_name("any-secret"));
         assert!(validator.supports_constant_time_comparison());
     }
 
@@ -343,8 +344,7 @@ mod key_vault_signature_validator_tests {
     #[test]
     fn test_debug_shows_secret_name_not_value() {
         let provider = provider_with_secret("my-kv-secret", "top-secret");
-        let validator =
-            KeyVaultSignatureValidator::new(provider, secret_name("my-kv-secret"));
+        let validator = KeyVaultSignatureValidator::new(provider, secret_name("my-kv-secret"));
         let debug_str = format!("{:?}", validator);
 
         assert!(
