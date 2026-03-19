@@ -1,8 +1,9 @@
 //! Configuration types for the HTTP service
 
+use crate::azure_config::AzureKeyVaultConfig;
 use crate::errors::ConfigError;
 use queue_keeper_core::webhook::generic_provider::{
-    GenericProviderConfig, GenericProviderConfigError,
+    GenericProviderConfig, GenericProviderConfigError, WebhookSecretConfig,
 };
 use serde::{Deserialize, Serialize};
 
@@ -44,6 +45,19 @@ pub struct ServiceConfig {
     /// with IDs in the [`providers`](Self::providers) list.
     #[serde(default)]
     pub generic_providers: Vec<GenericProviderConfig>,
+
+    /// Azure Key Vault configuration.
+    ///
+    /// Required when any provider in [`providers`](Self::providers) or
+    /// [`generic_providers`](Self::generic_providers) is configured with
+    /// [`ProviderSecretConfig::KeyVault`] or [`WebhookSecretConfig::KeyVault`].
+    /// The `vault_url` field must be a non-empty Azure Key Vault URL
+    /// (e.g. `https://my-vault.vault.azure.net`).
+    ///
+    /// When absent, Key Vault–backed providers cannot be used and service
+    /// startup will fail if any provider requests Key Vault secrets.
+    #[serde(default)]
+    pub key_vault: Option<AzureKeyVaultConfig>,
 }
 
 impl ServiceConfig {
@@ -108,6 +122,46 @@ impl ServiceConfig {
                         generic.provider_id
                     ),
                 });
+            }
+        }
+
+        // Verify Key Vault configuration is present when any provider requires it.
+        let needs_key_vault = self
+            .providers
+            .iter()
+            .any(|p| matches!(&p.secret, Some(ProviderSecretConfig::KeyVault { .. })))
+            || self.generic_providers.iter().any(|p| {
+                matches!(
+                    &p.webhook_secret,
+                    Some(WebhookSecretConfig::KeyVault { .. })
+                )
+            });
+
+        if needs_key_vault {
+            match &self.key_vault {
+                None => {
+                    return Err(ConfigError::ProviderValidation {
+                        message: "one or more providers use Key Vault secrets but no \
+                                  `key_vault` configuration section is present"
+                            .to_string(),
+                    });
+                }
+                Some(kv) if kv.vault_url.is_empty() => {
+                    return Err(ConfigError::ProviderValidation {
+                        message: "`key_vault.vault_url` must not be empty when \
+                                  Key Vault secrets are in use"
+                            .to_string(),
+                    });
+                }
+                Some(kv) if !kv.vault_url.starts_with("https://") => {
+                    return Err(ConfigError::ProviderValidation {
+                        message: format!(
+                            "`key_vault.vault_url` must use HTTPS (got '{}')",
+                            kv.vault_url
+                        ),
+                    });
+                }
+                Some(_) => {} // valid
             }
         }
 

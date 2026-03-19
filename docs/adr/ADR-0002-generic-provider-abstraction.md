@@ -77,10 +77,12 @@ The `webhook_secret.type` field names the secret source:
 - `literal`: Hard-coded value — development and CI only.
 - `key_vault`: Azure Key Vault — required for production.
 
-When `signature:` is set but no `webhook_secret:` is configured, or the
-`key_vault` source is used in a release where Key Vault is not yet wired, the
-service logs a `WARN` and skips validation. This is a deliberate fail-open
-default to avoid breaking deployments during migration.
+When `signature:` is set but no `webhook_secret:` is configured the service
+logs a `WARN` and skips validation for that provider. When the `key_vault`
+source is configured, the service retrieves the secret from Azure Key Vault
+via `AzureKeyVaultProvider` (cached for 5 minutes). If the `key_vault`
+configuration section is absent at startup, validation fails fast rather
+than silently skipping signature checks.
 
 ### Field Sources (`FieldSource`)
 
@@ -112,9 +114,9 @@ Fields can be read from multiple locations:
 
 ### Neutral
 
-- Key Vault–backed secrets for generic providers are not yet implemented. Until
-  they are, only `literal` secrets are supported, which limits production use
-  of signature validation for generic providers.
+- Key Vault–backed secrets are now fully implemented for both `providers` and
+  `generic_providers`. The `AzureKeyVaultProvider` is initialised once at
+  startup and shared across all providers via `Arc<dyn KeyVaultProvider>`.
 
 ## Implementation
 

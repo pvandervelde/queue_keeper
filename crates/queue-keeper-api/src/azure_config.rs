@@ -240,7 +240,16 @@ pub struct AzureKeyVaultConfig {
     /// Key Vault URL (e.g., https://my-vault.vault.azure.net/)
     pub vault_url: String,
 
-    /// Use Managed Identity for authentication
+    /// Informational flag — indicates the intended authentication method.
+    ///
+    /// **This field currently has no effect on runtime behaviour.** The
+    /// `AzureKeyVaultProvider` always uses `DefaultAzureCredential`, which
+    /// automatically chains through Managed Identity → Azure CLI → environment
+    /// variables and other sources. Setting this to `false` does *not* disable
+    /// Managed Identity attempts.
+    ///
+    /// The field is retained for documentation purposes so that config files
+    /// communicate intent, and to support a future credential-selector build.
     pub use_managed_identity: bool,
 
     /// Cache TTL for secrets in seconds

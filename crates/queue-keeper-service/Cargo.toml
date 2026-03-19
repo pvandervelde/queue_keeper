@@ -17,7 +17,7 @@ description = "HTTP service for receiving GitHub webhooks"
 queue-keeper-api = { path = "../queue-keeper-api", version = "0.1.0" }
 
 # Core dependencies
-queue-keeper-core = { path = "../queue-keeper-core", version = "0.1.0" }
+queue-keeper-core = { path = "../queue-keeper-core", version = "0.1.0", features = ["azure"] }
 queue-runtime = { workspace = true }
 github-bot-sdk = { workspace = true }
 tokio = { workspace = true }
@@ -31,7 +31,7 @@ chrono = { workspace = true }
 async-trait = { workspace = true }
 bytes = { workspace = true }
 
-# Cryptography (for LiteralSignatureValidator)
+# Cryptography (for validate_hmac_sha256 shared by LiteralSignatureValidator and KeyVaultSignatureValidator)
 hmac = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }
