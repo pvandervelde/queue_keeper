@@ -787,6 +787,30 @@ mod key_vault_config_validation_tests {
         );
     }
 
+    /// Verify that a `vault_url` with an `http://` scheme (not HTTPS) fails validation.
+    ///
+    /// Key Vault URLs must use HTTPS to ensure transport-layer encryption of
+    /// secrets in transit, consistent with `AzureProductionConfig::validate()`.
+    #[test]
+    fn test_key_vault_provider_with_http_vault_url_fails() {
+        let config = ServiceConfig {
+            providers: vec![provider_with_kv_secret()],
+            key_vault: Some(kv_config("http://my-vault.vault.azure.net")),
+            ..Default::default()
+        };
+        let result = config.validate();
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("vault_url"),
+            "error should mention vault_url, got: {msg}"
+        );
+        assert!(
+            msg.to_lowercase().contains("https"),
+            "error should mention https requirement, got: {msg}"
+        );
+    }
+
     /// Verify that a generic provider with a Key Vault webhook secret also
     /// requires the `key_vault` section.
     #[test]

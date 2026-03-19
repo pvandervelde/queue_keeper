@@ -147,12 +147,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Build provider registry
     //
     // For every entry in `config.providers` we create a GithubWebhookProvider
-    // with an optional LiteralSignatureValidator when the provider is
-    // configured with a Literal secret.
-    //
-    // Key Vault–backed secrets are not yet wired in this release; providers
-    // that request KeyVault will still receive webhooks but signature
-    // verification will be skipped and a WARN will be emitted.
+    // with the appropriate SignatureValidator:
+    //   - Literal secret  → LiteralSignatureValidator (dev/CI only, emits WARN)
+    //   - Key Vault secret → KeyVaultSignatureValidator backed by the
+    //                        AzureKeyVaultProvider initialised above
     // -------------------------------------------------------------------------
     let mut provider_registry = ProviderRegistry::new();
 

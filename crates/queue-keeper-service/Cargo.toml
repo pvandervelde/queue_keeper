@@ -31,7 +31,7 @@ chrono = { workspace = true }
 async-trait = { workspace = true }
 bytes = { workspace = true }
 
-# Cryptography (for LiteralSignatureValidator)
+# Cryptography (for validate_hmac_sha256 shared by LiteralSignatureValidator and KeyVaultSignatureValidator)
 hmac = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }

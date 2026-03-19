@@ -153,6 +153,14 @@ impl ServiceConfig {
                             .to_string(),
                     });
                 }
+                Some(kv) if !kv.vault_url.starts_with("https://") => {
+                    return Err(ConfigError::ProviderValidation {
+                        message: format!(
+                            "`key_vault.vault_url` must use HTTPS (got '{}')",
+                            kv.vault_url
+                        ),
+                    });
+                }
                 Some(_) => {} // valid
             }
         }
