@@ -2,6 +2,7 @@
 //!
 //! This module provides:
 //! - Mock implementations of traits (WebhookProcessor, HealthChecker, EventStore)
+//! - Mock QueueClient and BlobStorage for queue delivery tests
 //! - Helper functions for creating test fixtures
 //! - Shared test data builders
 
@@ -15,14 +16,329 @@ use queue_keeper_core::{
         AuditAction, AuditActor, AuditContext, AuditError, AuditEvent, AuditLogId, AuditLogger,
         AuditResource, AuditResult, SecurityAuditEvent, WebhookProcessingAction,
     },
+    blob_storage::{
+        BlobMetadata, BlobStorage, BlobStorageError, PayloadFilter, StorageHealthStatus,
+        StorageMetrics, StoredWebhook, WebhookPayload,
+    },
+    bot_config::{BotConfiguration, BotConfigurationSettings, BotSpecificConfig, BotSubscription},
     webhook::{
         NormalizationError, ProcessingOutput, StorageError, StorageReference, ValidationStatus,
         WebhookError, WebhookProcessor, WebhookRequest, WrappedEvent,
     },
-    EventId, QueueKeeperError, Repository, SessionId, Timestamp, ValidationError,
+    BotName, EventId, QueueKeeperError, QueueName, Repository, SessionId, Timestamp,
+    ValidationError,
 };
+use queue_runtime::{
+    Message, MessageId, ProviderType, QueueClient, QueueError, QueueName as RuntimeQueueName,
+    ReceiptHandle, ReceivedMessage, SessionId as RuntimeSessionId, SessionSupport,
+};
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use tokio::time::{sleep, Duration};
+
+// ============================================================================
+// Mock Queue Client
+// ============================================================================
+
+/// Controllable mock `QueueClient` for delivery integration tests.
+///
+/// Supports pre-queuing explicit send results (success or failure); once
+/// the queue is exhausted every subsequent `send_message` returns `Ok`.
+/// Dead-letter and abandon calls are recorded for assertion.
+#[derive(Clone)]
+#[allow(dead_code)]
+pub struct MockQueueClient {
+    send_results: Arc<Mutex<VecDeque<Result<MessageId, QueueError>>>>,
+    sent_messages: Arc<Mutex<Vec<(RuntimeQueueName, Message)>>>,
+    dead_lettered: Arc<Mutex<Vec<(ReceiptHandle, String)>>>,
+    abandoned: Arc<Mutex<Vec<ReceiptHandle>>>,
+}
+
+#[allow(dead_code)]
+impl MockQueueClient {
+    /// Create a new mock that succeeds by default.
+    pub fn new() -> Self {
+        Self {
+            send_results: Arc::new(Mutex::new(VecDeque::new())),
+            sent_messages: Arc::new(Mutex::new(Vec::new())),
+            dead_lettered: Arc::new(Mutex::new(Vec::new())),
+            abandoned: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    /// Queue an explicit success result for the next `send_message` call.
+    pub fn expect_success(&self) -> MessageId {
+        let id = MessageId::new();
+        self.send_results
+            .lock()
+            .unwrap()
+            .push_back(Ok(id.clone()));
+        id
+    }
+
+    /// Queue an explicit transient failure for the next `send_message` call.
+    pub fn expect_transient_failure(&self) {
+        self.send_results.lock().unwrap().push_back(Err(
+            QueueError::ProviderError {
+                provider: "MockQueue".to_string(),
+                code: "TransientError".to_string(),
+                message: "simulated transient failure".to_string(),
+            },
+        ));
+    }
+
+    /// Queue an explicit permanent failure for the next `send_message` call.
+    pub fn expect_permanent_failure(&self) {
+        self.send_results
+            .lock()
+            .unwrap()
+            .push_back(Err(QueueError::InvalidMessage {
+                message: "simulated permanent failure".to_string(),
+            }));
+    }
+
+    /// Pre-queue enough failures so every send will fail (for DLQ tests).
+    pub fn always_fail_transient(&self, count: usize) {
+        let mut q = self.send_results.lock().unwrap();
+        for _ in 0..count {
+            q.push_back(Err(QueueError::ProviderError {
+                provider: "MockQueue".to_string(),
+                code: "TransientError".to_string(),
+                message: "simulated transient failure".to_string(),
+            }));
+        }
+    }
+
+    /// Number of `send_message` calls recorded so far.
+    pub fn send_count(&self) -> usize {
+        self.sent_messages.lock().unwrap().len()
+    }
+
+    /// Get all sent (queue_name, message) pairs recorded so far.
+    pub fn sent_messages(&self) -> Vec<(RuntimeQueueName, Message)> {
+        self.sent_messages.lock().unwrap().clone()
+    }
+
+    /// Number of `dead_letter_message` calls recorded so far.
+    pub fn dead_letter_count(&self) -> usize {
+        self.dead_lettered.lock().unwrap().len()
+    }
+}
+
+#[async_trait::async_trait]
+impl QueueClient for MockQueueClient {
+    async fn send_message(
+        &self,
+        queue: &RuntimeQueueName,
+        message: Message,
+    ) -> Result<MessageId, QueueError> {
+        self.sent_messages
+            .lock()
+            .unwrap()
+            .push((queue.clone(), message));
+
+        let result = self.send_results.lock().unwrap().pop_front();
+        match result {
+            Some(r) => r,
+            None => Ok(MessageId::new()),
+        }
+    }
+
+    async fn send_messages(
+        &self,
+        queue: &RuntimeQueueName,
+        messages: Vec<Message>,
+    ) -> Result<Vec<MessageId>, QueueError> {
+        let mut ids = Vec::new();
+        for msg in messages {
+            ids.push(self.send_message(queue, msg).await?);
+        }
+        Ok(ids)
+    }
+
+    async fn receive_message(
+        &self,
+        _queue: &RuntimeQueueName,
+        _timeout: chrono::Duration,
+    ) -> Result<Option<ReceivedMessage>, QueueError> {
+        Ok(None)
+    }
+
+    async fn receive_messages(
+        &self,
+        _queue: &RuntimeQueueName,
+        _max_messages: u32,
+        _timeout: chrono::Duration,
+    ) -> Result<Vec<ReceivedMessage>, QueueError> {
+        Ok(vec![])
+    }
+
+    async fn complete_message(&self, _receipt: ReceiptHandle) -> Result<(), QueueError> {
+        Ok(())
+    }
+
+    async fn abandon_message(&self, receipt: ReceiptHandle) -> Result<(), QueueError> {
+        self.abandoned.lock().unwrap().push(receipt);
+        Ok(())
+    }
+
+    async fn dead_letter_message(
+        &self,
+        receipt: ReceiptHandle,
+        reason: String,
+    ) -> Result<(), QueueError> {
+        self.dead_lettered.lock().unwrap().push((receipt, reason));
+        Ok(())
+    }
+
+    async fn accept_session(
+        &self,
+        _queue: &RuntimeQueueName,
+        _session_id: Option<RuntimeSessionId>,
+    ) -> Result<Box<dyn queue_runtime::SessionClient>, QueueError> {
+        Err(QueueError::ProviderError {
+            provider: "MockQueue".to_string(),
+            code: "NotSupported".to_string(),
+            message: "sessions not supported in MockQueueClient".to_string(),
+        })
+    }
+
+    fn provider_type(&self) -> ProviderType {
+        ProviderType::InMemory
+    }
+
+    fn supports_sessions(&self) -> bool {
+        false
+    }
+
+    fn supports_batching(&self) -> bool {
+        false
+    }
+}
+
+// ============================================================================
+// Mock Blob Storage
+// ============================================================================
+
+/// In-memory `BlobStorage` implementation for DLQ persistence tests.
+#[derive(Clone, Default)]
+#[allow(dead_code)]
+pub struct MockBlobStorage {
+    stored: Arc<Mutex<Vec<(EventId, WebhookPayload)>>>,
+}
+
+#[allow(dead_code)]
+impl MockBlobStorage {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn stored_count(&self) -> usize {
+        self.stored.lock().unwrap().len()
+    }
+}
+
+#[async_trait::async_trait]
+impl BlobStorage for MockBlobStorage {
+    async fn store_payload(
+        &self,
+        event_id: &EventId,
+        payload: &WebhookPayload,
+    ) -> Result<BlobMetadata, BlobStorageError> {
+        self.stored.lock().unwrap().push((*event_id, payload.clone()));
+        Ok(BlobMetadata {
+            blob_path: format!("mock/{}.json", event_id),
+            event_id: *event_id,
+            size_bytes: payload.body.len() as u64,
+            created_at: Timestamp::now(),
+            etag: "mock-etag".to_string(),
+            checksum: "mock-checksum".to_string(),
+        })
+    }
+
+    async fn get_payload(
+        &self,
+        event_id: &EventId,
+    ) -> Result<Option<StoredWebhook>, BlobStorageError> {
+        let stored = self.stored.lock().unwrap();
+        Ok(stored.iter().find(|(id, _)| id == event_id).map(|(id, payload)| {
+            StoredWebhook {
+                metadata: BlobMetadata {
+                    blob_path: format!("mock/{}.json", id),
+                    event_id: *id,
+                    size_bytes: payload.body.len() as u64,
+                    created_at: Timestamp::now(),
+                    etag: "mock-etag".to_string(),
+                    checksum: "mock-checksum".to_string(),
+                },
+                payload: payload.clone(),
+            }
+        }))
+    }
+
+    async fn list_payloads(
+        &self,
+        _filter: &PayloadFilter,
+    ) -> Result<Vec<BlobMetadata>, BlobStorageError> {
+        Ok(vec![])
+    }
+
+    async fn delete_payload(&self, event_id: &EventId) -> Result<(), BlobStorageError> {
+        self.stored.lock().unwrap().retain(|(id, _)| id != event_id);
+        Ok(())
+    }
+
+    async fn health_check(&self) -> Result<StorageHealthStatus, BlobStorageError> {
+        Ok(StorageHealthStatus {
+            healthy: true,
+            connected: true,
+            last_success: Some(Timestamp::now()),
+            error_message: None,
+            metrics: StorageMetrics {
+                avg_write_latency_ms: 0.0,
+                avg_read_latency_ms: 0.0,
+                success_rate: 1.0,
+            },
+        })
+    }
+}
+
+// ============================================================================
+// Bot Configuration Helpers
+// ============================================================================
+
+/// Create a `BotConfiguration` with `count` bots, each subscribing to all events.
+///
+/// Queue names follow the pattern `queue-keeper-test-bot-N` (1-indexed).
+#[allow(dead_code)]
+pub fn create_test_bot_config(count: usize) -> BotConfiguration {
+    let bots = (1..=count)
+        .map(|i| BotSubscription {
+            name: BotName::new(format!("test-bot-{}", i)).unwrap(),
+            queue: QueueName::new(format!("queue-keeper-test-bot-{}", i)).unwrap(),
+            events: vec![queue_keeper_core::bot_config::EventTypePattern::Wildcard(
+                "*".to_string(),
+            )],
+            ordered: false,
+            repository_filter: None,
+            config: BotSpecificConfig::new(),
+        })
+        .collect();
+
+    BotConfiguration {
+        bots,
+        settings: BotConfigurationSettings::default(),
+    }
+}
+
+/// Create a `BotConfiguration` with no subscriptions (produces NoTargetQueues).
+#[allow(dead_code)]
+pub fn create_empty_bot_config() -> BotConfiguration {
+    BotConfiguration {
+        bots: vec![],
+        settings: BotConfigurationSettings::default(),
+    }
+}
 
 // ============================================================================
 // Mock Webhook Processor
@@ -350,6 +666,13 @@ pub fn create_test_app_state_with_providers(
         metrics,
         telemetry_config,
         std::collections::HashSet::new(),
+        None, // queue_client: disabled in unit/integration tests
+        Arc::new(queue_keeper_core::queue_integration::DefaultEventRouter::new()),
+        Arc::new(queue_keeper_core::bot_config::BotConfiguration {
+            bots: vec![],
+            settings: queue_keeper_core::bot_config::BotConfigurationSettings::default(),
+        }),
+        queue_keeper_api::queue_delivery::QueueDeliveryConfig::default(),
     )
 }
 
