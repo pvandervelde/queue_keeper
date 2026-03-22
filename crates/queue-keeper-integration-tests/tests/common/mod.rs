@@ -30,7 +30,7 @@ use queue_keeper_core::{
 };
 use queue_runtime::{
     Message, MessageId, ProviderType, QueueClient, QueueError, QueueName as RuntimeQueueName,
-    ReceiptHandle, ReceivedMessage, SessionId as RuntimeSessionId, SessionSupport,
+    ReceiptHandle, ReceivedMessage, SessionId as RuntimeSessionId,
 };
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -92,8 +92,9 @@ impl MockQueueClient {
         self.send_results
             .lock()
             .unwrap()
-            .push_back(Err(QueueError::InvalidMessage {
-                message: "simulated permanent failure".to_string(),
+            .push_back(Err(QueueError::MessageTooLarge {
+                size: usize::MAX,
+                max_size: 1,
             }));
     }
 
@@ -251,8 +252,16 @@ impl BlobStorage for MockBlobStorage {
             event_id: *event_id,
             size_bytes: payload.body.len() as u64,
             created_at: Timestamp::now(),
-            etag: "mock-etag".to_string(),
-            checksum: "mock-checksum".to_string(),
+            content_type: "application/json".to_string(),
+            checksum_sha256: "mock-checksum-sha256".to_string(),
+            metadata: queue_keeper_core::blob_storage::PayloadMetadata {
+                event_id: *event_id,
+                event_type: payload.metadata.event_type.clone(),
+                repository: None,
+                signature_valid: true,
+                received_at: Timestamp::now(),
+                delivery_id: None,
+            },
         })
     }
 
@@ -268,8 +277,16 @@ impl BlobStorage for MockBlobStorage {
                     event_id: *id,
                     size_bytes: payload.body.len() as u64,
                     created_at: Timestamp::now(),
-                    etag: "mock-etag".to_string(),
-                    checksum: "mock-checksum".to_string(),
+                    content_type: "application/json".to_string(),
+                    checksum_sha256: "mock-checksum-sha256".to_string(),
+                    metadata: queue_keeper_core::blob_storage::PayloadMetadata {
+                        event_id: *id,
+                        event_type: payload.metadata.event_type.clone(),
+                        repository: None,
+                        signature_valid: true,
+                        received_at: Timestamp::now(),
+                        delivery_id: None,
+                    },
                 },
                 payload: payload.clone(),
             }
