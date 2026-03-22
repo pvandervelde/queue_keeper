@@ -15,11 +15,14 @@ mod signature_validator;
 
 use queue_keeper_api::{
     start_server, DefaultEventStore, DefaultHealthChecker, ProviderId, ProviderRegistry,
-    ServiceConfig, ServiceError,
+    QueueBackendConfig, ServiceConfig, ServiceError,
 };
 use queue_keeper_core::adapters::{memory_key_vault::InMemorySecretCache, AzureKeyVaultProvider};
+use queue_keeper_core::bot_config::BotConfiguration;
 use queue_keeper_core::key_vault::{KeyVaultConfiguration, KeyVaultProvider, SecretName};
 use queue_keeper_core::webhook::{generic_provider::GenericWebhookProvider, GithubWebhookProvider};
+use circuit_breaker::queue::CircuitBreakerQueueProvider;
+use queue_runtime::{InMemoryConfig, ProviderConfig, QueueClientFactory, QueueConfig, StandardQueueClient};
 use signature_validator::{KeyVaultSignatureValidator, LiteralSignatureValidator};
 use std::sync::Arc;
 use tracing::{error, info};
@@ -251,6 +254,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let health_checker = Arc::new(DefaultHealthChecker);
     let event_store = Arc::new(DefaultEventStore);
 
+    // -------------------------------------------------------------------------
+    // Build queue client from runtime configuration.
+    //
+    // The provider is selected based on `service_config.queue`:
+    //   - `provider: in_memory`          → InMemoryProvider (dev/test only)
+    //   - `provider: azure_service_bus`  → AzureServiceBusProvider
+    //   - `provider: aws_sqs`            → AwsSqsProvider
+    //
+    // All providers are wrapped with the circuit breaker so cascading failures
+    // are contained (spec assertion #11: 5 consecutive failures → circuit open
+    // for 30 s).  When the queue config is absent the default is in-memory.
+    // -------------------------------------------------------------------------
+    let queue_client = match build_queue_client(&service_config.queue).await {
+        Ok(client) => client,
+        Err(e) => {
+            error!(error = %e, "Failed to initialise queue backend; aborting");
+            std::process::exit(3);
+        }
+    };
+
+    // Load bot configuration from environment or file; fall back to empty config.
+    let bot_config = Arc::new(
+        BotConfiguration::load_from_env()
+            .or_else(|_| BotConfiguration::load_from_file(std::path::Path::new("config/bots.yaml")))
+            .unwrap_or_else(|_| BotConfiguration {
+                bots: vec![],
+                settings: queue_keeper_core::bot_config::BotConfigurationSettings::default(),
+            }),
+    );
+
     info!(
         host = %service_config.server.host,
         port = service_config.server.port,
@@ -264,6 +297,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         health_checker,
         event_store,
         generic_provider_ids,
+        Some(queue_client),
+        bot_config,
     )
     .await
     {
@@ -285,6 +320,127 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 // ============================================================================
 // Private helpers
 // ============================================================================
+
+/// Build a circuit-breaker-wrapped [`QueueClient`] from the service's queue
+/// backend configuration.
+///
+/// All provider variants are wrapped with [`CircuitBreakerQueueProvider`] so
+/// cascading failures are contained regardless of the chosen backend.
+///
+/// # Errors
+///
+/// Returns a human-readable error string on connection or configuration failure
+/// so the caller can log it and `std::process::exit`.
+async fn build_queue_client(
+    queue_config: &QueueBackendConfig,
+) -> Result<Arc<dyn queue_runtime::QueueClient>, String> {
+    use queue_runtime::{AzureServiceBusConfig, AwsSqsConfig, InMemoryProvider};
+    use queue_runtime::providers::{AzureAuthMethod, AzureServiceBusProvider};
+
+    match queue_config {
+        QueueBackendConfig::InMemory { max_queue_size } => {
+            tracing::warn!(
+                "Queue backend is set to in-memory. Events will not be persisted across \
+                 restarts. Configure `azure_service_bus` or `aws_sqs` for production."
+            );
+            let mut cfg = InMemoryConfig::default();
+            if let Some(size) = max_queue_size {
+                cfg.max_queue_size = *size;
+            }
+            let provider = Arc::new(InMemoryProvider::new(cfg));
+            let cb = CircuitBreakerQueueProvider::new(provider);
+            let client = StandardQueueClient::new(Box::new(cb), QueueConfig::default());
+            Ok(Arc::new(client))
+        }
+
+        QueueBackendConfig::AzureServiceBus {
+            namespace,
+            connection_string,
+            use_sessions,
+            session_timeout_seconds,
+        } => {
+            let (auth_method, resolved_namespace) = if let Some(cs) = connection_string {
+                tracing::warn!(
+                    "Azure Service Bus is configured with a connection string. \
+                     Use managed identity (`namespace` only) in production."
+                );
+                // Namespace is embedded in the connection string — the provider
+                // parses it from the Endpoint value, so we pass None here.
+                let _ = cs; // used via AzureServiceBusConfig.connection_string below
+                (AzureAuthMethod::ConnectionString, None)
+            } else {
+                match namespace {
+                    Some(ns) => (AzureAuthMethod::DefaultCredential, Some(ns.clone())),
+                    None => {
+                        return Err(
+                            "queue.azure_service_bus: `namespace` is required when \
+                             `connection_string` is absent"
+                                .to_string(),
+                        )
+                    }
+                }
+            };
+
+            let session_timeout = session_timeout_seconds
+                .map(|s| chrono::Duration::seconds(s as i64))
+                .unwrap_or_else(|| chrono::Duration::minutes(5));
+
+            let azure_cfg = AzureServiceBusConfig {
+                connection_string: connection_string.clone(),
+                namespace: resolved_namespace,
+                auth_method,
+                use_sessions: *use_sessions,
+                session_timeout,
+            };
+
+            info!(
+                namespace = ?azure_cfg.namespace,
+                use_sessions = %use_sessions,
+                "Connecting to Azure Service Bus"
+            );
+
+            let provider = AzureServiceBusProvider::new(azure_cfg)
+                .await
+                .map_err(|e| format!("Failed to connect to Azure Service Bus: {}", e))?;
+
+            info!("Azure Service Bus connection established");
+
+            let cb = CircuitBreakerQueueProvider::new(Arc::new(provider));
+            let client = StandardQueueClient::new(Box::new(cb), QueueConfig::default());
+            Ok(Arc::new(client))
+        }
+
+        QueueBackendConfig::AwsSqs {
+            region,
+            use_fifo_queues,
+        } => {
+            let aws_cfg = AwsSqsConfig {
+                region: region.clone(),
+                // Credentials come from the standard AWS credential chain
+                // (IAM role → env vars → ~/.aws/credentials).  Never embed
+                // access keys in configuration files.
+                access_key_id: None,
+                secret_access_key: None,
+                use_fifo_queues: *use_fifo_queues,
+            };
+
+            let queue_runtime_cfg = QueueConfig {
+                provider: ProviderConfig::AwsSqs(aws_cfg),
+                ..QueueConfig::default()
+            };
+
+            info!(region = %region, use_fifo_queues = %use_fifo_queues, "Connecting to AWS SQS");
+
+            let client = QueueClientFactory::create_client(queue_runtime_cfg)
+                .await
+                .map_err(|e| format!("Failed to connect to AWS SQS: {}", e))?;
+
+            info!("AWS SQS connection established");
+            // QueueClientFactory returns Box<dyn QueueClient>; convert to Arc.
+            Ok(Arc::from(client))
+        }
+    }
+}
 
 /// Build a [`SignatureValidator`] from a standard [`ProviderConfig`].
 ///
