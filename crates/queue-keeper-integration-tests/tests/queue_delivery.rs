@@ -231,7 +231,7 @@ async fn test_partial_delivery_failure_tracking() {
     let event_router = Arc::new(DefaultEventRouter::new());
     let config = QueueDeliveryConfig {
         retry_policy: RetryPolicy {
-            max_attempts: 1, // no retries for this test
+            max_attempts: 0, // 0 retries = 1 attempt total, no retry loop
             initial_delay: Duration::from_millis(10),
             max_delay: Duration::from_millis(50),
             backoff_multiplier: 2.0,
@@ -252,9 +252,9 @@ async fn test_partial_delivery_failure_tracking() {
     )
     .await;
 
-    // Assert: failure reported; the partial-delivery error is treated by the
-    // retry loop as transient, but with max_attempts=1 it converts to
-    // CompleteFailure after exhausting the single attempt.
+    // Assert: failure reported; the partial-delivery error is classified as
+    // transient (PartialDelivery), but with max_attempts=0 (no retries allowed)
+    // it immediately converts to CompleteFailure.
     assert!(
         matches!(outcome, QueueDeliveryOutcome::CompleteFailure { .. }),
         "Expected CompleteFailure for partial delivery with max_attempts=1, got {:?}",
@@ -316,7 +316,7 @@ async fn test_dlq_after_max_retries() {
 
     let config = QueueDeliveryConfig {
         retry_policy: RetryPolicy {
-            max_attempts: 3,
+            max_attempts: 2, // 2 retries = 3 total sends (1 initial + 2 retries)
             initial_delay: Duration::from_millis(5),
             max_delay: Duration::from_millis(20),
             backoff_multiplier: 2.0,
@@ -349,7 +349,7 @@ async fn test_dlq_after_max_retries() {
         "Expected CompleteFailure with persisted_to_dlq=true, got {:?}",
         outcome
     );
-    // All 3 attempts were made (max_attempts=3)
+    // 3 total sends: 1 initial + 2 retries (max_attempts=2 means 2 retries)
     assert_eq!(queue_client.send_count(), 3);
     // Exactly 1 DLQ record persisted
     assert_eq!(
