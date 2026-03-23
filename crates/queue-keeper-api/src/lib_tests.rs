@@ -122,6 +122,13 @@ fn test_app_state(registry: ProviderRegistry) -> AppState {
             "test".to_string(),
         )),
         std::collections::HashSet::new(),
+        None, // queue delivery disabled in unit tests
+        Arc::new(queue_keeper_core::queue_integration::DefaultEventRouter::new()),
+        Arc::new(queue_keeper_core::bot_config::BotConfiguration {
+            bots: vec![],
+            settings: queue_keeper_core::bot_config::BotConfigurationSettings::default(),
+        }),
+        queue_delivery::QueueDeliveryConfig::default(),
     )
 }
 
