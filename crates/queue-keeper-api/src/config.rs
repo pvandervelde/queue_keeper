@@ -177,6 +177,11 @@ impl ServiceConfig {
             }
         }
 
+        // Validate queue backend configuration
+        self.queue
+            .validate()
+            .map_err(|msg| ConfigError::ProviderValidation { message: msg })?;
+
         Ok(())
     }
 }
@@ -654,6 +659,42 @@ pub enum QueueBackendConfig {
 
 fn default_queue_true() -> bool {
     true
+}
+
+impl QueueBackendConfig {
+    /// Validate the queue backend configuration for completeness.
+    ///
+    /// Returns an error string describing the first problem found.
+    ///
+    /// # Errors
+    ///
+    /// - `AzureServiceBus` with neither `namespace` nor `connection_string` set.
+    /// - `AwsSqs` with an empty `region`.
+    pub fn validate(&self) -> Result<(), String> {
+        match self {
+            Self::InMemory { .. } => Ok(()),
+            Self::AzureServiceBus {
+                namespace,
+                connection_string,
+                ..
+            } => {
+                if namespace.is_none() && connection_string.is_none() {
+                    return Err(
+                        "queue.azure_service_bus: either `namespace` or `connection_string` \
+                         must be provided"
+                            .to_string(),
+                    );
+                }
+                Ok(())
+            }
+            Self::AwsSqs { region, .. } => {
+                if region.is_empty() {
+                    return Err("queue.aws_sqs: `region` must not be empty".to_string());
+                }
+                Ok(())
+            }
+        }
+    }
 }
 
 impl Default for QueueBackendConfig {
