@@ -27,6 +27,7 @@ pub mod retry;
 // mod middleware;
 // mod responses;
 
+use crate::queue_delivery::{spawn_queue_delivery, QueueDeliveryConfig};
 use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
@@ -41,7 +42,7 @@ use queue_keeper_core::{
     bot_config::BotConfiguration,
     monitoring::MetricsCollector,
     queue_integration::{DefaultEventRouter, EventRouter},
-    webhook::{WebhookHeaders, WebhookRequest, ProcessingOutput},
+    webhook::{ProcessingOutput, WebhookHeaders, WebhookRequest},
     EventId, SessionId, Timestamp,
 };
 use queue_runtime::QueueClient;
@@ -53,7 +54,6 @@ use std::{
 use tower::ServiceBuilder;
 use tower_http::{compression::CompressionLayer, cors::CorsLayer, trace::TraceLayer};
 use tracing::{error, info, instrument, warn};
-use crate::queue_delivery::{spawn_queue_delivery, QueueDeliveryConfig};
 
 // Re-export public types
 pub use azure_config::{
@@ -458,13 +458,28 @@ pub async fn handle_provider_webhook(
     // the event router.
     if let ProcessingOutput::Wrapped(wrapped_event) = processing_output {
         if let Some(queue_client) = &state.queue_client {
-            spawn_queue_delivery(
+            let handle = spawn_queue_delivery(
                 wrapped_event,
                 state.event_router.clone(),
                 state.bot_config.clone(),
                 queue_client.clone(),
                 state.delivery_config.clone(),
             );
+            // Detach the task but monitor for panics: if the delivery task
+            // panics the JoinHandle will hold the panic payload until dropped.
+            // Spawning a watcher task ensures the panic is surfaced in logs
+            // rather than silently discarded, and allows tracing the event_id.
+            let logged_event_id = event_id;
+            tokio::spawn(async move {
+                if let Err(join_err) = handle.await {
+                    if join_err.is_panic() {
+                        error!(
+                            event_id = %logged_event_id,
+                            "Queue delivery task panicked — event may not have been delivered"
+                        );
+                    }
+                }
+            });
         }
     }
 

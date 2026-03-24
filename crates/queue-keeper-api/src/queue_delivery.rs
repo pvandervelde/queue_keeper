@@ -29,27 +29,24 @@ use tracing::{error, info, warn};
 /// Configuration for queue delivery retry behavior
 ///
 /// Encapsulates retry policy and DLQ settings for queue delivery operations.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct QueueDeliveryConfig {
     /// Retry policy for transient failures
     pub retry_policy: RetryPolicy,
 
-    /// Enable DLQ persistence for permanent failures
+    /// Enable DLQ persistence for permanent failures.
+    ///
+    /// Defaults to `false`. Without a configured `dlq_service` the flag is
+    /// meaningless; a `true` default would misleadingly suggest events are
+    /// being durably recorded when they are not. Set to `true` together with
+    /// `dlq_service` to enable DLQ persistence.
     pub enable_dlq: bool,
 
-    /// Optional DLQ storage service for persisting failed events
-    /// When None and enable_dlq is true, failures will be logged but not persisted
+    /// Optional DLQ storage service for persisting failed events.
+    ///
+    /// When `None`, failed events that exhaust retries are logged but not
+    /// persisted. `enable_dlq` must also be `true` for persistence to occur.
     pub dlq_service: Option<Arc<DlqStorageService>>,
-}
-
-impl Default for QueueDeliveryConfig {
-    fn default() -> Self {
-        Self {
-            retry_policy: RetryPolicy::default(),
-            enable_dlq: true,
-            dlq_service: None,
-        }
-    }
 }
 
 impl QueueDeliveryConfig {

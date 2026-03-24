@@ -69,22 +69,20 @@ impl MockQueueClient {
     /// Queue an explicit success result for the next `send_message` call.
     pub fn expect_success(&self) -> MessageId {
         let id = MessageId::new();
-        self.send_results
-            .lock()
-            .unwrap()
-            .push_back(Ok(id.clone()));
+        self.send_results.lock().unwrap().push_back(Ok(id.clone()));
         id
     }
 
     /// Queue an explicit transient failure for the next `send_message` call.
     pub fn expect_transient_failure(&self) {
-        self.send_results.lock().unwrap().push_back(Err(
-            QueueError::ProviderError {
+        self.send_results
+            .lock()
+            .unwrap()
+            .push_back(Err(QueueError::ProviderError {
                 provider: "MockQueue".to_string(),
                 code: "TransientError".to_string(),
                 message: "simulated transient failure".to_string(),
-            },
-        ));
+            }));
     }
 
     /// Queue an explicit permanent failure for the next `send_message` call.
@@ -246,7 +244,10 @@ impl BlobStorage for MockBlobStorage {
         event_id: &EventId,
         payload: &WebhookPayload,
     ) -> Result<BlobMetadata, BlobStorageError> {
-        self.stored.lock().unwrap().push((*event_id, payload.clone()));
+        self.stored
+            .lock()
+            .unwrap()
+            .push((*event_id, payload.clone()));
         Ok(BlobMetadata {
             blob_path: format!("mock/{}.json", event_id),
             event_id: *event_id,
@@ -270,8 +271,10 @@ impl BlobStorage for MockBlobStorage {
         event_id: &EventId,
     ) -> Result<Option<StoredWebhook>, BlobStorageError> {
         let stored = self.stored.lock().unwrap();
-        Ok(stored.iter().find(|(id, _)| id == event_id).map(|(id, payload)| {
-            StoredWebhook {
+        Ok(stored
+            .iter()
+            .find(|(id, _)| id == event_id)
+            .map(|(id, payload)| StoredWebhook {
                 metadata: BlobMetadata {
                     blob_path: format!("mock/{}.json", id),
                     event_id: *id,
@@ -289,8 +292,7 @@ impl BlobStorage for MockBlobStorage {
                     },
                 },
                 payload: payload.clone(),
-            }
-        }))
+            }))
     }
 
     async fn list_payloads(

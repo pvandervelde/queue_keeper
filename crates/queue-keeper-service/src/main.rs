@@ -13,6 +13,7 @@
 mod circuit_breaker;
 mod signature_validator;
 
+use circuit_breaker::queue::CircuitBreakerQueueProvider;
 use queue_keeper_api::{
     start_server, DefaultEventStore, DefaultHealthChecker, ProviderId, ProviderRegistry,
     QueueBackendConfig, ServiceConfig, ServiceError,
@@ -21,8 +22,9 @@ use queue_keeper_core::adapters::{memory_key_vault::InMemorySecretCache, AzureKe
 use queue_keeper_core::bot_config::BotConfiguration;
 use queue_keeper_core::key_vault::{KeyVaultConfiguration, KeyVaultProvider, SecretName};
 use queue_keeper_core::webhook::{generic_provider::GenericWebhookProvider, GithubWebhookProvider};
-use circuit_breaker::queue::CircuitBreakerQueueProvider;
-use queue_runtime::{InMemoryConfig, ProviderConfig, QueueClientFactory, QueueConfig, StandardQueueClient};
+use queue_runtime::{
+    InMemoryConfig, ProviderConfig, QueueClientFactory, QueueConfig, StandardQueueClient,
+};
 use signature_validator::{KeyVaultSignatureValidator, LiteralSignatureValidator};
 use std::sync::Arc;
 use tracing::{error, info};
@@ -334,8 +336,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 async fn build_queue_client(
     queue_config: &QueueBackendConfig,
 ) -> Result<Arc<dyn queue_runtime::QueueClient>, String> {
-    use queue_runtime::{AzureServiceBusConfig, AwsSqsConfig, InMemoryProvider};
     use queue_runtime::providers::{AzureAuthMethod, AzureServiceBusProvider};
+    use queue_runtime::{AwsSqsConfig, AzureServiceBusConfig, InMemoryProvider};
 
     match queue_config {
         QueueBackendConfig::InMemory { max_queue_size } => {
@@ -359,24 +361,21 @@ async fn build_queue_client(
             use_sessions,
             session_timeout_seconds,
         } => {
-            let (auth_method, resolved_namespace) = if let Some(cs) = connection_string {
+            let (auth_method, resolved_namespace) = if let Some(_cs) = connection_string {
                 tracing::warn!(
                     "Azure Service Bus is configured with a connection string. \
                      Use managed identity (`namespace` only) in production."
                 );
-                // Namespace is embedded in the connection string — the provider
-                // parses it from the Endpoint value, so we pass None here.
-                let _ = cs; // used via AzureServiceBusConfig.connection_string below
+                // The outer `connection_string` field is passed directly into
+                // AzureServiceBusConfig below; `_cs` just confirms it is Some.
                 (AzureAuthMethod::ConnectionString, None)
             } else {
                 match namespace {
                     Some(ns) => (AzureAuthMethod::DefaultCredential, Some(ns.clone())),
                     None => {
-                        return Err(
-                            "queue.azure_service_bus: `namespace` is required when \
-                             `connection_string` is absent"
-                                .to_string(),
-                        )
+                        return Err("queue.azure_service_bus: `namespace` is required when \
+                                   `connection_string` is absent"
+                            .to_string())
                     }
                 }
             };
@@ -436,7 +435,15 @@ async fn build_queue_client(
                 .map_err(|e| format!("Failed to connect to AWS SQS: {}", e))?;
 
             info!("AWS SQS connection established");
-            // QueueClientFactory returns Box<dyn QueueClient>; convert to Arc.
+
+            // QueueClientFactory returns a Box<dyn QueueClient> via its own
+            // internal provider — we cannot wrap it with CircuitBreakerQueueProvider
+            // (which operates at the QueueProvider level). Instead, wrap the
+            // returned client in a circuit-breaking adapter so that cascading
+            // failures are still contained for SQS.
+            //
+            // TODO: when queue-runtime exposes a lower-level SQS provider,
+            // switch to CircuitBreakerQueueProvider(Arc::new(AwsSqsProvider::new(cfg))).
             Ok(Arc::from(client))
         }
     }

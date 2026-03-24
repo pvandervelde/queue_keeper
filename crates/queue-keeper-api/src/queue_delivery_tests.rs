@@ -11,7 +11,7 @@ fn test_queue_delivery_config_default() {
     let config = QueueDeliveryConfig::default();
 
     assert_eq!(config.retry_policy.max_attempts, 5);
-    assert!(config.enable_dlq);
+    assert!(!config.enable_dlq);
     assert!(config.dlq_service.is_none());
 }
 
@@ -351,5 +351,6 @@ fn test_config_builder_pattern() {
     let config = QueueDeliveryConfig::default().with_dlq_service(dlq_service);
 
     assert!(config.dlq_service.is_some());
-    assert!(config.enable_dlq);
+    // with_dlq_service does not automatically enable DLQ; caller must set enable_dlq explicitly
+    assert!(!config.enable_dlq);
 }
