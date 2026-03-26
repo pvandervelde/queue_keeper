@@ -18,7 +18,6 @@ use queue_runtime::{
 /// Wraps queue_runtime::QueueProvider with circuit breaker protection to prevent
 /// cascading failures when queue service experiences issues.
 #[derive(Clone)]
-#[allow(dead_code)]
 pub struct CircuitBreakerQueueProvider {
     /// Underlying queue provider
     inner: Arc<dyn QueueProvider>,
@@ -27,7 +26,6 @@ pub struct CircuitBreakerQueueProvider {
     circuit_breaker_receive: DefaultCircuitBreaker<Vec<ReceivedMessage>, QueueError>,
 }
 
-#[allow(dead_code)]
 impl CircuitBreakerQueueProvider {
     /// Create new circuit breaker protected queue provider.
     ///
@@ -73,6 +71,8 @@ impl QueueProvider for CircuitBreakerQueueProvider {
                 Ok(vec![message_id])
             })
             .await
+            // INVARIANT: the closure always returns Ok(vec![one_id]), so the
+            // vec is guaranteed to have exactly one element; unwrap cannot panic.
             .map(|ids| ids.into_iter().next().unwrap())
             .map_err(|e| match e {
                 CircuitBreakerError::CircuitOpen => QueueError::ProviderError {
@@ -357,6 +357,8 @@ impl QueueClient for CircuitBreakerQueueClient {
                 Ok(vec![message_id])
             })
             .await
+            // INVARIANT: the closure always returns Ok(vec![one_id]), so the
+            // vec is guaranteed to have exactly one element; unwrap cannot panic.
             .map(|ids| ids.into_iter().next().unwrap())
             .map_err(map_send_cb_error)
     }
