@@ -1,4 +1,4 @@
-//! Tests for CircuitBreakerQueueProvider wrapper.
+//! Tests for CircuitBreakerQueueProvider and CircuitBreakerQueueClient wrappers.
 
 use std::sync::Arc;
 
@@ -6,12 +6,12 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use chrono::Duration;
 use queue_runtime::{
-    InMemoryConfig, InMemoryProvider, Message, MessageId, ProviderType, QueueError, QueueName,
-    QueueProvider, ReceiptHandle, ReceivedMessage, SessionId, SessionProvider, SessionSupport,
-    Timestamp,
+    InMemoryConfig, InMemoryProvider, Message, MessageId, ProviderType, QueueClient, QueueError,
+    QueueName, QueueProvider, ReceiptHandle, ReceivedMessage, SessionClient, SessionId,
+    SessionProvider, SessionSupport, Timestamp,
 };
 
-use super::CircuitBreakerQueueProvider;
+use super::{CircuitBreakerQueueClient, CircuitBreakerQueueProvider};
 
 // ============================================================================
 // Mock Failing Provider
@@ -475,4 +475,372 @@ async fn test_separate_circuit_breakers() {
         .await;
     assert!(receive_result.is_err());
     // First few receive attempts should be operation failures, not circuit breaker
+}
+
+// ============================================================================
+// CircuitBreakerQueueClient — Mock Infrastructure
+// ============================================================================
+
+/// Mock `QueueClient` that always fails on send/batch-receive, recording call counts.
+#[derive(Clone)]
+struct FailingQueueClient {
+    failure_count: Arc<std::sync::Mutex<u32>>,
+}
+
+impl FailingQueueClient {
+    fn new() -> Self {
+        Self {
+            failure_count: Arc::new(std::sync::Mutex::new(0)),
+        }
+    }
+
+    fn failure_count(&self) -> u32 {
+        *self.failure_count.lock().unwrap()
+    }
+}
+
+#[async_trait]
+impl QueueClient for FailingQueueClient {
+    async fn send_message(
+        &self,
+        _queue: &QueueName,
+        _message: Message,
+    ) -> Result<MessageId, QueueError> {
+        *self.failure_count.lock().unwrap() += 1;
+        Err(QueueError::ProviderError {
+            provider: "FailingMockClient".to_string(),
+            code: "ServiceUnavailable".to_string(),
+            message: "Mock client failure".to_string(),
+        })
+    }
+
+    async fn send_messages(
+        &self,
+        _queue: &QueueName,
+        _messages: Vec<Message>,
+    ) -> Result<Vec<MessageId>, QueueError> {
+        *self.failure_count.lock().unwrap() += 1;
+        Err(QueueError::ProviderError {
+            provider: "FailingMockClient".to_string(),
+            code: "ServiceUnavailable".to_string(),
+            message: "Mock client batch failure".to_string(),
+        })
+    }
+
+    async fn receive_message(
+        &self,
+        _queue: &QueueName,
+        _timeout: Duration,
+    ) -> Result<Option<ReceivedMessage>, QueueError> {
+        Ok(None)
+    }
+
+    async fn receive_messages(
+        &self,
+        _queue: &QueueName,
+        _max_messages: u32,
+        _timeout: Duration,
+    ) -> Result<Vec<ReceivedMessage>, QueueError> {
+        *self.failure_count.lock().unwrap() += 1;
+        Err(QueueError::ProviderError {
+            provider: "FailingMockClient".to_string(),
+            code: "ServiceUnavailable".to_string(),
+            message: "Mock client receive failure".to_string(),
+        })
+    }
+
+    async fn complete_message(&self, _receipt: ReceiptHandle) -> Result<(), QueueError> {
+        Ok(())
+    }
+
+    async fn abandon_message(&self, _receipt: ReceiptHandle) -> Result<(), QueueError> {
+        Ok(())
+    }
+
+    async fn dead_letter_message(
+        &self,
+        _receipt: ReceiptHandle,
+        _reason: String,
+    ) -> Result<(), QueueError> {
+        Ok(())
+    }
+
+    async fn accept_session(
+        &self,
+        _queue: &QueueName,
+        _session_id: Option<SessionId>,
+    ) -> Result<Box<dyn SessionClient>, QueueError> {
+        Err(QueueError::ProviderError {
+            provider: "FailingMockClient".to_string(),
+            code: "Unsupported".to_string(),
+            message: "sessions not supported".to_string(),
+        })
+    }
+
+    fn provider_type(&self) -> ProviderType {
+        ProviderType::AwsSqs
+    }
+
+    fn supports_sessions(&self) -> bool {
+        false
+    }
+
+    fn supports_batching(&self) -> bool {
+        true
+    }
+}
+
+fn create_failing_client() -> (CircuitBreakerQueueClient, Arc<FailingQueueClient>) {
+    let failing = Arc::new(FailingQueueClient::new());
+    let wrapper = CircuitBreakerQueueClient::new(failing.clone() as Arc<dyn QueueClient>);
+    (wrapper, failing)
+}
+
+// ============================================================================
+// CircuitBreakerQueueClient — Construction Tests
+// ============================================================================
+
+/// Verify CircuitBreakerQueueClient creation and metadata passthrough.
+#[test]
+fn test_circuit_breaker_queue_client_creation() {
+    let (client, _) = create_failing_client();
+    assert_eq!(client.inner().provider_type(), ProviderType::AwsSqs);
+}
+
+/// Verify Clone works for CircuitBreakerQueueClient.
+#[test]
+fn test_circuit_breaker_queue_client_clone() {
+    let (client, _) = create_failing_client();
+    let cloned = client.clone();
+    assert_eq!(cloned.provider_type(), ProviderType::AwsSqs);
+}
+
+// ============================================================================
+// CircuitBreakerQueueClient — Send Circuit Breaker Tests
+// ============================================================================
+
+/// Verify send_message is protected by circuit breaker.
+#[tokio::test]
+async fn test_queue_client_send_message_circuit_protection() {
+    let (client, failing) = create_failing_client();
+    let queue = QueueName::new("test-queue".to_string()).unwrap();
+
+    // Trip the circuit breaker with 5 failures.
+    for i in 0..5 {
+        let result = client
+            .send_message(&queue, Message::new(Bytes::from("msg")))
+            .await;
+        assert!(result.is_err(), "Attempt {} should fail", i + 1);
+    }
+    assert_eq!(failing.failure_count(), 5);
+
+    // 6th attempt should be blocked by open circuit — failure count stays at 5.
+    let result = client
+        .send_message(&queue, Message::new(Bytes::from("msg")))
+        .await;
+    assert!(result.is_err());
+    if let Err(QueueError::ProviderError { code, .. }) = result {
+        assert_eq!(code, "CircuitOpen", "Expected CircuitOpen, got {}", code);
+    } else {
+        panic!("Expected ProviderError");
+    }
+    assert_eq!(
+        failing.failure_count(),
+        5,
+        "Failure count must not increase when circuit is open"
+    );
+}
+
+/// Verify send_messages batch operation is protected by the send circuit breaker.
+#[tokio::test]
+async fn test_queue_client_send_messages_circuit_protection() {
+    let (client, failing) = create_failing_client();
+    let queue = QueueName::new("test-queue".to_string()).unwrap();
+    let msgs = vec![
+        Message::new(Bytes::from("a")),
+        Message::new(Bytes::from("b")),
+    ];
+
+    for _ in 0..5 {
+        let _ = client.send_messages(&queue, msgs.clone()).await;
+    }
+    assert_eq!(failing.failure_count(), 5);
+
+    let result = client.send_messages(&queue, msgs).await;
+    assert!(matches!(
+        result,
+        Err(QueueError::ProviderError { ref code, .. }) if code == "CircuitOpen"
+    ));
+}
+
+// ============================================================================
+// CircuitBreakerQueueClient — Receive Circuit Breaker Tests
+// ============================================================================
+
+/// Verify receive_messages batch operation is protected by its own circuit breaker.
+#[tokio::test]
+async fn test_queue_client_receive_messages_circuit_protection() {
+    let (client, failing) = create_failing_client();
+    let queue = QueueName::new("test-queue".to_string()).unwrap();
+
+    for _ in 0..5 {
+        let _ = client
+            .receive_messages(&queue, 10, Duration::seconds(1))
+            .await;
+    }
+    assert_eq!(failing.failure_count(), 5);
+
+    let result = client
+        .receive_messages(&queue, 10, Duration::seconds(1))
+        .await;
+    assert!(matches!(
+        result,
+        Err(QueueError::ProviderError { ref code, .. }) if code == "CircuitOpen"
+    ));
+}
+
+/// Verify receive_message (single) passes through without circuit breaker.
+#[tokio::test]
+async fn test_queue_client_receive_message_passthrough() {
+    let (client, _) = create_failing_client();
+    let queue = QueueName::new("test-queue".to_string()).unwrap();
+
+    // FailingQueueClient returns Ok(None) for receive_message — should pass through.
+    let result = client.receive_message(&queue, Duration::seconds(1)).await;
+    assert!(result.is_ok());
+    assert!(result.unwrap().is_none());
+}
+
+// ============================================================================
+// CircuitBreakerQueueClient — Pass-Through Operation Tests
+// ============================================================================
+
+/// Verify complete_message passes through without circuit breaker involvement.
+#[tokio::test]
+async fn test_queue_client_complete_message_passthrough() {
+    let (client, _) = create_failing_client();
+    let receipt = ReceiptHandle::new(
+        "receipt-123".to_string(),
+        Timestamp::now(),
+        ProviderType::AwsSqs,
+    );
+    let result = client.complete_message(receipt).await;
+    assert!(result.is_ok(), "complete_message should pass through");
+}
+
+/// Verify abandon_message passes through without circuit breaker involvement.
+#[tokio::test]
+async fn test_queue_client_abandon_message_passthrough() {
+    let (client, _) = create_failing_client();
+    let receipt = ReceiptHandle::new(
+        "receipt-456".to_string(),
+        Timestamp::now(),
+        ProviderType::AwsSqs,
+    );
+    let result = client.abandon_message(receipt).await;
+    assert!(result.is_ok(), "abandon_message should pass through");
+}
+
+/// Verify dead_letter_message passes through without circuit breaker involvement.
+#[tokio::test]
+async fn test_queue_client_dead_letter_message_passthrough() {
+    let (client, _) = create_failing_client();
+    let receipt = ReceiptHandle::new(
+        "receipt-789".to_string(),
+        Timestamp::now(),
+        ProviderType::AwsSqs,
+    );
+    let result = client
+        .dead_letter_message(receipt, "test reason".to_string())
+        .await;
+    assert!(result.is_ok(), "dead_letter_message should pass through");
+}
+
+// ============================================================================
+// CircuitBreakerQueueClient — Metadata Passthrough Tests
+// ============================================================================
+
+/// Verify metadata methods delegate directly to the inner client.
+#[test]
+fn test_queue_client_metadata_passthrough() {
+    let (client, _) = create_failing_client();
+    assert_eq!(client.provider_type(), ProviderType::AwsSqs);
+    assert!(!client.supports_sessions());
+    assert!(client.supports_batching());
+}
+
+// ============================================================================
+// CircuitBreakerQueueClient — Error Mapping Tests
+// ============================================================================
+
+/// Verify CircuitOpen error is mapped correctly for send operations.
+#[tokio::test]
+async fn test_queue_client_circuit_open_error_mapping() {
+    let (client, _) = create_failing_client();
+    let queue = QueueName::new("test-queue".to_string()).unwrap();
+
+    // Trip the circuit.
+    for _ in 0..5 {
+        let _ = client
+            .send_message(&queue, Message::new(Bytes::from("x")))
+            .await;
+    }
+
+    let result = client
+        .send_message(&queue, Message::new(Bytes::from("x")))
+        .await;
+    match result.unwrap_err() {
+        QueueError::ProviderError {
+            provider,
+            code,
+            message,
+        } => {
+            assert_eq!(provider, "CircuitBreaker");
+            assert_eq!(code, "CircuitOpen");
+            assert!(
+                message.contains("circuit breaker is open"),
+                "Message was: {}",
+                message
+            );
+        }
+        other => panic!("Expected ProviderError, got {:?}", other),
+    }
+}
+
+/// Verify send and receive circuit breakers are independent.
+#[tokio::test]
+async fn test_queue_client_separate_send_receive_circuit_breakers() {
+    let (client, _) = create_failing_client();
+    let queue = QueueName::new("test-queue".to_string()).unwrap();
+
+    // Trip the send circuit.
+    for _ in 0..5 {
+        let _ = client
+            .send_message(&queue, Message::new(Bytes::from("x")))
+            .await;
+    }
+
+    // Send is blocked.
+    let send_result = client
+        .send_message(&queue, Message::new(Bytes::from("x")))
+        .await;
+    assert!(matches!(
+        send_result,
+        Err(QueueError::ProviderError { ref code, .. }) if code == "CircuitOpen"
+    ));
+
+    // Receive circuit is independent — first attempt should be an operation
+    // failure (not "CircuitOpen") because its circuit has not been tripped yet.
+    let receive_result = client
+        .receive_messages(&queue, 10, Duration::seconds(1))
+        .await;
+    match receive_result {
+        Err(QueueError::ProviderError { code, .. }) => {
+            assert_ne!(
+                code, "CircuitOpen",
+                "Receive circuit should still be closed"
+            );
+        }
+        other => panic!("Expected ProviderError from failing mock, got {:?}", other),
+    }
 }

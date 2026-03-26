@@ -13,7 +13,7 @@
 mod circuit_breaker;
 mod signature_validator;
 
-use circuit_breaker::queue::CircuitBreakerQueueProvider;
+use circuit_breaker::queue::{CircuitBreakerQueueClient, CircuitBreakerQueueProvider};
 use queue_keeper_api::{
     start_server, DefaultEventStore, DefaultHealthChecker, ProviderId, ProviderRegistry,
     QueueBackendConfig, ServiceConfig, ServiceError,
@@ -436,15 +436,11 @@ async fn build_queue_client(
 
             info!("AWS SQS connection established");
 
-            // QueueClientFactory returns a Box<dyn QueueClient> via its own
-            // internal provider — we cannot wrap it with CircuitBreakerQueueProvider
-            // (which operates at the QueueProvider level). Instead, wrap the
-            // returned client in a circuit-breaking adapter so that cascading
-            // failures are still contained for SQS.
-            //
-            // TODO: when queue-runtime exposes a lower-level SQS provider,
-            // switch to CircuitBreakerQueueProvider(Arc::new(AwsSqsProvider::new(cfg))).
-            Ok(Arc::from(client))
+            // QueueClientFactory returns a Box<dyn QueueClient> via its own internal
+            // provider — wrap it with CircuitBreakerQueueClient so cascading failures
+            // are contained the same way they are for Azure Service Bus.
+            let cb_client = CircuitBreakerQueueClient::new(Arc::from(client));
+            Ok(Arc::new(cb_client))
         }
     }
 }
