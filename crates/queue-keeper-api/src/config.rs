@@ -58,6 +58,18 @@ pub struct ServiceConfig {
     /// startup will fail if any provider requests Key Vault secrets.
     #[serde(default)]
     pub key_vault: Option<AzureKeyVaultConfig>,
+
+    /// Queue backend provider configuration.
+    ///
+    /// Selects and configures the message queue used for routing processed
+    /// webhook events to bot queues. Defaults to `in_memory` when absent,
+    /// which is suitable for development only — events are not persisted
+    /// across restarts.
+    ///
+    /// See [`QueueBackendConfig`] for the full set of providers and their
+    /// YAML shapes.
+    #[serde(default)]
+    pub queue: QueueBackendConfig,
 }
 
 impl ServiceConfig {
@@ -164,6 +176,11 @@ impl ServiceConfig {
                 Some(_) => {} // valid
             }
         }
+
+        // Validate queue backend configuration
+        self.queue
+            .validate()
+            .map_err(|msg| ConfigError::ProviderValidation { message: msg })?;
 
         Ok(())
     }
@@ -517,6 +534,208 @@ impl Default for LoggingConfig {
             level: "info".to_string(),
             json_format: false,
             file_path: None,
+        }
+    }
+}
+
+// ============================================================================
+// Queue Backend Configuration
+// ============================================================================
+
+/// Queue backend provider selection and configuration.
+///
+/// Controls which message queue provider the service uses for routing
+/// processed webhook events to bot queues. When absent the in-memory
+/// provider is used (development / testing only — data is lost on restart).
+///
+/// # YAML examples
+///
+/// ```yaml
+/// # Azure Service Bus — managed identity (production)
+/// queue:
+///   provider: azure_service_bus
+///   namespace: mybus.servicebus.windows.net
+///   use_sessions: true
+///
+/// # Azure Service Bus — connection string (dev/test only)
+/// queue:
+///   provider: azure_service_bus
+///   connection_string: "Endpoint=sb://mybus.servicebus.windows.net/;SharedAccessKeyName=..."
+///
+/// # AWS SQS (production — uses IAM role credential chain)
+/// queue:
+///   provider: aws_sqs
+///   region: us-east-1
+///   use_fifo_queues: true
+///
+/// # In-memory (development only)
+/// queue:
+///   provider: in_memory
+/// ```
+///
+/// # Production guidance
+///
+/// Always configure a durable provider in production:
+/// - **Azure Service Bus**: omit `connection_string`, set `namespace`, and assign
+///   the Service Bus Data Sender/Receiver role to the pod's managed identity.
+/// - **AWS SQS**: omit explicit credentials, attach an IAM role with
+///   `sqs:SendMessage` and `sqs:ReceiveMessage` permissions to the workload.
+///
+/// The in-memory backend must not be used in production because events are not
+/// persisted across restarts and no dead-letter queue semantics are guaranteed.
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(tag = "provider", rename_all = "snake_case")]
+pub enum QueueBackendConfig {
+    /// In-memory provider. **Development and testing only.**
+    ///
+    /// A `WARN` is emitted at startup when this variant is active.
+    /// Events are not persisted; all data is lost on restart.
+    #[serde(rename = "in_memory")]
+    InMemory {
+        /// Maximum number of messages held per queue. Defaults to 10 000.
+        #[serde(default)]
+        max_queue_size: Option<usize>,
+    },
+
+    /// Azure Service Bus.
+    ///
+    /// Provide either `namespace` (managed identity / DefaultCredential) or
+    /// `connection_string` (dev/test SharedAccessKey auth, emits `WARN`).
+    /// `namespace` is required when `connection_string` is absent.
+    #[serde(rename = "azure_service_bus")]
+    AzureServiceBus {
+        /// Fully-qualified Service Bus namespace hostname.
+        ///
+        /// e.g. `mybus.servicebus.windows.net`
+        ///
+        /// Required when `connection_string` is absent. The credential used
+        /// is the DefaultAzureCredential chain: managed identity → env vars
+        /// (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_CLIENT_SECRET`) →
+        /// Azure CLI.
+        #[serde(default)]
+        namespace: Option<String>,
+
+        /// Connection string (development / testing only).
+        ///
+        /// When present overrides `namespace` and uses SharedAccessKey auth.
+        /// **Never use in production.** A `WARN` is emitted at startup.
+        ///
+        /// Excluded from serialization (e.g. `/admin/config` response) so
+        /// the secret key embedded in the string is never returned by the API.
+        #[serde(default, skip_serializing)]
+        connection_string: Option<String>,
+
+        /// Enable session-ordered delivery (default: `true`).
+        ///
+        /// Must match the session enablement setting on the target queues.
+        /// When `true`, messages for the same session are delivered in order.
+        #[serde(default = "default_queue_true")]
+        use_sessions: bool,
+
+        /// Session lock duration in seconds (default: 300 = 5 minutes).
+        #[serde(default)]
+        session_timeout_seconds: Option<u64>,
+    },
+
+    /// AWS SQS.
+    ///
+    /// Uses the standard AWS credential chain: IAM role, `AWS_ACCESS_KEY_ID` /
+    /// `AWS_SECRET_ACCESS_KEY` environment variables, or `~/.aws/credentials`.
+    /// In production, attach an IAM role with `sqs:SendMessage` and
+    /// `sqs:ReceiveMessage` permissions to the compute resource.
+    #[serde(rename = "aws_sqs")]
+    AwsSqs {
+        /// AWS region (e.g. `us-east-1`).
+        region: String,
+
+        /// Use FIFO queues for ordered delivery (default: `true`).
+        ///
+        /// FIFO queues enforce strict ordering at the cost of lower
+        /// throughput. Required for session-ordered bot delivery.
+        #[serde(default = "default_queue_true")]
+        use_fifo_queues: bool,
+    },
+}
+
+fn default_queue_true() -> bool {
+    true
+}
+
+impl QueueBackendConfig {
+    /// Validate the queue backend configuration for completeness.
+    ///
+    /// Returns an error string describing the first problem found.
+    ///
+    /// # Errors
+    ///
+    /// - `AzureServiceBus` with neither `namespace` nor `connection_string` set.
+    /// - `AwsSqs` with an empty `region`.
+    pub fn validate(&self) -> Result<(), String> {
+        match self {
+            Self::InMemory { .. } => Ok(()),
+            Self::AzureServiceBus {
+                namespace,
+                connection_string,
+                ..
+            } => {
+                if namespace.is_none() && connection_string.is_none() {
+                    return Err(
+                        "queue.azure_service_bus: either `namespace` or `connection_string` \
+                         must be provided"
+                            .to_string(),
+                    );
+                }
+                Ok(())
+            }
+            Self::AwsSqs { region, .. } => {
+                if region.is_empty() {
+                    return Err("queue.aws_sqs: `region` must not be empty".to_string());
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+impl Default for QueueBackendConfig {
+    fn default() -> Self {
+        Self::InMemory {
+            max_queue_size: None,
+        }
+    }
+}
+
+/// Secret values in `QueueBackendConfig` are redacted in `Debug` output.
+impl std::fmt::Debug for QueueBackendConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InMemory { max_queue_size } => f
+                .debug_struct("InMemory")
+                .field("max_queue_size", max_queue_size)
+                .finish(),
+            Self::AzureServiceBus {
+                namespace,
+                connection_string,
+                use_sessions,
+                session_timeout_seconds,
+            } => f
+                .debug_struct("AzureServiceBus")
+                .field("namespace", namespace)
+                .field(
+                    "connection_string",
+                    &connection_string.as_ref().map(|_| "<REDACTED>"),
+                )
+                .field("use_sessions", use_sessions)
+                .field("session_timeout_seconds", session_timeout_seconds)
+                .finish(),
+            Self::AwsSqs {
+                region,
+                use_fifo_queues,
+            } => f
+                .debug_struct("AwsSqs")
+                .field("region", region)
+                .field("use_fifo_queues", use_fifo_queues)
+                .finish(),
         }
     }
 }

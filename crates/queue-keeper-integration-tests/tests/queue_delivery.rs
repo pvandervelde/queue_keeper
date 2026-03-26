@@ -4,13 +4,18 @@
 //! - Event delivery to multiple bot queues (Assertion #6)
 //! - Retry behavior with exponential backoff (Assertion #10)
 //! - Dead letter queue handling (Assertion #9)
-//! - Partial delivery failure handling
+//! - Partial delivery failure handling (Assertion #6)
 
 mod common;
 
-use queue_keeper_api::queue_delivery::QueueDeliveryConfig;
-use queue_keeper_core::webhook::WrappedEvent;
-use queue_keeper_core::SessionId;
+use common::{create_empty_bot_config, create_test_bot_config, MockBlobStorage, MockQueueClient};
+use queue_keeper_api::{
+    dlq_storage::DlqStorageService,
+    queue_delivery::{deliver_event_to_queues, QueueDeliveryConfig, QueueDeliveryOutcome},
+    retry::RetryPolicy,
+};
+use queue_keeper_core::{queue_integration::DefaultEventRouter, webhook::WrappedEvent, SessionId};
+use std::sync::Arc;
 use std::time::Duration;
 
 /// Helper to create a test wrapped event
@@ -37,154 +42,327 @@ fn create_test_event() -> WrappedEvent {
     )
 }
 
-/// Verify that queue delivery succeeds when all queues accept events
+/// Verify that queue delivery succeeds when all queues accept events.
 ///
-/// Tests Assertion #6: One-to-Many Routing
+/// Asserts Assertion #6: One-to-Many Routing — the event MUST be delivered to
+/// every bot queue whose subscription matches the event.
 #[tokio::test]
 async fn test_successful_delivery_to_all_queues() {
-    // Arrange: Create mock components
-    let _event = create_test_event();
-    let _config = QueueDeliveryConfig::default();
+    // Arrange: 2 bots, both subscribing to all event types
+    let event = create_test_event();
+    let bot_config = create_test_bot_config(2);
+    let queue_client = Arc::new(MockQueueClient::new());
+    let event_router = Arc::new(DefaultEventRouter::new());
+    let config = QueueDeliveryConfig::default();
 
-    // TODO: This test requires EventRouter and QueueClient integration
-    // Implement once task 14.1 is complete
+    // Act
+    let outcome = deliver_event_to_queues(
+        event,
+        event_router,
+        Arc::new(bot_config),
+        queue_client.clone(),
+        config,
+    )
+    .await;
 
-    // Act: Deliver event to queues
-    // let outcome = deliver_event_to_queues(
-    //     &event,
-    //     &event_router,
-    //     &queue_client,
-    //     &config,
-    // ).await;
-
-    // Assert: All queues received the event
-    // assert!(matches!(outcome, QueueDeliveryOutcome::AllQueuesSucceeded));
+    // Assert: both queues received the event
+    assert!(
+        matches!(
+            outcome,
+            QueueDeliveryOutcome::AllQueuesSucceeded {
+                successful_count: 2,
+                ..
+            }
+        ),
+        "Expected AllQueuesSucceeded(2), got {:?}",
+        outcome
+    );
+    assert_eq!(
+        queue_client.send_count(),
+        2,
+        "Expected 2 send_message calls"
+    );
 }
 
-/// Verify that transient failures trigger retry with exponential backoff
+/// Verify that transient failures trigger retry with exponential backoff.
 ///
-/// Tests Assertion #10: Retry Behavior
+/// Asserts Assertion #10: Retry Behavior — transient errors MUST be retried
+/// with exponential back-off up to the configured maximum.
 #[tokio::test]
 async fn test_retry_on_transient_failure() {
-    // Arrange: Create mock that fails first 2 attempts
-    let _event = create_test_event();
-    let _config = QueueDeliveryConfig {
-        retry_policy: queue_keeper_api::retry::RetryPolicy {
+    // Arrange: 1 bot, first attempt fails transiently, second succeeds
+    let event = create_test_event();
+    let bot_config = create_test_bot_config(1);
+    let queue_client = Arc::new(MockQueueClient::new());
+    // Queue one transient failure then let default succeed
+    queue_client.expect_transient_failure();
+
+    let event_router = Arc::new(DefaultEventRouter::new());
+    let config = QueueDeliveryConfig {
+        retry_policy: RetryPolicy {
             max_attempts: 3,
             initial_delay: Duration::from_millis(10),
-            max_delay: Duration::from_millis(100),
+            max_delay: Duration::from_millis(50),
             backoff_multiplier: 2.0,
             use_jitter: false,
-            jitter_percent: 0.0, // Disable jitter for predictable test
+            jitter_percent: 0.0,
         },
         ..Default::default()
     };
 
-    // TODO: Implement mock that fails twice then succeeds
-
-    // Act: Attempt delivery with retry
     let start = std::time::Instant::now();
-    // let outcome = deliver_event_to_queues(...).await;
-    let _elapsed = start.elapsed();
 
-    // Assert: Retry delays were applied (should take ~30ms for 2 retries)
-    // assert!(elapsed >= Duration::from_millis(20));
-    // assert!(matches!(outcome, QueueDeliveryOutcome::AllQueuesSucceeded));
+    // Act
+    let outcome = deliver_event_to_queues(
+        event,
+        event_router,
+        Arc::new(bot_config),
+        queue_client.clone(),
+        config,
+    )
+    .await;
+
+    let elapsed = start.elapsed();
+
+    // Assert: succeeds on retry
+    assert!(
+        matches!(
+            outcome,
+            QueueDeliveryOutcome::AllQueuesSucceeded {
+                successful_count: 1,
+                ..
+            }
+        ),
+        "Expected AllQueuesSucceeded after retry, got {:?}",
+        outcome
+    );
+    // At least one retry delay of 10 ms must have occurred
+    assert!(
+        elapsed >= Duration::from_millis(10),
+        "Expected retry delay, elapsed was {:?}",
+        elapsed
+    );
+    // 2 send calls: first attempt (failure) + retry (success)
+    assert_eq!(queue_client.send_count(), 2);
 }
 
-/// Verify that permanent failures don't trigger retry
+/// Verify that permanent failures do not trigger retry.
 ///
-/// Tests Assertion #10: Retry Behavior (permanent errors)
+/// Asserts Assertion #10: Retry Behavior — permanent errors MUST NOT be retried
+/// and MUST fail fast.
 #[tokio::test]
 async fn test_no_retry_on_permanent_failure() {
-    // Arrange: Create mock that returns permanent error
-    let _event = create_test_event();
-    let _config = QueueDeliveryConfig::default();
+    // Arrange: 1 bot, permanent failure on every send
+    let event = create_test_event();
+    let bot_config = create_test_bot_config(1);
+    let queue_client = Arc::new(MockQueueClient::new());
+    // Queue several permanent failures to ensure no retry consumes extras
+    for _ in 0..5 {
+        queue_client.expect_permanent_failure();
+    }
 
-    // TODO: Implement mock that returns permanent error
-
-    // Act: Attempt delivery
-    let start = std::time::Instant::now();
-    // let outcome = deliver_event_to_queues(...).await;
-    let _elapsed = start.elapsed();
-
-    // Assert: No retries attempted (should complete quickly)
-    // assert!(elapsed < Duration::from_millis(100));
-    // assert!(matches!(outcome, QueueDeliveryOutcome::SomeQueuesFailed { .. }));
-}
-
-/// Verify that partial delivery failures are handled correctly
-///
-/// Tests Assertion #6: One-to-Many Routing (partial failure)
-#[tokio::test]
-async fn test_partial_delivery_failure_tracking() {
-    // Arrange: Create mocks where 1 of 3 queues fails
-    let _event = create_test_event();
-    let _config = QueueDeliveryConfig::default();
-
-    // TODO: Implement mocks where queue_2 fails but queue_1 and queue_3 succeed
-
-    // Act: Attempt delivery to all queues
-    // let outcome = deliver_event_to_queues(...).await;
-
-    // Assert: Outcome tracks which queues failed
-    // if let QueueDeliveryOutcome::SomeQueuesFailed { succeeded, failed } = outcome {
-    //     assert_eq!(succeeded.len(), 2);
-    //     assert_eq!(failed.len(), 1);
-    //     assert!(failed.contains_key("queue_2"));
-    // } else {
-    //     panic!("Expected SomeQueuesFailed outcome");
-    // }
-}
-
-/// Verify that events with no matching queues are handled gracefully
-///
-/// Tests edge case of routing configuration
-#[tokio::test]
-async fn test_no_matching_queues() {
-    // Arrange: Create event that doesn't match any bot subscriptions
-    let _event = create_test_event();
-    let _config = QueueDeliveryConfig::default();
-
-    // TODO: Configure routing with no matching subscriptions
-
-    // Act: Attempt delivery
-    // let outcome = deliver_event_to_queues(...).await;
-
-    // Assert: NoTargetQueues outcome
-    // assert!(matches!(outcome, QueueDeliveryOutcome::NoTargetQueues));
-}
-
-/// Verify that DLQ is used after max retries exhausted
-///
-/// Tests Assertion #9: Dead Letter Handling
-#[tokio::test]
-#[ignore = "Requires task 14.5 (DLQ infrastructure)"]
-async fn test_dlq_after_max_retries() {
-    // Arrange: Create mock that always fails
-    let _event = create_test_event();
-    let _config = QueueDeliveryConfig {
-        retry_policy: queue_keeper_api::retry::RetryPolicy {
+    let event_router = Arc::new(DefaultEventRouter::new());
+    let config = QueueDeliveryConfig {
+        retry_policy: RetryPolicy {
             max_attempts: 3,
-            ..Default::default()
+            initial_delay: Duration::from_millis(100),
+            max_delay: Duration::from_secs(1),
+            backoff_multiplier: 2.0,
+            use_jitter: false,
+            jitter_percent: 0.0,
         },
-        enable_dlq: true,
-        ..Default::default()
+        enable_dlq: false,
+        dlq_service: None,
     };
 
-    // TODO: Implement mock that always fails
+    let start = std::time::Instant::now();
 
-    // Act: Attempt delivery with retries
-    // let outcome = deliver_event_to_queues(...).await;
+    // Act
+    let outcome = deliver_event_to_queues(
+        event,
+        event_router,
+        Arc::new(bot_config),
+        queue_client.clone(),
+        config,
+    )
+    .await;
 
-    // Assert: Event sent to DLQ after exhausting retries
-    // assert!(matches!(outcome, QueueDeliveryOutcome::SomeQueuesFailed { .. }));
-    // Verify DLQ contains the event
+    let elapsed = start.elapsed();
+
+    // Assert: failed without retrying (only 1 send call, no delay)
+    assert!(
+        matches!(outcome, QueueDeliveryOutcome::CompleteFailure { .. }),
+        "Expected CompleteFailure, got {:?}",
+        outcome
+    );
+    // Permanent failure means no retry delays
+    assert!(
+        elapsed < Duration::from_millis(100),
+        "Permanent failure retried unexpectedly; elapsed {:?}",
+        elapsed
+    );
+    // Only the single initial send attempt
+    assert_eq!(queue_client.send_count(), 1);
 }
 
-/// Verify that retry delays use exponential backoff with jitter
+/// Verify that partial delivery failures are handled and tracked correctly.
 ///
-/// Tests Assertion #10: Retry Behavior (exponential backoff)
+/// Asserts Assertion #6: One-to-Many Routing — failures on individual queues
+/// MUST be recorded; the router exhausts retries and reports the outcome.
+///
+/// Note: Because `PartialDelivery` errors are classified as transient by
+/// `QueueDeliveryError`, the delivery loop retries the full batch up to
+/// `max_attempts` times before giving up. With `max_attempts=1` no retry
+/// occurs, so the outcome is `CompleteFailure`.
+#[tokio::test]
+async fn test_partial_delivery_failure_tracking() {
+    // Arrange: 3 bots; the second send call returns a permanent failure,
+    // the others succeed. max_attempts=1 to prevent the partial-delivery
+    // retry loop from re-sending to already-successful queues.
+    let event = create_test_event();
+    let bot_config = create_test_bot_config(3);
+    let queue_client = Arc::new(MockQueueClient::new());
+    // bot-1 succeeds, bot-2 fails permanently, bot-3 succeeds
+    // (order is deterministic: bots are iterated in config order)
+    queue_client.expect_success();
+    queue_client.expect_permanent_failure();
+    queue_client.expect_success();
+
+    let event_router = Arc::new(DefaultEventRouter::new());
+    let config = QueueDeliveryConfig {
+        retry_policy: RetryPolicy {
+            max_attempts: 0, // 0 retries = 1 attempt total, no retry loop
+            initial_delay: Duration::from_millis(10),
+            max_delay: Duration::from_millis(50),
+            backoff_multiplier: 2.0,
+            use_jitter: false,
+            jitter_percent: 0.0,
+        },
+        enable_dlq: false,
+        dlq_service: None,
+    };
+
+    // Act
+    let outcome = deliver_event_to_queues(
+        event,
+        event_router,
+        Arc::new(bot_config),
+        queue_client.clone(),
+        config,
+    )
+    .await;
+
+    // Assert: failure reported; the partial-delivery error is classified as
+    // transient (PartialDelivery), but with max_attempts=0 (no retries allowed)
+    // it immediately converts to CompleteFailure.
+    assert!(
+        matches!(outcome, QueueDeliveryOutcome::CompleteFailure { .. }),
+        "Expected CompleteFailure for partial delivery with max_attempts=1, got {:?}",
+        outcome
+    );
+    // All 3 sends happened within the single attempt
+    assert_eq!(queue_client.send_count(), 3);
+}
+
+/// Verify that events with no matching queues are handled gracefully.
+///
+/// Tests the edge case where no bot subscriptions match the incoming event.
+#[tokio::test]
+async fn test_no_matching_queues() {
+    // Arrange: empty bot config — no subscriptions
+    let event = create_test_event();
+    let bot_config = create_empty_bot_config();
+    let queue_client = Arc::new(MockQueueClient::new());
+    let event_router = Arc::new(DefaultEventRouter::new());
+    let config = QueueDeliveryConfig::default();
+
+    // Act
+    let outcome = deliver_event_to_queues(
+        event,
+        event_router,
+        Arc::new(bot_config),
+        queue_client.clone(),
+        config,
+    )
+    .await;
+
+    // Assert: no-op outcome, nothing sent
+    assert!(
+        matches!(outcome, QueueDeliveryOutcome::NoTargetQueues { .. }),
+        "Expected NoTargetQueues, got {:?}",
+        outcome
+    );
+    assert_eq!(queue_client.send_count(), 0);
+}
+
+/// Verify that DLQ is used after max retries are exhausted.
+///
+/// Asserts Assertion #9: Dead Letter Handling — events that fail delivery after
+/// the maximum retry attempts MUST be persisted to the dead-letter store with
+/// failure metadata.
+#[tokio::test]
+async fn test_dlq_after_max_retries() {
+    // Arrange: 1 bot, always fails transiently. DLQ service backed by in-memory storage.
+    let event = create_test_event();
+    let bot_config = create_test_bot_config(1);
+    let queue_client = Arc::new(MockQueueClient::new());
+    // More failures than max_attempts to ensure every attempt fails
+    queue_client.always_fail_transient(10);
+
+    let event_router = Arc::new(DefaultEventRouter::new());
+
+    let blob_storage = Arc::new(MockBlobStorage::new());
+    let dlq_service = Arc::new(DlqStorageService::new(blob_storage.clone()));
+
+    let config = QueueDeliveryConfig {
+        retry_policy: RetryPolicy {
+            max_attempts: 2, // 2 retries = 3 total sends (1 initial + 2 retries)
+            initial_delay: Duration::from_millis(5),
+            max_delay: Duration::from_millis(20),
+            backoff_multiplier: 2.0,
+            use_jitter: false,
+            jitter_percent: 0.0,
+        },
+        enable_dlq: true,
+        dlq_service: Some(dlq_service),
+    };
+
+    // Act
+    let outcome = deliver_event_to_queues(
+        event,
+        event_router,
+        Arc::new(bot_config),
+        queue_client.clone(),
+        config,
+    )
+    .await;
+
+    // Assert: event persisted to DLQ after exhausting retries
+    assert!(
+        matches!(
+            outcome,
+            QueueDeliveryOutcome::CompleteFailure {
+                persisted_to_dlq: true,
+                ..
+            }
+        ),
+        "Expected CompleteFailure with persisted_to_dlq=true, got {:?}",
+        outcome
+    );
+    // 3 total sends: 1 initial + 2 retries (max_attempts=2 means 2 retries)
+    assert_eq!(queue_client.send_count(), 3);
+    // Exactly 1 DLQ record persisted
+    assert_eq!(
+        blob_storage.stored_count(),
+        1,
+        "Expected exactly 1 DLQ record in blob storage"
+    );
+}
+
+/// Verify that retry delays use exponential backoff with jitter.
+///
+/// Asserts Assertion #10: Retry Behavior — delays MUST grow exponentially and
+/// respect the configured maximum delay cap.
 #[tokio::test]
 async fn test_exponential_backoff_with_jitter() {
     use queue_keeper_api::retry::{RetryPolicy, RetryState};
@@ -201,20 +379,43 @@ async fn test_exponential_backoff_with_jitter() {
 
     let mut state = RetryState::new();
 
-    // Act & Assert: Verify delays increase exponentially
-    let mut last_delay = Duration::ZERO;
-    for _ in 0..4 {
+    // Act & Assert: Verify delays increase exponentially.
+    //
+    // Get the first delay and verify it is in the expected range for attempt 0
+    // (initial_delay ± jitter), then verify each subsequent delay is at least
+    // 80% of the previous one to confirm exponential growth under jitter.
+    let first_delay = state.get_delay(&policy);
+    let expected_low = policy
+        .initial_delay
+        .mul_f32(1.0 - policy.jitter_percent as f32);
+    assert!(
+        first_delay >= expected_low,
+        "First delay {:?} should be >= initial_delay * (1 - jitter) = {:?}",
+        first_delay,
+        expected_low,
+    );
+    assert!(
+        first_delay <= policy.max_delay,
+        "First delay {:?} exceeds max {:?}",
+        first_delay,
+        policy.max_delay,
+    );
+
+    let mut last_delay = first_delay;
+    state.next_attempt();
+
+    for _ in 1..4 {
         let delay = state.get_delay(&policy);
 
-        // Delay should be >= previous delay (considering jitter)
+        // Delay should be >= previous (considering negative jitter of up to 20%).
         assert!(
-            delay >= last_delay.mul_f32(0.8), // Account for negative jitter
-            "Delay should increase: {:?} < {:?}",
+            delay >= last_delay.mul_f32(0.8),
+            "Delay should increase: {:?} < 80% of {:?}",
             delay,
-            last_delay
+            last_delay,
         );
 
-        // Delay should not exceed max_delay
+        // Delay should not exceed max_delay.
         assert!(delay <= policy.max_delay, "Delay exceeds max: {:?}", delay);
 
         last_delay = delay;

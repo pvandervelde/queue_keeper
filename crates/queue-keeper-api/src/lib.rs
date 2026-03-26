@@ -27,6 +27,7 @@ pub mod retry;
 // mod middleware;
 // mod responses;
 
+use crate::queue_delivery::{spawn_queue_delivery, QueueDeliveryConfig};
 use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
@@ -38,10 +39,13 @@ use axum::{
 use bytes::Bytes;
 use prometheus::TextEncoder;
 use queue_keeper_core::{
+    bot_config::BotConfiguration,
     monitoring::MetricsCollector,
-    webhook::{WebhookHeaders, WebhookRequest},
+    queue_integration::{DefaultEventRouter, EventRouter},
+    webhook::{ProcessingOutput, WebhookHeaders, WebhookRequest},
     EventId, SessionId, Timestamp,
 };
+use queue_runtime::QueueClient;
 use std::{
     collections::{HashMap, HashSet},
     net::SocketAddr,
@@ -57,8 +61,8 @@ pub use azure_config::{
     AzureServiceBusConfig, AzureTelemetryConfig,
 };
 pub use config::{
-    LoggingConfig, ProviderConfig, ProviderSecretConfig, SecurityConfig, ServerConfig,
-    ServiceConfig, WebhookConfig,
+    LoggingConfig, ProviderConfig, ProviderSecretConfig, QueueBackendConfig, SecurityConfig,
+    ServerConfig, ServiceConfig, WebhookConfig,
 };
 pub use errors::{ConfigError, ServiceError, WebhookHandlerError};
 pub use metrics::{ServiceMetrics, TelemetryConfig};
@@ -96,10 +100,27 @@ pub struct AppState {
     /// O(1) lookup in the hot request path instead of scanning the full list
     /// on every webhook request.
     pub generic_provider_ids: Arc<HashSet<String>>,
+
+    /// Queue client for delivering events to bot queues.
+    ///
+    /// `None` disables queue delivery (events are processed but not routed).
+    /// When `Some`, each successfully processed webhook spawns an async
+    /// delivery task. Should be circuit-breaker-wrapped for production.
+    pub queue_client: Option<Arc<dyn QueueClient>>,
+
+    /// Event router for determining target queues from bot subscriptions.
+    pub event_router: Arc<dyn EventRouter>,
+
+    /// Bot subscription configuration defining which bots receive which events.
+    pub bot_config: Arc<BotConfiguration>,
+
+    /// Configuration for queue delivery retry and DLQ behaviour.
+    pub delivery_config: QueueDeliveryConfig,
 }
 
 impl AppState {
     /// Create new application state
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: ServiceConfig,
         provider_registry: Arc<ProviderRegistry>,
@@ -108,6 +129,10 @@ impl AppState {
         metrics: Arc<ServiceMetrics>,
         telemetry_config: Arc<TelemetryConfig>,
         generic_provider_ids: HashSet<String>,
+        queue_client: Option<Arc<dyn QueueClient>>,
+        event_router: Arc<dyn EventRouter>,
+        bot_config: Arc<BotConfiguration>,
+        delivery_config: QueueDeliveryConfig,
     ) -> Self {
         Self {
             config,
@@ -117,6 +142,10 @@ impl AppState {
             metrics,
             telemetry_config,
             generic_provider_ids: Arc::new(generic_provider_ids),
+            queue_client,
+            event_router,
+            bot_config,
+            delivery_config,
         }
     }
 }
@@ -182,6 +211,8 @@ pub async fn start_server(
     health_checker: Arc<dyn HealthChecker>,
     event_store: Arc<dyn EventStore>,
     generic_provider_ids: HashSet<String>,
+    queue_client: Option<Arc<dyn QueueClient>>,
+    bot_config: Arc<BotConfiguration>,
 ) -> Result<(), ServiceError> {
     // Validate configuration before initializing any infrastructure
     config.validate().map_err(ServiceError::Configuration)?;
@@ -211,6 +242,8 @@ pub async fn start_server(
         "development".to_string(), // TODO: Get from environment
     ));
 
+    let event_router: Arc<dyn EventRouter> = Arc::new(DefaultEventRouter::new());
+
     let state = AppState::new(
         config.clone(),
         Arc::new(provider_registry),
@@ -219,6 +252,10 @@ pub async fn start_server(
         metrics,
         telemetry_config,
         generic_provider_ids,
+        queue_client,
+        event_router,
+        bot_config,
+        QueueDeliveryConfig::default(),
     );
     let app = create_router(state);
 
@@ -413,9 +450,42 @@ pub async fn handle_provider_webhook(
     let duration = start.elapsed();
     state.metrics.record_webhook_request(duration, true);
 
+    let event_id = processing_output.event_id();
+    let session_id = processing_output.session_id().cloned();
+
+    // Spawn async queue delivery for wrapped events (fire-and-forget).
+    // Direct-mode events are forwarded as raw payloads and do not go through
+    // the event router.
+    if let ProcessingOutput::Wrapped(wrapped_event) = processing_output {
+        if let Some(queue_client) = &state.queue_client {
+            let handle = spawn_queue_delivery(
+                wrapped_event,
+                state.event_router.clone(),
+                state.bot_config.clone(),
+                queue_client.clone(),
+                state.delivery_config.clone(),
+            );
+            // Detach the task but monitor for panics: if the delivery task
+            // panics the JoinHandle will hold the panic payload until dropped.
+            // Spawning a watcher task ensures the panic is surfaced in logs
+            // rather than silently discarded, and allows tracing the event_id.
+            let logged_event_id = event_id;
+            tokio::spawn(async move {
+                if let Err(join_err) = handle.await {
+                    if join_err.is_panic() {
+                        error!(
+                            event_id = %logged_event_id,
+                            "Queue delivery task panicked — event may not have been delivered"
+                        );
+                    }
+                }
+            });
+        }
+    }
+
     Ok(Json(WebhookResponse {
-        event_id: processing_output.event_id(),
-        session_id: processing_output.session_id().cloned(),
+        event_id,
+        session_id,
         status: "processed".to_string(),
         message: "Webhook processed successfully".to_string(),
     }))
