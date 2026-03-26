@@ -872,3 +872,136 @@ mod key_vault_config_validation_tests {
         assert!(config.validate().is_ok());
     }
 }
+
+// ============================================================================
+// QueueBackendConfig::validate() tests
+// ============================================================================
+
+mod queue_backend_config_tests {
+    use super::*;
+
+    /// Verify InMemory variant always passes validation.
+    #[test]
+    fn test_in_memory_always_passes() {
+        let cfg = QueueBackendConfig::InMemory {
+            max_queue_size: None,
+        };
+        assert!(cfg.validate().is_ok());
+    }
+
+    /// Verify InMemory with a size limit also passes.
+    #[test]
+    fn test_in_memory_with_size_limit_passes() {
+        let cfg = QueueBackendConfig::InMemory {
+            max_queue_size: Some(1000),
+        };
+        assert!(cfg.validate().is_ok());
+    }
+
+    /// Verify AzureServiceBus fails when neither `namespace` nor
+    /// `connection_string` is provided.
+    #[test]
+    fn test_azure_service_bus_requires_namespace_or_connection_string() {
+        let cfg = QueueBackendConfig::AzureServiceBus {
+            namespace: None,
+            connection_string: None,
+            use_sessions: false,
+            session_timeout_seconds: None,
+        };
+        let err = cfg.validate().unwrap_err();
+        assert!(
+            err.contains("azure_service_bus"),
+            "Error should mention azure_service_bus: {}",
+            err
+        );
+        assert!(
+            err.contains("namespace") || err.contains("connection_string"),
+            "Error should mention namespace or connection_string: {}",
+            err
+        );
+    }
+
+    /// Verify AzureServiceBus passes when `namespace` is provided.
+    #[test]
+    fn test_azure_service_bus_passes_with_namespace() {
+        let cfg = QueueBackendConfig::AzureServiceBus {
+            namespace: Some("mynamespace.servicebus.windows.net".to_string()),
+            connection_string: None,
+            use_sessions: false,
+            session_timeout_seconds: None,
+        };
+        assert!(cfg.validate().is_ok());
+    }
+
+    /// Verify AzureServiceBus passes when `connection_string` is provided.
+    #[test]
+    fn test_azure_service_bus_passes_with_connection_string() {
+        let cfg = QueueBackendConfig::AzureServiceBus {
+            namespace: None,
+            connection_string: Some(
+                "Endpoint=sb://ns.servicebus.windows.net/;SharedAccessKeyName=k;SharedAccessKey=s"
+                    .to_string(),
+            ),
+            use_sessions: false,
+            session_timeout_seconds: None,
+        };
+        assert!(cfg.validate().is_ok());
+    }
+
+    /// Verify AzureServiceBus passes when both `namespace` and
+    /// `connection_string` are provided (connection_string takes precedence
+    /// in the runtime; config accepts either or both).
+    #[test]
+    fn test_azure_service_bus_passes_with_both_namespace_and_connection_string() {
+        let cfg = QueueBackendConfig::AzureServiceBus {
+            namespace: Some("ns.servicebus.windows.net".to_string()),
+            connection_string: Some(
+                "Endpoint=sb://ns.servicebus.windows.net/;SharedAccessKeyName=k;SharedAccessKey=s"
+                    .to_string(),
+            ),
+            use_sessions: true,
+            session_timeout_seconds: Some(600),
+        };
+        assert!(cfg.validate().is_ok());
+    }
+
+    /// Verify AwsSqs fails when `region` is an empty string.
+    #[test]
+    fn test_aws_sqs_requires_nonempty_region() {
+        let cfg = QueueBackendConfig::AwsSqs {
+            region: String::new(),
+            use_fifo_queues: false,
+        };
+        let err = cfg.validate().unwrap_err();
+        assert!(
+            err.contains("aws_sqs"),
+            "Error should mention aws_sqs: {}",
+            err
+        );
+        assert!(
+            err.contains("region"),
+            "Error should mention region: {}",
+            err
+        );
+    }
+
+    /// Verify AwsSqs passes when a non-empty `region` is provided.
+    #[test]
+    fn test_aws_sqs_passes_with_region() {
+        let cfg = QueueBackendConfig::AwsSqs {
+            region: "us-east-1".to_string(),
+            use_fifo_queues: false,
+        };
+        assert!(cfg.validate().is_ok());
+    }
+
+    /// Verify AwsSqs passes with FIFO queues enabled.
+    #[test]
+    fn test_aws_sqs_passes_with_fifo_queue() {
+        let cfg = QueueBackendConfig::AwsSqs {
+            region: "eu-west-1".to_string(),
+            use_fifo_queues: true,
+        };
+        assert!(cfg.validate().is_ok());
+    }
+}

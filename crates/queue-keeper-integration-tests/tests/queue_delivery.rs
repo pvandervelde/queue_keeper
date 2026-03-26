@@ -379,20 +379,43 @@ async fn test_exponential_backoff_with_jitter() {
 
     let mut state = RetryState::new();
 
-    // Act & Assert: Verify delays increase exponentially
-    let mut last_delay = Duration::ZERO;
-    for _ in 0..4 {
+    // Act & Assert: Verify delays increase exponentially.
+    //
+    // Get the first delay and verify it is in the expected range for attempt 0
+    // (initial_delay ± jitter), then verify each subsequent delay is at least
+    // 80% of the previous one to confirm exponential growth under jitter.
+    let first_delay = state.get_delay(&policy);
+    let expected_low = policy
+        .initial_delay
+        .mul_f32(1.0 - policy.jitter_percent as f32);
+    assert!(
+        first_delay >= expected_low,
+        "First delay {:?} should be >= initial_delay * (1 - jitter) = {:?}",
+        first_delay,
+        expected_low,
+    );
+    assert!(
+        first_delay <= policy.max_delay,
+        "First delay {:?} exceeds max {:?}",
+        first_delay,
+        policy.max_delay,
+    );
+
+    let mut last_delay = first_delay;
+    state.next_attempt();
+
+    for _ in 1..4 {
         let delay = state.get_delay(&policy);
 
-        // Delay should be >= previous delay (considering jitter)
+        // Delay should be >= previous (considering negative jitter of up to 20%).
         assert!(
-            delay >= last_delay.mul_f32(0.8), // Account for negative jitter
-            "Delay should increase: {:?} < {:?}",
+            delay >= last_delay.mul_f32(0.8),
+            "Delay should increase: {:?} < 80% of {:?}",
             delay,
-            last_delay
+            last_delay,
         );
 
-        // Delay should not exceed max_delay
+        // Delay should not exceed max_delay.
         assert!(delay <= policy.max_delay, "Delay exceeds max: {:?}", delay);
 
         last_delay = delay;
