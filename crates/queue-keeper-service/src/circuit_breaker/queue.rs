@@ -49,6 +49,7 @@ impl CircuitBreakerQueueProvider {
     }
 
     /// Get reference to inner provider for operations not requiring circuit breaker.
+    #[allow(dead_code)]
     pub fn inner(&self) -> &dyn QueueProvider {
         &*self.inner
     }
