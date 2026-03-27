@@ -500,6 +500,17 @@ pub struct SecurityConfig {
 
     /// Log request bodies (security risk)
     pub log_request_bodies: bool,
+
+    /// API key required for admin endpoints (`/admin/**`).
+    ///
+    /// When `Some`, every request to an admin endpoint must supply a matching
+    /// `Authorization: Bearer <key>` header. When `None`, admin endpoints are
+    /// accessible without authentication (suitable for development only).
+    ///
+    /// In production deployments set this via the `QK__SECURITY__ADMIN_API_KEY`
+    /// environment variable; do not store the key in committed YAML files.
+    #[serde(default)]
+    pub admin_api_key: Option<String>,
 }
 
 impl Default for SecurityConfig {
@@ -511,6 +522,7 @@ impl Default for SecurityConfig {
             ip_rate_limit: 100,
             log_requests: true,
             log_request_bodies: false,
+            admin_api_key: None,
         }
     }
 }

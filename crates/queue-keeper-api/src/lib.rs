@@ -16,6 +16,7 @@ pub mod config;
 pub mod dlq_storage;
 pub mod errors;
 pub mod metrics;
+pub mod middleware;
 pub mod provider_registry;
 pub mod queue_delivery;
 pub mod responses;
@@ -23,15 +24,12 @@ pub mod retry;
 
 // Private modules (not yet fully extracted)
 // mod handlers;
-// mod metrics;
-// mod middleware;
-// mod responses;
+// mod admin_api;
 
 use crate::queue_delivery::{spawn_queue_delivery, QueueDeliveryConfig};
 use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
-    middleware,
     response::{Json, Response},
     routing::{get, post, put},
     Router,
@@ -50,6 +48,7 @@ use std::{
     collections::{HashMap, HashSet},
     net::SocketAddr,
     sync::Arc,
+    time::Duration,
 };
 use tower::ServiceBuilder;
 use tower_http::{compression::CompressionLayer, cors::CorsLayer, trace::TraceLayer};
@@ -66,6 +65,7 @@ pub use config::{
 };
 pub use errors::{ConfigError, ServiceError, WebhookHandlerError};
 pub use metrics::{ServiceMetrics, TelemetryConfig};
+pub use middleware::IpFailureTracker;
 pub use provider_registry::{InvalidProviderIdError, ProviderId, ProviderRegistry};
 pub use responses::*;
 
@@ -116,6 +116,18 @@ pub struct AppState {
 
     /// Configuration for queue delivery retry and DLQ behaviour.
     pub delivery_config: QueueDeliveryConfig,
+
+    /// IP-based authentication failure rate limiter.
+    ///
+    /// `None` when `SecurityConfig::enable_ip_rate_limiting = false`.
+    pub ip_rate_limiter: Option<Arc<IpFailureTracker>>,
+
+    /// Admin API key for authenticated admin endpoints.
+    ///
+    /// `None` means admin endpoints are open (development mode).
+    /// In production, supply this via the `QK__SECURITY__ADMIN_API_KEY`
+    /// environment variable.
+    pub admin_api_key: Option<String>,
 }
 
 impl AppState {
@@ -133,6 +145,8 @@ impl AppState {
         event_router: Arc<dyn EventRouter>,
         bot_config: Arc<BotConfiguration>,
         delivery_config: QueueDeliveryConfig,
+        ip_rate_limiter: Option<Arc<IpFailureTracker>>,
+        admin_api_key: Option<String>,
     ) -> Self {
         Self {
             config,
@@ -146,6 +160,8 @@ impl AppState {
             event_router,
             bot_config,
             delivery_config,
+            ip_rate_limiter,
+            admin_api_key,
         }
     }
 }
@@ -156,7 +172,12 @@ impl AppState {
 
 /// Create HTTP router with all endpoints
 pub fn create_router(state: AppState) -> Router {
-    let webhook_routes = Router::new().route("/webhook/{provider}", post(handle_provider_webhook));
+    let webhook_routes = Router::new()
+        .route("/webhook/{provider}", post(handle_provider_webhook))
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::middleware::ip_rate_limit_middleware,
+        ));
 
     let health_routes = Router::new()
         .route("/health", get(handle_health_check))
@@ -184,7 +205,11 @@ pub fn create_router(state: AppState) -> Router {
         .route("/admin/logging/level", put(set_log_level))
         .route("/admin/tracing/sampling", get(get_trace_sampling))
         .route("/admin/tracing/sampling", put(set_trace_sampling))
-        .route("/admin/metrics/reset", post(reset_metrics));
+        .route("/admin/metrics/reset", post(reset_metrics))
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::middleware::admin_auth_middleware,
+        ));
 
     Router::new()
         .merge(webhook_routes)
@@ -197,8 +222,8 @@ pub fn create_router(state: AppState) -> Router {
                 .layer(TraceLayer::new_for_http())
                 .layer(CompressionLayer::new())
                 .layer(CorsLayer::permissive())
-                .layer(middleware::from_fn(request_logging_middleware))
-                .layer(middleware::from_fn(metrics_middleware))
+                .layer(axum::middleware::from_fn(request_logging_middleware))
+                .layer(axum::middleware::from_fn(metrics_middleware))
                 .into_inner(),
         )
         .with_state(state)
@@ -244,6 +269,18 @@ pub async fn start_server(
 
     let event_router: Arc<dyn EventRouter> = Arc::new(DefaultEventRouter::new());
 
+    // Build IP rate limiter if enabled (assertion #19: 10 failures in 5 minutes).
+    let ip_rate_limiter = if config.security.enable_ip_rate_limiting {
+        Some(Arc::new(IpFailureTracker::new(
+            10,
+            Duration::from_secs(300),
+        )))
+    } else {
+        None
+    };
+
+    let admin_api_key = config.security.admin_api_key.clone();
+
     let state = AppState::new(
         config.clone(),
         Arc::new(provider_registry),
@@ -256,6 +293,8 @@ pub async fn start_server(
         event_router,
         bot_config,
         QueueDeliveryConfig::default(),
+        ip_rate_limiter,
+        admin_api_key,
     );
     let app = create_router(state);
 

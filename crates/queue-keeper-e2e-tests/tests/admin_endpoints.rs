@@ -232,25 +232,51 @@ async fn test_reset_session() {
     assert!(response.status().is_success() || response.status() == 404);
 }
 
-/// Verify that admin endpoints require authentication
+/// Verify that admin endpoints require authentication when an admin API key
+/// is configured.
+///
+/// Starts the container with `QK__SECURITY__ADMIN_API_KEY` set so that the
+/// admin auth middleware is active, then verifies:
+/// 1. An unauthenticated request returns 401.
+/// 2. A request with the correct bearer token succeeds.
 #[tokio::test]
-#[ignore = "Authentication not yet implemented"]
 async fn test_admin_endpoints_require_auth() {
-    // Arrange
-    let server = TestContainer::start().await;
+    // Arrange: start container with admin auth enabled
+    let server = TestContainer::start_with_env(vec![(
+        "QK__SECURITY__ADMIN_API_KEY",
+        "e2e-test-admin-key",
+    )])
+    .await;
     let client = http_client();
 
-    // Act - Try to access admin endpoint without credentials
-    let response = client
+    // Act 1 – unauthenticated request
+    let unauth_response = client
         .get(server.url("/admin/config"))
         .send()
         .await
-        .expect("Failed to send request");
+        .expect("Failed to send unauthenticated request");
 
-    // Assert
-    // Once authentication is implemented, this should return 401
-    // For now, endpoints are open
-    assert!(response.status().is_success() || response.status() == 401);
+    // Assert 1 – must be rejected
+    assert_eq!(
+        unauth_response.status(),
+        401,
+        "Unauthenticated admin request must return 401"
+    );
+
+    // Act 2 – authenticated request
+    let auth_response = client
+        .get(server.url("/admin/config"))
+        .header("Authorization", "Bearer e2e-test-admin-key")
+        .send()
+        .await
+        .expect("Failed to send authenticated request");
+
+    // Assert 2 – must succeed
+    assert!(
+        auth_response.status().is_success(),
+        "Authenticated admin request must succeed, got {}",
+        auth_response.status()
+    );
 }
 
 /// Verify that admin API returns consistent JSON error format

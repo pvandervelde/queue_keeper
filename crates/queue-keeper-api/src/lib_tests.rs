@@ -129,6 +129,8 @@ fn test_app_state(registry: ProviderRegistry) -> AppState {
             settings: queue_keeper_core::bot_config::BotConfigurationSettings::default(),
         }),
         queue_delivery::QueueDeliveryConfig::default(),
+        None, // ip_rate_limiter: disabled in unit tests
+        None, // admin_api_key: no auth in unit tests
     )
 }
 

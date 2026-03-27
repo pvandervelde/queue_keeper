@@ -1,10 +1,14 @@
-//! Integration tests for HTTP middleware (logging, metrics, tracing)
+//! Integration tests for HTTP middleware (logging, metrics, tracing,
+//! IP rate limiting, admin authentication)
 
 mod common;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use common::create_test_app_state;
+use queue_keeper_api::{middleware::IpFailureTracker, AppState};
+use std::sync::Arc;
+use std::time::Duration;
 use tower::ServiceExt;
 
 /// Verify that request logging middleware processes requests
@@ -143,4 +147,237 @@ async fn test_cors_middleware_allows_configured_origins() {
 
     // CORS headers may or may not be present depending on configuration
     // This test validates that CORS middleware doesn't break request flow
+}
+
+// ============================================================================
+// IP rate limiting integration tests
+// ============================================================================
+
+/// Helper: build an AppState with an IP rate limiter that has a very low
+/// threshold so tests can reach the limit quickly.
+fn state_with_rate_limiter(max_failures: usize) -> AppState {
+    let tracker = Arc::new(IpFailureTracker::new(
+        max_failures,
+        Duration::from_secs(300),
+    ));
+    // Start from the default test state and override the rate limiter field.
+    let mut state = create_test_app_state();
+    state.ip_rate_limiter = Some(tracker);
+    state
+}
+
+/// Verify that requests without prior failures are allowed through to the handler.
+#[tokio::test]
+async fn test_ip_rate_limit_allows_requests_below_threshold() {
+    // Arrange: threshold of 5, no prior failures
+    let state = state_with_rate_limiter(5);
+    let app = queue_keeper_api::create_router(state);
+
+    // Send a webhook request — the middleware should pass it through (no failures yet)
+    let request = Request::builder()
+        .method("POST")
+        .uri("/webhook/github")
+        .header("x-github-event", "ping")
+        .header("x-github-delivery", "test-delivery-id")
+        .header("content-type", "application/json")
+        .body(Body::from("{}"))
+        .unwrap();
+
+    // Act
+    let response = app.oneshot(request).await.unwrap();
+
+    // Assert: request reaches the handler (any response other than 429 is acceptable)
+    assert_ne!(
+        response.status(),
+        StatusCode::TOO_MANY_REQUESTS,
+        "Request with no prior failures must not be rate-limited"
+    );
+}
+
+/// Verify that an IP pre-loaded with the maximum failures receives HTTP 429.
+#[tokio::test]
+async fn test_ip_rate_limit_blocks_ip_at_threshold() {
+    // Arrange: tracker pre-populated to the threshold
+    let tracker = Arc::new(IpFailureTracker::new(3, Duration::from_secs(300)));
+    for _ in 0..3 {
+        tracker.record_failure("203.0.113.10");
+    }
+    let mut state = create_test_app_state();
+    state.ip_rate_limiter = Some(tracker);
+    let app = queue_keeper_api::create_router(state);
+
+    // Send webhook request with the blocked IP in X-Forwarded-For
+    let request = Request::builder()
+        .method("POST")
+        .uri("/webhook/github")
+        .header("x-github-event", "ping")
+        .header("x-github-delivery", "test-delivery-id")
+        .header("content-type", "application/json")
+        .header("x-forwarded-for", "203.0.113.10")
+        .body(Body::from("{}"))
+        .unwrap();
+
+    // Act
+    let response = app.oneshot(request).await.unwrap();
+
+    // Assert: IP is blocked — 429 Too Many Requests
+    assert_eq!(
+        response.status(),
+        StatusCode::TOO_MANY_REQUESTS,
+        "Blocked IP should receive 429"
+    );
+}
+
+/// Verify the 429 response includes a Retry-After header.
+#[tokio::test]
+async fn test_ip_rate_limit_response_includes_retry_after_header() {
+    let tracker = Arc::new(IpFailureTracker::new(1, Duration::from_secs(300)));
+    tracker.record_failure("203.0.113.11");
+    let mut state = create_test_app_state();
+    state.ip_rate_limiter = Some(tracker);
+    let app = queue_keeper_api::create_router(state);
+
+    let request = Request::builder()
+        .method("POST")
+        .uri("/webhook/github")
+        .header("x-github-event", "ping")
+        .header("x-github-delivery", "test-delivery-id")
+        .header("content-type", "application/json")
+        .header("x-forwarded-for", "203.0.113.11")
+        .body(Body::from("{}"))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert!(
+        response.headers().contains_key("retry-after"),
+        "429 response must include Retry-After header"
+    );
+}
+
+// ============================================================================
+// Admin authentication integration tests
+// ============================================================================
+
+/// Verify that admin endpoints are accessible when no API key is configured.
+#[tokio::test]
+async fn test_admin_endpoints_open_when_no_api_key_configured() {
+    // Arrange: no admin key
+    let state = create_test_app_state();
+    let app = queue_keeper_api::create_router(state);
+
+    let request = Request::builder()
+        .uri("/admin/config")
+        .body(Body::empty())
+        .unwrap();
+
+    // Act
+    let response = app.oneshot(request).await.unwrap();
+
+    // Assert: no auth configured → request reaches handler
+    assert!(
+        response.status().is_success(),
+        "Admin endpoints must be open when no API key is set, got {}",
+        response.status()
+    );
+}
+
+/// Verify that admin endpoints reject unauthenticated requests when an API
+/// key is configured.
+#[tokio::test]
+async fn test_admin_endpoints_require_auth_when_api_key_configured() {
+    // Arrange
+    let mut state = create_test_app_state();
+    state.admin_api_key = Some("test-admin-key".to_string());
+    let app = queue_keeper_api::create_router(state);
+
+    let request = Request::builder()
+        .uri("/admin/config")
+        .body(Body::empty())
+        .unwrap();
+
+    // Act
+    let response = app.oneshot(request).await.unwrap();
+
+    // Assert: no auth header → 401
+    assert_eq!(
+        response.status(),
+        StatusCode::UNAUTHORIZED,
+        "Unauthenticated admin request must be rejected"
+    );
+}
+
+/// Verify that an incorrect bearer token is rejected.
+#[tokio::test]
+async fn test_admin_endpoints_reject_wrong_api_key() {
+    // Arrange
+    let mut state = create_test_app_state();
+    state.admin_api_key = Some("correct-key".to_string());
+    let app = queue_keeper_api::create_router(state);
+
+    let request = Request::builder()
+        .uri("/admin/config")
+        .header("Authorization", "Bearer wrong-key")
+        .body(Body::empty())
+        .unwrap();
+
+    // Act
+    let response = app.oneshot(request).await.unwrap();
+
+    // Assert
+    assert_eq!(
+        response.status(),
+        StatusCode::UNAUTHORIZED,
+        "Incorrect bearer token must be rejected"
+    );
+}
+
+/// Verify that the correct bearer token grants access.
+#[tokio::test]
+async fn test_admin_endpoints_allow_correct_api_key() {
+    // Arrange
+    let mut state = create_test_app_state();
+    state.admin_api_key = Some("my-secret-key".to_string());
+    let app = queue_keeper_api::create_router(state);
+
+    let request = Request::builder()
+        .uri("/admin/config")
+        .header("Authorization", "Bearer my-secret-key")
+        .body(Body::empty())
+        .unwrap();
+
+    // Act
+    let response = app.oneshot(request).await.unwrap();
+
+    // Assert
+    assert!(
+        response.status().is_success(),
+        "Correct bearer token must be accepted, got {}",
+        response.status()
+    );
+}
+
+/// Verify that health endpoints do not require authentication.
+#[tokio::test]
+async fn test_health_endpoints_not_gated_by_admin_auth() {
+    // Arrange: admin key configured — health routes must NOT require auth
+    let mut state = create_test_app_state();
+    state.admin_api_key = Some("secret".to_string());
+    let app = queue_keeper_api::create_router(state);
+
+    let request = Request::builder()
+        .uri("/health")
+        .body(Body::empty())
+        .unwrap();
+
+    // Act
+    let response = app.oneshot(request).await.unwrap();
+
+    // Assert: health route bypasses admin auth middleware
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "Health endpoints must not require admin auth"
+    );
 }
