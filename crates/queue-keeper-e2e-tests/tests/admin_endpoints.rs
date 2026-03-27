@@ -242,11 +242,9 @@ async fn test_reset_session() {
 #[tokio::test]
 async fn test_admin_endpoints_require_auth() {
     // Arrange: start container with admin auth enabled
-    let server = TestContainer::start_with_env(vec![(
-        "QK__SECURITY__ADMIN_API_KEY",
-        "e2e-test-admin-key",
-    )])
-    .await;
+    let server =
+        TestContainer::start_with_env(vec![("QK__SECURITY__ADMIN_API_KEY", "e2e-test-admin-key")])
+            .await;
     let client = http_client();
 
     // Act 1 – unauthenticated request
