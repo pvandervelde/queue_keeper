@@ -69,15 +69,33 @@ impl IpFailureTracker {
         }
     }
 
+    /// Maximum number of failures before an IP is blocked.
+    pub fn max_failures(&self) -> usize {
+        self.max_failures
+    }
+
+    /// Duration of the sliding failure window.
+    pub fn window(&self) -> Duration {
+        self.window
+    }
+
     /// Return `true` if `ip` has reached or exceeded the failure threshold
     /// within the current sliding window.
     pub fn is_blocked(&self, ip: &str) -> bool {
         let mut map = self.failures.lock().unwrap();
         let now = Instant::now();
         let window = self.window;
-        let entry = map.entry(ip.to_string()).or_default();
-        entry.retain(|t| now.duration_since(*t) < window);
-        entry.len() >= self.max_failures
+
+        if let Some(entry) = map.get_mut(ip) {
+            entry.retain(|t| now.duration_since(*t) < window);
+            if entry.is_empty() {
+                map.remove(ip);
+                return false;
+            }
+            entry.len() >= self.max_failures
+        } else {
+            false
+        }
     }
 
     /// Record one authentication failure for `ip`.
@@ -97,9 +115,17 @@ impl IpFailureTracker {
         let mut map = self.failures.lock().unwrap();
         let now = Instant::now();
         let window = self.window;
-        let entry = map.entry(ip.to_string()).or_default();
-        entry.retain(|t| now.duration_since(*t) < window);
-        entry.len()
+
+        if let Some(entry) = map.get_mut(ip) {
+            entry.retain(|t| now.duration_since(*t) < window);
+            if entry.is_empty() {
+                map.remove(ip);
+                return 0;
+            }
+            entry.len()
+        } else {
+            0
+        }
     }
 }
 
@@ -143,7 +169,10 @@ pub async fn ip_rate_limit_middleware(
             client_ip = %client_ip,
             "IP rate limited: too many authentication failures"
         );
-        return build_too_many_requests_response();
+        return build_too_many_requests_response(
+            tracker.max_failures(),
+            tracker.window().as_secs(),
+        );
     }
 
     let response = next.run(request).await;
@@ -199,6 +228,14 @@ pub async fn admin_auth_middleware(
 /// 1. First (leftmost, original client) IP in `X-Forwarded-For`
 /// 2. `X-Real-IP`
 /// 3. `"unknown"`
+///
+/// # Security
+///
+/// These headers are **fully controlled by the sender** and can be trivially
+/// spoofed unless the service is deployed behind a reverse proxy that strips
+/// and re-appends them. Ensure a trusted proxy (e.g. an ingress controller or
+/// load balancer) is the only entity that can set `X-Forwarded-For` and
+/// `X-Real-IP` before this service receives the request.
 pub fn extract_client_ip(headers: &HeaderMap) -> String {
     if let Some(xff) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
         if let Some(first) = xff.split(',').next() {
@@ -220,6 +257,12 @@ pub fn extract_client_ip(headers: &HeaderMap) -> String {
 }
 
 /// Extract the bearer token from `Authorization: Bearer <token>`.
+///
+/// # Note
+///
+/// The scheme prefix (`Bearer `) comparison is **case-sensitive**. A header
+/// such as `Authorization: bearer <token>` (lowercase) will not be recognised.
+/// Clients must use the canonical capitalisation as defined in RFC 6750.
 fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {
     let auth = headers.get("authorization")?.to_str().ok()?;
     auth.strip_prefix("Bearer ").map(|t| t.to_string())
@@ -238,14 +281,17 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
         == 0
 }
 
-fn build_too_many_requests_response() -> Response {
+fn build_too_many_requests_response(limit: usize, window_secs: u64) -> Response {
     Response::builder()
         .status(StatusCode::TOO_MANY_REQUESTS)
         .header("content-type", "application/json")
-        .header("retry-after", "300")
-        .body(Body::from(
-            r#"{"error":"Too many authentication failures","retry_after_seconds":300}"#,
-        ))
+        .header("retry-after", window_secs.to_string())
+        .header("x-ratelimit-limit", limit.to_string())
+        .header("x-ratelimit-remaining", "0")
+        .body(Body::from(format!(
+            r#"{{"error":"Too many authentication failures","retry_after_seconds":{}}}"#,
+            window_secs
+        )))
         .unwrap()
 }
 

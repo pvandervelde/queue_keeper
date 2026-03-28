@@ -209,6 +209,10 @@ pub fn create_router(state: AppState) -> Router {
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
             crate::middleware::admin_auth_middleware,
+        ))
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::middleware::ip_rate_limit_middleware,
         ));
 
     Router::new()
@@ -269,11 +273,12 @@ pub async fn start_server(
 
     let event_router: Arc<dyn EventRouter> = Arc::new(DefaultEventRouter::new());
 
-    // Build IP rate limiter if enabled (assertion #19: 10 failures in 5 minutes).
+    // Build IP rate limiter if enabled (assertion #19).
+    // Threshold and window are configurable via SecurityConfig.
     let ip_rate_limiter = if config.security.enable_ip_rate_limiting {
         Some(Arc::new(IpFailureTracker::new(
-            10,
-            Duration::from_secs(300),
+            config.security.auth_failure_threshold,
+            Duration::from_secs(config.security.auth_failure_window_secs),
         )))
     } else {
         None

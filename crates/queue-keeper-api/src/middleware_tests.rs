@@ -81,6 +81,53 @@ mod ip_failure_tracker_tests {
             "IP should be unblocked after failures expire"
         );
     }
+
+    /// Verify that checking an unseen IP does not insert an empty entry into
+    /// the HashMap, preventing unbounded memory growth.
+    #[test]
+    fn test_checking_unseen_ip_does_not_grow_map() {
+        let tracker = IpFailureTracker::new(10, Duration::from_secs(300));
+        // Call all three read paths with a fresh IP
+        assert!(!tracker.is_blocked("192.0.2.1"));
+        assert_eq!(tracker.failure_count("192.0.2.1"), 0);
+
+        // The internal map must remain empty — no phantom entries created.
+        let map = tracker.failures.lock().unwrap();
+        assert_eq!(map.len(), 0, "No entries should be inserted for unseen IPs");
+    }
+
+    /// Verify that after the window expires, the entry is cleaned up so the map
+    /// does not hold stale empty vecs.
+    #[tokio::test]
+    async fn test_expired_entries_are_removed_from_map() {
+        let tracker = IpFailureTracker::new(5, Duration::from_millis(50));
+        tracker.record_failure("192.0.2.2");
+
+        {
+            let map = tracker.failures.lock().unwrap();
+            assert_eq!(map.len(), 1, "Entry should exist before expiry");
+        }
+
+        tokio::time::sleep(Duration::from_millis(60)).await;
+
+        // Calling is_blocked prunes and removes the now-empty entry.
+        tracker.is_blocked("192.0.2.2");
+
+        let map = tracker.failures.lock().unwrap();
+        assert_eq!(
+            map.len(),
+            0,
+            "Expired empty entry should be removed from the map"
+        );
+    }
+
+    /// Verify the public accessors return the configured values.
+    #[test]
+    fn test_accessors_return_configured_values() {
+        let tracker = IpFailureTracker::new(7, Duration::from_secs(120));
+        assert_eq!(tracker.max_failures(), 7);
+        assert_eq!(tracker.window(), Duration::from_secs(120));
+    }
 }
 
 // ============================================================================

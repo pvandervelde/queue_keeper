@@ -481,7 +481,7 @@ impl Default for WebhookConfig {
 }
 
 /// Security configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct SecurityConfig {
     /// Enable request rate limiting
     pub enable_rate_limiting: bool,
@@ -494,6 +494,20 @@ pub struct SecurityConfig {
 
     /// IP rate limit (requests per minute per IP)
     pub ip_rate_limit: u32,
+
+    /// Maximum number of authentication failures from a single IP before it
+    /// is rate-limited. Defaults to 10 (spec assertion #19).
+    ///
+    /// Configure via `QK__SECURITY__AUTH_FAILURE_THRESHOLD`.
+    #[serde(default = "SecurityConfig::default_auth_failure_threshold")]
+    pub auth_failure_threshold: usize,
+
+    /// Duration of the sliding window for authentication failure counting,
+    /// in seconds. Defaults to 300 (5 minutes, spec assertion #19).
+    ///
+    /// Configure via `QK__SECURITY__AUTH_FAILURE_WINDOW_SECS`.
+    #[serde(default = "SecurityConfig::default_auth_failure_window_secs")]
+    pub auth_failure_window_secs: u64,
 
     /// Enable request logging
     pub log_requests: bool,
@@ -509,8 +523,40 @@ pub struct SecurityConfig {
     ///
     /// In production deployments set this via the `QK__SECURITY__ADMIN_API_KEY`
     /// environment variable; do not store the key in committed YAML files.
-    #[serde(default)]
+    ///
+    /// This field is intentionally excluded from serialization so it is never
+    /// returned by the `/admin/config` endpoint or written to log output.
+    #[serde(default, skip_serializing)]
     pub admin_api_key: Option<String>,
+}
+
+impl std::fmt::Debug for SecurityConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SecurityConfig")
+            .field("enable_rate_limiting", &self.enable_rate_limiting)
+            .field("global_rate_limit", &self.global_rate_limit)
+            .field("enable_ip_rate_limiting", &self.enable_ip_rate_limiting)
+            .field("ip_rate_limit", &self.ip_rate_limit)
+            .field("auth_failure_threshold", &self.auth_failure_threshold)
+            .field("auth_failure_window_secs", &self.auth_failure_window_secs)
+            .field("log_requests", &self.log_requests)
+            .field("log_request_bodies", &self.log_request_bodies)
+            .field(
+                "admin_api_key",
+                &self.admin_api_key.as_ref().map(|_| "<REDACTED>"),
+            )
+            .finish()
+    }
+}
+
+impl SecurityConfig {
+    fn default_auth_failure_threshold() -> usize {
+        10
+    }
+
+    fn default_auth_failure_window_secs() -> u64 {
+        300
+    }
 }
 
 impl Default for SecurityConfig {
@@ -520,6 +566,8 @@ impl Default for SecurityConfig {
             global_rate_limit: 1000,
             enable_ip_rate_limiting: true,
             ip_rate_limit: 100,
+            auth_failure_threshold: SecurityConfig::default_auth_failure_threshold(),
+            auth_failure_window_secs: SecurityConfig::default_auth_failure_window_secs(),
             log_requests: true,
             log_request_bodies: false,
             admin_api_key: None,
