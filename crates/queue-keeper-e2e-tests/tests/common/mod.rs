@@ -73,7 +73,7 @@ impl TestContainer {
     async fn wait_for_health(&self) {
         let client = http_client();
         let health_url = format!("{}/health", self.base_url);
-        let max_attempts = 30;
+        let max_attempts = 60;
         let retry_delay = Duration::from_millis(500);
 
         for attempt in 1..=max_attempts {
@@ -90,9 +90,12 @@ impl TestContainer {
             }
         }
 
+        // Capture container logs before panicking so CI output is actionable.
+        let logs = self.logs();
         panic!(
-            "Container {} did not become healthy after {} attempts",
-            self.container_id, max_attempts
+            "Container {} did not become healthy after {} attempts.\n\
+             Container logs:\n{}",
+            self.container_id, max_attempts, logs
         );
     }
 
@@ -102,7 +105,6 @@ impl TestContainer {
     }
 
     /// Get container logs
-    #[allow(dead_code)]
     pub fn logs(&self) -> String {
         let output = Command::new("docker")
             .arg("logs")

@@ -418,31 +418,15 @@ async fn test_health_endpoints_not_gated_by_admin_auth() {
 /// to block that IP on subsequent admin requests (assertion #19 for admin).
 #[tokio::test]
 async fn test_admin_auth_failures_trigger_rate_limiting() {
-    // Arrange: tracker with threshold of 3, admin key configured
+    // Arrange: tracker with threshold of 3, admin key configured.
+    // Pre-populate 3 failures directly so we don't need multiple oneshot calls.
     let tracker = Arc::new(IpFailureTracker::new(3, Duration::from_secs(300)));
-    let mut state = create_test_app_state();
-    state.admin_api_key = Some("real-key".to_string());
-    state.ip_rate_limiter = Some(Arc::clone(&tracker));
-    let app = queue_keeper_api::create_router(state);
-
-    // Send 3 failing auth requests with the same IP — each returns 401
-    // and the ip_rate_limit_middleware records the failure.
     for _ in 0..3 {
-        let req = Request::builder()
-            .uri("/admin/config")
-            .header("x-forwarded-for", "203.0.113.20")
-            // wrong key — triggers 401
-            .header("Authorization", "Bearer wrong-key")
-            .body(Body::empty())
-            .unwrap();
-        // Each call needs its own router instance because `oneshot` consumes it.
-        let req_tracker = Arc::clone(&tracker);
-        req_tracker.record_failure("203.0.113.20");
-        let _ = req; // request constructed but not sent through router (counter incremented directly)
+        tracker.record_failure("203.0.113.20");
     }
 
-    // Now the tracker should block that IP — send one more request
-    // through the actual router.
+    // The IP is now at the threshold — the next request from that IP must be
+    // rate-limited even when it carries the correct bearer token.
     let blocked_request = Request::builder()
         .uri("/admin/config")
         .header("x-forwarded-for", "203.0.113.20")
@@ -450,13 +434,12 @@ async fn test_admin_auth_failures_trigger_rate_limiting() {
         .body(Body::empty())
         .unwrap();
 
-    // Rebuild app so we can call oneshot
-    let mut state2 = create_test_app_state();
-    state2.admin_api_key = Some("real-key".to_string());
-    state2.ip_rate_limiter = Some(Arc::clone(&tracker));
-    let app2 = queue_keeper_api::create_router(state2);
+    let mut state = create_test_app_state();
+    state.admin_api_key = Some("real-key".to_string());
+    state.ip_rate_limiter = Some(Arc::clone(&tracker));
+    let app = queue_keeper_api::create_router(state);
 
-    let response = app2.oneshot(blocked_request).await.unwrap();
+    let response = app.oneshot(blocked_request).await.unwrap();
 
     assert_eq!(
         response.status(),
