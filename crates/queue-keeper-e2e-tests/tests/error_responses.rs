@@ -86,10 +86,12 @@ async fn test_error_responses_have_consistent_format() {
         .await
         .expect("Failed to send request");
 
-    // Assert - Should be 4xx error
-    assert!(
-        response.status().is_client_error(),
-        "Missing required headers should be client error"
+    // Assert - Missing required headers should return 400 (not 404, which would
+    // indicate the provider is not registered).
+    assert_eq!(
+        response.status(),
+        400,
+        "Missing required headers should return 400 Bad Request"
     );
 }
 

@@ -692,6 +692,8 @@ pub fn create_test_app_state_with_providers(
             settings: queue_keeper_core::bot_config::BotConfigurationSettings::default(),
         }),
         queue_keeper_api::queue_delivery::QueueDeliveryConfig::default(),
+        None, // ip_rate_limiter: disabled in unit/integration tests
+        None, // admin_api_key: no auth in unit/integration tests
     )
 }
 

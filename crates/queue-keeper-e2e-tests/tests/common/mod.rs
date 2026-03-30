@@ -27,11 +27,14 @@ impl TestContainer {
         // Find an available port
         let port = find_available_port();
 
-        // Build docker run command
+        // Build docker run command.
+        // Note: --rm is intentionally omitted so the container is NOT
+        // automatically removed on exit.  This preserves logs for debugging
+        // when the container crashes during startup.  Cleanup is done
+        // explicitly in the Drop impl below.
         let mut cmd = Command::new("docker");
         cmd.arg("run")
             .arg("-d") // Detached
-            .arg("--rm") // Remove on exit
             .arg("-p")
             .arg(format!("{}:8080", port)); // Map container port 8080 to host port
 
@@ -73,11 +76,23 @@ impl TestContainer {
     async fn wait_for_health(&self) {
         let client = http_client();
         let health_url = format!("{}/health", self.base_url);
-        let max_attempts = 30;
+        let max_attempts = 60;
         let retry_delay = Duration::from_millis(500);
 
         for attempt in 1..=max_attempts {
             tokio::time::sleep(retry_delay).await;
+
+            // Detect early container exit: if the process is no longer running
+            // there is no point waiting further.
+            if let Some(status) = self.exit_status() {
+                let logs = self.logs();
+                panic!(
+                    "Container {} exited unexpectedly after {} health-check attempt(s).\n\
+                     Exit status: {}\n\
+                     Container logs:\n{}",
+                    self.container_id, attempt, status, logs
+                );
+            }
 
             if let Ok(response) = client.get(&health_url).send().await {
                 if response.status().is_success() {
@@ -90,9 +105,12 @@ impl TestContainer {
             }
         }
 
+        // Capture container logs before panicking so CI output is actionable.
+        let logs = self.logs();
         panic!(
-            "Container {} did not become healthy after {} attempts",
-            self.container_id, max_attempts
+            "Container {} did not become healthy after {} attempts.\n\
+             Container logs:\n{}",
+            self.container_id, max_attempts, logs
         );
     }
 
@@ -101,28 +119,68 @@ impl TestContainer {
         format!("{}{}", self.base_url, path)
     }
 
-    /// Get container logs
-    #[allow(dead_code)]
+    /// Get container logs (both stdout and stderr).
+    ///
+    /// `docker logs` writes the container's stdout to its own stdout and the
+    /// container's stderr to its own stderr.  The Rust `tracing` subscriber
+    /// emits to stderr by default, so both streams must be captured to see
+    /// service startup errors.
     pub fn logs(&self) -> String {
         let output = Command::new("docker")
             .arg("logs")
             .arg(&self.container_id)
             .output()
-            .expect("Failed to get container logs");
+            .expect("Failed to run docker logs");
 
-        String::from_utf8_lossy(&output.stdout).to_string()
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
+        match (stdout.is_empty(), stderr.is_empty()) {
+            (true, true) => "(no output captured — container may have been removed)".to_string(),
+            (true, false) => format!("[stderr]\n{}", stderr),
+            (false, true) => format!("[stdout]\n{}", stdout),
+            (false, false) => format!("[stdout]\n{}\n[stderr]\n{}", stdout, stderr),
+        }
+    }
+
+    /// Return the container's exit status string if it has already exited,
+    /// or `None` if it is still running.
+    fn exit_status(&self) -> Option<String> {
+        let output = Command::new("docker")
+            .args([
+                "inspect",
+                "--format",
+                "{{.State.Status}} {{.State.ExitCode}}",
+                &self.container_id,
+            ])
+            .output()
+            .ok()?;
+
+        let text = String::from_utf8_lossy(&output.stdout);
+        let text = text.trim();
+        if text.starts_with("exited") || text.starts_with("dead") {
+            Some(text.to_string())
+        } else {
+            None
+        }
     }
 }
 
 impl Drop for TestContainer {
     fn drop(&mut self) {
-        // Stop and remove container
+        // Stop and remove container. --rm was not used so we must remove explicitly.
         let _ = Command::new("docker")
             .arg("stop")
             .arg(&self.container_id)
             .output();
 
-        println!("Stopped container {}", self.container_id);
+        let _ = Command::new("docker")
+            .arg("rm")
+            .arg("--force")
+            .arg(&self.container_id)
+            .output();
+
+        println!("Stopped and removed container {}", self.container_id);
     }
 }
 
