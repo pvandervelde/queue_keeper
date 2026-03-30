@@ -484,15 +484,19 @@ impl Default for WebhookConfig {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct SecurityConfig {
     /// Enable request rate limiting
+    #[serde(default = "SecurityConfig::default_enable_rate_limiting")]
     pub enable_rate_limiting: bool,
 
     /// Global rate limit (requests per minute)
+    #[serde(default = "SecurityConfig::default_global_rate_limit")]
     pub global_rate_limit: u32,
 
     /// Enable IP-based rate limiting
+    #[serde(default = "SecurityConfig::default_enable_ip_rate_limiting")]
     pub enable_ip_rate_limiting: bool,
 
     /// IP rate limit (requests per minute per IP)
+    #[serde(default = "SecurityConfig::default_ip_rate_limit")]
     pub ip_rate_limit: u32,
 
     /// Maximum number of authentication failures from a single IP before it
@@ -510,9 +514,11 @@ pub struct SecurityConfig {
     pub auth_failure_window_secs: u64,
 
     /// Enable request logging
+    #[serde(default = "SecurityConfig::default_log_requests")]
     pub log_requests: bool,
 
     /// Log request bodies (security risk)
+    #[serde(default)]
     pub log_request_bodies: bool,
 
     /// API key required for admin endpoints (`/admin/**`).
@@ -550,6 +556,26 @@ impl std::fmt::Debug for SecurityConfig {
 }
 
 impl SecurityConfig {
+    fn default_enable_rate_limiting() -> bool {
+        true
+    }
+
+    fn default_global_rate_limit() -> u32 {
+        1000
+    }
+
+    fn default_enable_ip_rate_limiting() -> bool {
+        true
+    }
+
+    fn default_ip_rate_limit() -> u32 {
+        100
+    }
+
+    fn default_log_requests() -> bool {
+        true
+    }
+
     fn default_auth_failure_threshold() -> usize {
         10
     }
