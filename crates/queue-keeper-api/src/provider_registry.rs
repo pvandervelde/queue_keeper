@@ -163,6 +163,16 @@ impl ProviderRegistry {
     pub fn contains(&self, provider: &str) -> bool {
         self.processors.contains_key(provider)
     }
+
+    /// Returns `true` if no providers have been registered.
+    pub fn is_empty(&self) -> bool {
+        self.processors.is_empty()
+    }
+
+    /// Returns the number of registered providers.
+    pub fn len(&self) -> usize {
+        self.processors.len()
+    }
 }
 
 impl Default for ProviderRegistry {

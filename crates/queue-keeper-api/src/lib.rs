@@ -15,6 +15,7 @@ pub mod azure_config;
 pub mod config;
 pub mod dlq_storage;
 pub mod errors;
+pub mod handlers;
 pub mod metrics;
 pub mod middleware;
 pub mod provider_registry;
@@ -22,25 +23,18 @@ pub mod queue_delivery;
 pub mod responses;
 pub mod retry;
 
-// Private modules (not yet fully extracted)
-// mod handlers;
-// mod admin_api;
-
-use crate::queue_delivery::{spawn_queue_delivery, QueueDeliveryConfig};
+use crate::queue_delivery::QueueDeliveryConfig;
 use axum::{
     extract::{Path, Query, State},
-    http::{HeaderMap, StatusCode},
+    http::StatusCode,
     response::{Json, Response},
     routing::{get, post, put},
     Router,
 };
-use bytes::Bytes;
 use prometheus::TextEncoder;
 use queue_keeper_core::{
     bot_config::BotConfiguration,
-    monitoring::MetricsCollector,
     queue_integration::{DefaultEventRouter, EventRouter},
-    webhook::{ProcessingOutput, WebhookHeaders, WebhookRequest},
     EventId, SessionId, Timestamp,
 };
 use queue_runtime::QueueClient;
@@ -68,6 +62,9 @@ pub use metrics::{ServiceMetrics, TelemetryConfig};
 pub use middleware::IpFailureTracker;
 pub use provider_registry::{InvalidProviderIdError, ProviderId, ProviderRegistry};
 pub use responses::*;
+
+// Re-export handlers that are referenced by integration tests or external code.
+pub use handlers::webhook::handle_provider_webhook;
 
 // ============================================================================
 // Application State
@@ -173,17 +170,23 @@ impl AppState {
 /// Create HTTP router with all endpoints
 pub fn create_router(state: AppState) -> Router {
     let webhook_routes = Router::new()
-        .route("/webhook/{provider}", post(handle_provider_webhook))
+        .route(
+            "/webhook/{provider}",
+            post(handlers::webhook::handle_provider_webhook),
+        )
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
             crate::middleware::ip_rate_limit_middleware,
         ));
 
     let health_routes = Router::new()
-        .route("/health", get(handle_health_check))
-        .route("/health/deep", get(handle_deep_health_check))
-        .route("/health/live", get(handle_liveness_check))
-        .route("/ready", get(handle_readiness_check));
+        .route("/health", get(handlers::health::handle_health_check))
+        .route(
+            "/health/deep",
+            get(handlers::health::handle_deep_health_check),
+        )
+        .route("/health/live", get(handlers::health::handle_liveness_check))
+        .route("/ready", get(handlers::health::handle_readiness_check));
 
     let api_routes = Router::new()
         .route("/api/events", get(list_events))
@@ -236,7 +239,7 @@ pub fn create_router(state: AppState) -> Router {
 /// Start HTTP server
 pub async fn start_server(
     config: ServiceConfig,
-    provider_registry: ProviderRegistry,
+    provider_registry: Arc<ProviderRegistry>,
     health_checker: Arc<dyn HealthChecker>,
     event_store: Arc<dyn EventStore>,
     generic_provider_ids: HashSet<String>,
@@ -288,7 +291,7 @@ pub async fn start_server(
 
     let state = AppState::new(
         config.clone(),
-        Arc::new(provider_registry),
+        provider_registry,
         health_checker,
         event_store,
         metrics,
@@ -358,267 +361,6 @@ pub async fn start_server(
 
     info!("HTTP server shutdown complete");
     Ok(())
-}
-
-// ============================================================================
-// Webhook Handlers
-// ============================================================================
-
-/// Handle a webhook for a specific provider.
-///
-/// Routes `POST /webhook/{provider}` to the processor registered under that
-/// provider name. Returns `404 Not Found` when the provider is unknown.
-///
-/// # Request Flow
-///
-/// 1. Extract provider name from the URL path.
-/// 2. Look it up in the [`ProviderRegistry`]; return 404 if absent.
-/// 3. Parse provider-agnostic webhook headers.
-/// 4. Delegate to the provider's [`WebhookProcessor::process_webhook`].
-/// 5. Return `200 OK` with [`WebhookResponse`] on success.
-///
-/// # Errors
-///
-/// - [`WebhookHandlerError::ProviderNotFound`] when the provider is not registered.
-/// - [`WebhookHandlerError::InvalidHeaders`] when required headers are missing or malformed.
-/// - [`WebhookHandlerError::ProcessingFailed`] when the processor pipeline fails.
-#[instrument(skip(state, headers, body), fields(provider = %provider))]
-pub async fn handle_provider_webhook(
-    State(state): State<AppState>,
-    Path(provider): Path<String>,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Result<Json<WebhookResponse>, WebhookHandlerError> {
-    info!(provider = %provider, "Received webhook request");
-
-    // Resolve provider – return 404 for unknown providers before any further work
-    let processor = state.provider_registry.get(&provider).ok_or_else(|| {
-        WebhookHandlerError::ProviderNotFound {
-            provider: provider.clone(),
-        }
-    })?;
-
-    // Start timing for metrics
-    let start = std::time::Instant::now();
-
-    // Convert headers to HashMap (lowercase keys for consistent lookup)
-    let header_map: HashMap<String, String> = headers
-        .iter()
-        .map(|(k, v)| {
-            (
-                k.as_str().to_lowercase(),
-                v.to_str().unwrap_or("").to_string(),
-            )
-        })
-        .collect();
-
-    // Determine whether this is a generic (non-GitHub) provider.
-    // Generic providers do not send GitHub-specific headers, so we use a
-    // relaxed parser that falls back to safe defaults instead of failing.
-    //
-    // The set is pre-built at startup (O(1) lookup here vs. O(n) scan).
-    //
-    // Note: generic providers do not support `allowed_event_types` filtering
-    // — all event types are accepted regardless of configuration. If you need
-    // per-event filtering for a generic provider, implement it downstream.
-    let is_generic_provider = state.generic_provider_ids.contains(&provider);
-
-    let webhook_headers = if is_generic_provider {
-        // For generic providers, never fail on missing GitHub headers — the
-        // provider's own process_webhook will re-extract values from raw headers.
-        WebhookHeaders::from_http_headers_relaxed(&header_map)
-    } else {
-        // For GitHub and other strict providers, require all GitHub-specific headers.
-        match WebhookHeaders::from_http_headers(&header_map) {
-            Ok(h) => h,
-            Err(e) => {
-                let duration = start.elapsed();
-                state.metrics.record_webhook_request(duration, false);
-                state.metrics.record_webhook_validation_failure();
-                return Err(WebhookHandlerError::InvalidHeaders(e));
-            }
-        }
-    };
-
-    // Enforce per-provider allowed_event_types if configured.
-    // An empty list means all event types are accepted.
-    //
-    // Note: require_signature enforcement is delegated to the processor's
-    // SignatureValidator. When a SignatureValidator is wired into the
-    // DefaultWebhookProcessor it will reject requests with an invalid or
-    // missing signature regardless of the ProviderConfig setting.
-    let provider_config = state.config.providers.iter().find(|p| p.id == provider);
-    if let Some(pc) = provider_config {
-        if !pc.allowed_event_types.is_empty()
-            && !pc.allowed_event_types.contains(&webhook_headers.event_type)
-        {
-            let duration = start.elapsed();
-            state.metrics.record_webhook_request(duration, false);
-            state.metrics.record_webhook_validation_failure();
-            return Err(WebhookHandlerError::InvalidHeaders(
-                queue_keeper_core::ValidationError::InvalidFormat {
-                    // Use a provider-neutral field name so non-GitHub providers
-                    // receive a sensible error rather than a GitHub header name.
-                    field: "event-type".to_string(),
-                    message: format!(
-                        "event type '{}' is not in the allowed list for provider '{}'",
-                        webhook_headers.event_type, provider
-                    ),
-                },
-            ));
-        }
-    }
-
-    // Create webhook request, carrying the full header map so generic providers
-    // can resolve FieldSource::Header values from any header name.
-    let webhook_request = WebhookRequest::with_raw_headers(webhook_headers, header_map, body);
-
-    // Delegate to the provider-specific processor
-    let processing_output = match processor.process_webhook(webhook_request).await {
-        Ok(output) => output,
-        Err(e) => {
-            let duration = start.elapsed();
-            state.metrics.record_webhook_request(duration, false);
-            return Err(WebhookHandlerError::ProcessingFailed(e));
-        }
-    };
-
-    info!(
-        event_id = %processing_output.event_id(),
-        event_type = processing_output.event_type().unwrap_or("unknown"),
-        session_id = ?processing_output.session_id(),
-        provider = %provider,
-        "Successfully processed webhook - returning immediate response"
-    );
-
-    let duration = start.elapsed();
-    state.metrics.record_webhook_request(duration, true);
-
-    let event_id = processing_output.event_id();
-    let session_id = processing_output.session_id().cloned();
-
-    // Spawn async queue delivery for wrapped events (fire-and-forget).
-    // Direct-mode events are forwarded as raw payloads and do not go through
-    // the event router.
-    if let ProcessingOutput::Wrapped(wrapped_event) = processing_output {
-        if let Some(queue_client) = &state.queue_client {
-            let handle = spawn_queue_delivery(
-                wrapped_event,
-                state.event_router.clone(),
-                state.bot_config.clone(),
-                queue_client.clone(),
-                state.delivery_config.clone(),
-            );
-            // Detach the task but monitor for panics: if the delivery task
-            // panics the JoinHandle will hold the panic payload until dropped.
-            // Spawning a watcher task ensures the panic is surfaced in logs
-            // rather than silently discarded, and allows tracing the event_id.
-            let logged_event_id = event_id;
-            tokio::spawn(async move {
-                if let Err(join_err) = handle.await {
-                    if join_err.is_panic() {
-                        error!(
-                            event_id = %logged_event_id,
-                            "Queue delivery task panicked — event may not have been delivered"
-                        );
-                    }
-                }
-            });
-        }
-    }
-
-    Ok(Json(WebhookResponse {
-        event_id,
-        session_id,
-        status: "processed".to_string(),
-        message: "Webhook processed successfully".to_string(),
-    }))
-}
-
-// ============================================================================
-// Health Check Handlers
-// ============================================================================
-
-/// Basic health check endpoint
-#[instrument(skip(state))]
-async fn handle_health_check(
-    State(state): State<AppState>,
-) -> Result<Json<HealthResponse>, StatusCode> {
-    let status = state.health_checker.check_basic_health().await;
-
-    let response = HealthResponse {
-        status: if status.is_healthy {
-            "healthy".to_string()
-        } else {
-            "unhealthy".to_string()
-        },
-        timestamp: Timestamp::now(),
-        checks: status.checks,
-        version: env!("CARGO_PKG_VERSION").to_string(),
-    };
-
-    if status.is_healthy {
-        Ok(Json(response))
-    } else {
-        Err(StatusCode::SERVICE_UNAVAILABLE)
-    }
-}
-
-/// Deep health check with dependency validation
-#[instrument(skip(state))]
-async fn handle_deep_health_check(
-    State(state): State<AppState>,
-) -> Result<Json<HealthResponse>, StatusCode> {
-    let status = state.health_checker.check_deep_health().await;
-
-    let response = HealthResponse {
-        status: if status.is_healthy {
-            "healthy".to_string()
-        } else {
-            "unhealthy".to_string()
-        },
-        timestamp: Timestamp::now(),
-        checks: status.checks,
-        version: env!("CARGO_PKG_VERSION").to_string(),
-    };
-
-    if status.is_healthy {
-        Ok(Json(response))
-    } else {
-        Err(StatusCode::SERVICE_UNAVAILABLE)
-    }
-}
-
-/// Readiness check for Kubernetes
-#[instrument(skip(state))]
-async fn handle_readiness_check(
-    State(state): State<AppState>,
-) -> Result<Json<ReadinessResponse>, StatusCode> {
-    let is_ready = state.health_checker.check_readiness().await;
-
-    let response = ReadinessResponse {
-        ready: is_ready,
-        timestamp: Timestamp::now(),
-    };
-
-    if is_ready {
-        Ok(Json(response))
-    } else {
-        Err(StatusCode::SERVICE_UNAVAILABLE)
-    }
-}
-
-/// Liveness check endpoint (for Kubernetes)
-#[instrument(skip(_state))]
-async fn handle_liveness_check(State(_state): State<AppState>) -> Json<HealthResponse> {
-    // Liveness check is simpler than readiness - just verify the process is alive
-    // If we can respond, we're alive (unlike readiness which checks dependencies)
-    Json(HealthResponse {
-        status: "alive".to_string(),
-        timestamp: Timestamp::now(),
-        checks: HashMap::new(),
-        version: env!("CARGO_PKG_VERSION").to_string(),
-    })
 }
 
 // ============================================================================
