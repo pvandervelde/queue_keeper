@@ -1,9 +1,11 @@
 //! Response types, query parameters, and supporting types for the API.
 
+use crate::ProviderRegistry;
 use queue_keeper_core::webhook::WrappedEvent;
 use queue_keeper_core::{EventId, QueueKeeperError, Repository, SessionId, Timestamp};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 // ============================================================================
 // Response Types
@@ -334,6 +336,98 @@ impl HealthChecker for DefaultHealthChecker {
     }
 }
 
+/// Production health checker that verifies service-level readiness.
+///
+/// Unlike [`DefaultHealthChecker`], this implementation checks that at least
+/// one webhook provider is registered before reporting ready. An empty provider
+/// registry means the service cannot process any incoming webhooks, so traffic
+/// should not be routed to it.
+///
+/// # Readiness contract
+///
+/// - **Ready** (`true`): ≥ 1 provider registered.
+/// - **Not ready** (`false`): provider registry is empty (Kubernetes will not route
+///   traffic until a subsequent `/ready` poll returns 200).
+pub struct ServiceHealthChecker {
+    provider_registry: Arc<ProviderRegistry>,
+}
+
+impl ServiceHealthChecker {
+    /// Create a new checker bound to the given provider registry.
+    pub fn new(provider_registry: Arc<ProviderRegistry>) -> Self {
+        Self { provider_registry }
+    }
+}
+
+#[async_trait::async_trait]
+impl HealthChecker for ServiceHealthChecker {
+    async fn check_basic_health(&self) -> HealthStatus {
+        let start = std::time::Instant::now();
+        let mut checks = HashMap::new();
+
+        let provider_count = self.provider_registry.len();
+        let providers_healthy = provider_count > 0;
+        checks.insert(
+            "service".to_string(),
+            HealthCheckResult {
+                healthy: true,
+                message: "Service is running".to_string(),
+                duration_ms: start.elapsed().as_millis() as u64,
+            },
+        );
+        checks.insert(
+            "providers".to_string(),
+            HealthCheckResult {
+                healthy: providers_healthy,
+                message: format!("{} webhook provider(s) registered", provider_count),
+                duration_ms: start.elapsed().as_millis() as u64,
+            },
+        );
+
+        HealthStatus {
+            is_healthy: providers_healthy,
+            checks,
+        }
+    }
+
+    async fn check_deep_health(&self) -> HealthStatus {
+        let start = std::time::Instant::now();
+        let mut checks = HashMap::new();
+
+        let provider_count = self.provider_registry.len();
+        let providers_healthy = provider_count > 0;
+
+        checks.insert(
+            "service".to_string(),
+            HealthCheckResult {
+                healthy: true,
+                message: "Service is running".to_string(),
+                duration_ms: start.elapsed().as_millis() as u64,
+            },
+        );
+        checks.insert(
+            "providers".to_string(),
+            HealthCheckResult {
+                healthy: providers_healthy,
+                message: format!("{} webhook provider(s) registered", provider_count),
+                duration_ms: start.elapsed().as_millis() as u64,
+            },
+        );
+
+        HealthStatus {
+            is_healthy: providers_healthy,
+            checks,
+        }
+    }
+
+    async fn check_readiness(&self) -> bool {
+        // Ready when at least one webhook provider is registered.
+        // An empty registry means the service cannot handle any incoming
+        // webhooks, so Kubernetes should not route traffic to this pod.
+        !self.provider_registry.is_empty()
+    }
+}
+
 /// Default event store implementation
 pub struct DefaultEventStore;
 
@@ -394,3 +488,11 @@ impl EventStore for DefaultEventStore {
         })
     }
 }
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+#[cfg(test)]
+#[path = "responses_tests.rs"]
+mod tests;

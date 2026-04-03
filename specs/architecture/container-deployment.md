@@ -329,7 +329,7 @@ trafficShifting:
 healthCheck:
   liveness:
     httpGet:
-      path: "/health"
+      path: "/health/live"
       port: 8080
     initialDelaySeconds: 10
     periodSeconds: 30
