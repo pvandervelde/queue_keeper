@@ -366,6 +366,7 @@ impl HealthChecker for ServiceHealthChecker {
         let mut checks = HashMap::new();
 
         let provider_count = self.provider_registry.len();
+        let providers_healthy = provider_count > 0;
         checks.insert(
             "service".to_string(),
             HealthCheckResult {
@@ -377,14 +378,14 @@ impl HealthChecker for ServiceHealthChecker {
         checks.insert(
             "providers".to_string(),
             HealthCheckResult {
-                healthy: provider_count > 0,
+                healthy: providers_healthy,
                 message: format!("{} webhook provider(s) registered", provider_count),
                 duration_ms: start.elapsed().as_millis() as u64,
             },
         );
 
         HealthStatus {
-            is_healthy: true,
+            is_healthy: providers_healthy,
             checks,
         }
     }
@@ -487,3 +488,11 @@ impl EventStore for DefaultEventStore {
         })
     }
 }
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+#[cfg(test)]
+#[path = "responses_tests.rs"]
+mod tests;

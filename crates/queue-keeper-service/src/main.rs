@@ -15,8 +15,8 @@ mod signature_validator;
 
 use circuit_breaker::queue::{CircuitBreakerQueueClient, CircuitBreakerQueueProvider};
 use queue_keeper_api::{
-    start_server, DefaultEventStore, ServiceHealthChecker, ProviderId, ProviderRegistry,
-    QueueBackendConfig, ServiceConfig, ServiceError,
+    start_server, DefaultEventStore, ProviderId, ProviderRegistry, QueueBackendConfig,
+    ServiceConfig, ServiceError, ServiceHealthChecker,
 };
 use queue_keeper_core::adapters::{memory_key_vault::InMemorySecretCache, AzureKeyVaultProvider};
 use queue_keeper_core::bot_config::BotConfiguration;
@@ -253,7 +253,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let health_checker = Arc::new(ServiceHealthChecker::new(Arc::new(provider_registry.clone())));
+    let provider_registry = Arc::new(provider_registry);
+    let health_checker = Arc::new(ServiceHealthChecker::new(Arc::clone(&provider_registry)));
     let event_store = Arc::new(DefaultEventStore);
 
     // -------------------------------------------------------------------------
@@ -295,7 +296,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Start the server
     if let Err(e) = start_server(
         service_config,
-        Arc::new(provider_registry),
+        provider_registry,
         health_checker,
         event_store,
         generic_provider_ids,

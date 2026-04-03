@@ -25,7 +25,7 @@ use tracing::instrument;
 #[instrument(skip(state))]
 pub async fn handle_health_check(
     State(state): State<AppState>,
-) -> Result<Json<HealthResponse>, StatusCode> {
+) -> (StatusCode, Json<HealthResponse>) {
     let status = state.health_checker.check_basic_health().await;
 
     let response = HealthResponse {
@@ -39,11 +39,13 @@ pub async fn handle_health_check(
         version: env!("CARGO_PKG_VERSION").to_string(),
     };
 
-    if status.is_healthy {
-        Ok(Json(response))
+    let status_code = if status.is_healthy {
+        StatusCode::OK
     } else {
-        Err(StatusCode::SERVICE_UNAVAILABLE)
-    }
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+
+    (status_code, Json(response))
 }
 
 /// Deep health check with dependency validation (`GET /health/deep`).
@@ -53,7 +55,7 @@ pub async fn handle_health_check(
 #[instrument(skip(state))]
 pub async fn handle_deep_health_check(
     State(state): State<AppState>,
-) -> Result<Json<HealthResponse>, StatusCode> {
+) -> (StatusCode, Json<HealthResponse>) {
     let status = state.health_checker.check_deep_health().await;
 
     let response = HealthResponse {
@@ -67,11 +69,13 @@ pub async fn handle_deep_health_check(
         version: env!("CARGO_PKG_VERSION").to_string(),
     };
 
-    if status.is_healthy {
-        Ok(Json(response))
+    let status_code = if status.is_healthy {
+        StatusCode::OK
     } else {
-        Err(StatusCode::SERVICE_UNAVAILABLE)
-    }
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+
+    (status_code, Json(response))
 }
 
 /// Readiness check for Kubernetes (`GET /ready`).
@@ -83,7 +87,7 @@ pub async fn handle_deep_health_check(
 #[instrument(skip(state))]
 pub async fn handle_readiness_check(
     State(state): State<AppState>,
-) -> Result<Json<ReadinessResponse>, StatusCode> {
+) -> (StatusCode, Json<ReadinessResponse>) {
     let is_ready = state.health_checker.check_readiness().await;
 
     let response = ReadinessResponse {
@@ -91,11 +95,13 @@ pub async fn handle_readiness_check(
         timestamp: Timestamp::now(),
     };
 
-    if is_ready {
-        Ok(Json(response))
+    let status_code = if is_ready {
+        StatusCode::OK
     } else {
-        Err(StatusCode::SERVICE_UNAVAILABLE)
-    }
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+
+    (status_code, Json(response))
 }
 
 /// Liveness check for Kubernetes (`GET /health/live`).
