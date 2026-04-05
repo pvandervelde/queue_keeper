@@ -131,6 +131,7 @@ fn test_app_state(registry: ProviderRegistry) -> AppState {
         queue_delivery::QueueDeliveryConfig::default(),
         None, // ip_rate_limiter: disabled in unit tests
         None, // admin_api_key: no auth in unit tests
+        None, // event_blob_storage: no event persistence in unit tests
     )
 }
 
