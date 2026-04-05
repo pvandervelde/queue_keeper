@@ -727,6 +727,10 @@ impl EventStore for BlobBackedEventStore {
                 });
 
         // Apply in-memory filters (since, session_id) not supported at blob-list level.
+        // TODO: push the `since` cutoff down to the storage layer via
+        // `PayloadFilter.date_range` once that field is wired in the blob-storage
+        // implementations, eliminating the need to deserialise all blobs before
+        // filtering.
         let filtered: Vec<&WrappedEvent> = all_events
             .iter()
             .filter(|e| since_ts.is_none_or(|ts| e.received_at >= ts))
@@ -949,6 +953,12 @@ impl EventStore for BlobBackedEventStore {
         // Load all event bodies so we can count sessions accurately —
         // session_id is not stored in BlobMetadata so a metadata-only scan
         // (list_payloads) cannot determine the session count.
+        //
+        // NOTE: because load_all_events propagates ChecksumMismatch as
+        // QueueKeeperError::Internal, a single tampered or corrupt event blob
+        // will cause this endpoint to return 500 for every caller until the
+        // blob is removed. This is intentional: any tampering must be
+        // immediately visible rather than silently hidden behind partial stats.
         let all_events = self.load_all_events(&PayloadFilter::default()).await?;
 
         let total_events = all_events.len() as u64;
