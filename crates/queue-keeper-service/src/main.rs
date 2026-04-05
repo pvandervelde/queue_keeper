@@ -15,10 +15,13 @@ mod signature_validator;
 
 use circuit_breaker::queue::{CircuitBreakerQueueClient, CircuitBreakerQueueProvider};
 use queue_keeper_api::{
-    start_server, DefaultEventStore, ProviderId, ProviderRegistry, QueueBackendConfig,
+    start_server, BlobBackedEventStore, ProviderId, ProviderRegistry, QueueBackendConfig,
     ServiceConfig, ServiceError, ServiceHealthChecker,
 };
-use queue_keeper_core::adapters::{memory_key_vault::InMemorySecretCache, AzureKeyVaultProvider};
+use queue_keeper_core::adapters::{
+    memory_key_vault::InMemorySecretCache, AzureKeyVaultProvider, FilesystemBlobStorage,
+};
+use queue_keeper_core::blob_storage::BlobStorage;
 use queue_keeper_core::bot_config::BotConfiguration;
 use queue_keeper_core::key_vault::{KeyVaultConfiguration, KeyVaultProvider, SecretName};
 use queue_keeper_core::webhook::{generic_provider::GenericWebhookProvider, GithubWebhookProvider};
@@ -26,8 +29,9 @@ use queue_runtime::{
     InMemoryConfig, ProviderConfig, QueueClientFactory, QueueConfig, StandardQueueClient,
 };
 use signature_validator::{KeyVaultSignatureValidator, LiteralSignatureValidator};
+use std::path::PathBuf;
 use std::sync::Arc;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
@@ -255,7 +259,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let provider_registry = Arc::new(provider_registry);
     let health_checker = Arc::new(ServiceHealthChecker::new(Arc::clone(&provider_registry)));
-    let event_store = Arc::new(DefaultEventStore);
+
+    // -------------------------------------------------------------------------
+    // Initialise blob storage for persisting processed events.
+    //
+    // Events written here power the /api/events and /api/sessions query
+    // endpoints. The default is filesystem-backed storage at ./data/events
+    // (relative to the working directory). In production you would replace
+    // this with an Azure Blob Storage adapter configured from the azure section
+    // of service.yaml.
+    // -------------------------------------------------------------------------
+    let event_blob_path =
+        std::env::var("QK_EVENT_STORAGE_PATH").unwrap_or_else(|_| "./data/events".to_string());
+
+    let event_blob_storage: Option<Arc<dyn BlobStorage>> =
+        match FilesystemBlobStorage::new(PathBuf::from(&event_blob_path)).await {
+            Ok(storage) => {
+                info!(path = %event_blob_path, "Event blob storage initialised (filesystem)");
+                Some(Arc::new(storage))
+            }
+            Err(e) => {
+                warn!(
+                    path = %event_blob_path,
+                    error = %e,
+                    "Failed to initialise event blob storage; /api/events will return empty results"
+                );
+                None
+            }
+        };
+
+    let event_store: Arc<dyn queue_keeper_api::EventStore> =
+        if let Some(ref storage) = event_blob_storage {
+            Arc::new(BlobBackedEventStore::new(Arc::clone(storage)))
+        } else {
+            Arc::new(queue_keeper_api::DefaultEventStore)
+        };
 
     // -------------------------------------------------------------------------
     // Build queue client from runtime configuration.
@@ -302,6 +340,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         generic_provider_ids,
         Some(queue_client),
         bot_config,
+        event_blob_storage,
     )
     .await
     {

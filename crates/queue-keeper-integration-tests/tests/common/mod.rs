@@ -694,6 +694,7 @@ pub fn create_test_app_state_with_providers(
         queue_keeper_api::queue_delivery::QueueDeliveryConfig::default(),
         None, // ip_rate_limiter: disabled in unit/integration tests
         None, // admin_api_key: no auth in unit/integration tests
+        None, // event_blob_storage: no event persistence in unit/integration tests
     )
 }
 

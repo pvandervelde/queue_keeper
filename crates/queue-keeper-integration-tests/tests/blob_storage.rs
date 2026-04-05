@@ -118,8 +118,15 @@ async fn test_payload_retrieval() {
 /// Verify that checksums detect payload tampering
 ///
 /// Tests Assertion #23: Payload Immutability (tamper detection)
+///
+/// Stores a payload, then directly modifies the stored JSON file on disk to
+/// simulate tampering, and confirms that the next retrieval returns a
+/// `BlobStorageError::ChecksumMismatch`.
 #[tokio::test]
 async fn test_checksum_tamper_detection() {
+    use queue_keeper_core::blob_storage::BlobStorageError;
+    use std::io::Write;
+
     // Arrange
     let storage_path = std::env::temp_dir().join("test-storage-tamper");
     let storage = queue_keeper_core::adapters::filesystem_storage::FilesystemBlobStorage::new(
@@ -129,8 +136,9 @@ async fn test_checksum_tamper_detection() {
     .expect("Failed to create storage");
 
     let event_id = EventId::new();
+    let original_body = Bytes::from("{\"action\":\"opened\"}");
     let payload = WebhookPayload {
-        body: Bytes::from("{\"action\":\"opened\"}"),
+        body: original_body.clone(),
         headers: HashMap::new(),
         metadata: PayloadMetadata {
             event_id,
@@ -144,14 +152,58 @@ async fn test_checksum_tamper_detection() {
 
     // Act: Store payload
     let store_result = storage.store_payload(&event_id, &payload).await;
-    assert!(store_result.is_ok());
+    assert!(
+        store_result.is_ok(),
+        "Store should succeed: {:?}",
+        store_result.err()
+    );
+    let blob_meta = store_result.unwrap();
 
-    // Tamper with stored file (modify the body)
-    // Note: This requires finding the stored file and modifying it
-    // For filesystem storage, we'd need to know the path structure
+    // Tamper: read the JSON file on disk and replace the stored body bytes
+    // with different content (without updating the checksum).
+    let blob_file = storage_path.join(&blob_meta.blob_path);
+    assert!(
+        blob_file.exists(),
+        "Blob file must exist at {:?}",
+        blob_file
+    );
 
-    // TODO: Implement file tampering based on storage path structure
-    // Then verify that retrieval detects the tampering
+    let raw_json = std::fs::read_to_string(&blob_file).expect("Should be able to read blob file");
+
+    // Parse, mutate, reserialise — replacing the body but leaving the checksum intact
+    let mut stored_value: serde_json::Value =
+        serde_json::from_str(&raw_json).expect("Blob should be valid JSON");
+
+    // The body is stored as a byte array (via bytes_serde). Replace it with
+    // different bytes to break the checksum.
+    stored_value["payload"]["body"] = serde_json::json!([1u8, 2u8, 3u8, 4u8]);
+
+    let tampered_json =
+        serde_json::to_string_pretty(&stored_value).expect("Re-serialisation should succeed");
+
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .open(&blob_file)
+        .expect("Should be able to open blob file for writing");
+    file.write_all(tampered_json.as_bytes())
+        .expect("Should be able to write tampered content");
+    drop(file);
+
+    // Assert: retrieval detects the tampering via checksum mismatch
+    let retrieve_result = storage.get_payload(&event_id).await;
+
+    assert!(
+        retrieve_result.is_err(),
+        "Retrieval of tampered blob must return an error"
+    );
+    assert!(
+        matches!(
+            retrieve_result.unwrap_err(),
+            BlobStorageError::ChecksumMismatch { .. }
+        ),
+        "Error must be ChecksumMismatch"
+    );
 
     // Cleanup
     let _ = std::fs::remove_dir_all(storage_path);
