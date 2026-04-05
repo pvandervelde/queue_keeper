@@ -12,7 +12,11 @@ use queue_keeper_core::{
         NormalizationError, ProcessingOutput, StorageError, StorageReference, ValidationStatus,
         WebhookError, WebhookProcessor, WebhookRequest, WrappedEvent,
     },
-    Timestamp, ValidationError,
+    EventId, QueueKeeperError, SessionId, Timestamp, ValidationError,
+};
+use responses::{
+    EventListParams, EventListResponse, EventStore, SessionDetails, SessionListParams,
+    SessionListResponse, StatisticsResponse,
 };
 use std::sync::{Arc, Mutex, OnceLock};
 use tower::ServiceExt;
@@ -264,5 +268,131 @@ async fn test_unknown_provider_404_has_error_body() {
     assert!(
         body["error"].as_str().unwrap_or("").contains("nonexistent"),
         "Error message should mention the unknown provider name"
+    );
+}
+
+// ============================================================================
+// Event API handler tests
+// ============================================================================
+
+/// EventStore that always returns QueueKeeperError::Internal for get_event and get_session.
+struct AlwaysFailingEventStore;
+
+#[async_trait]
+impl EventStore for AlwaysFailingEventStore {
+    async fn list_events(
+        &self,
+        params: EventListParams,
+    ) -> Result<EventListResponse, QueueKeeperError> {
+        Ok(EventListResponse {
+            events: vec![],
+            total: 0,
+            page: params.page.unwrap_or(1),
+            per_page: params.per_page.unwrap_or(50),
+        })
+    }
+
+    async fn get_event(&self, _event_id: &EventId) -> Result<WrappedEvent, QueueKeeperError> {
+        Err(QueueKeeperError::Internal {
+            message: "simulated storage failure".to_string(),
+        })
+    }
+
+    async fn list_sessions(
+        &self,
+        _params: SessionListParams,
+    ) -> Result<SessionListResponse, QueueKeeperError> {
+        Ok(SessionListResponse {
+            sessions: vec![],
+            total: 0,
+        })
+    }
+
+    async fn get_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<SessionDetails, QueueKeeperError> {
+        Err(QueueKeeperError::Internal {
+            message: format!("simulated storage failure for {}", session_id),
+        })
+    }
+
+    async fn get_statistics(&self) -> Result<StatisticsResponse, QueueKeeperError> {
+        Ok(StatisticsResponse {
+            total_events: 0,
+            events_per_hour: 0.0,
+            active_sessions: 0,
+            error_rate: 0.0,
+            uptime_seconds: 0,
+        })
+    }
+}
+
+/// Build an [`AppState`] using a custom event store.
+fn test_app_state_with_store(store: impl EventStore + 'static) -> AppState {
+    AppState::new(
+        ServiceConfig::default(),
+        Arc::new(ProviderRegistry::new()),
+        Arc::new(DefaultHealthChecker),
+        Arc::new(store),
+        test_metrics(),
+        Arc::new(TelemetryConfig::new(
+            "test-service".to_string(),
+            "test".to_string(),
+        )),
+        std::collections::HashSet::new(),
+        None,
+        Arc::new(queue_keeper_core::queue_integration::DefaultEventRouter::new()),
+        Arc::new(queue_keeper_core::bot_config::BotConfiguration {
+            bots: vec![],
+            settings: queue_keeper_core::bot_config::BotConfigurationSettings::default(),
+        }),
+        queue_delivery::QueueDeliveryConfig::default(),
+        None,
+        None,
+        None,
+    )
+}
+
+/// GET /api/events/{event_id} must return 500 when the event store returns an
+/// Internal error (e.g. checksum mismatch), not 404.
+#[tokio::test]
+async fn test_get_event_returns_500_on_internal_error() {
+    let app = create_router(test_app_state_with_store(AlwaysFailingEventStore));
+
+    let event_id = EventId::new();
+    let request = Request::builder()
+        .method("GET")
+        .uri(format!("/api/events/{}", event_id))
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+
+    assert_eq!(
+        response.status(),
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "Internal storage errors must surface as 500, not 404"
+    );
+}
+
+/// GET /api/sessions/{session_id} must return 500 when the event store returns an
+/// Internal error, not 404.
+#[tokio::test]
+async fn test_get_session_returns_500_on_internal_error() {
+    let app = create_router(test_app_state_with_store(AlwaysFailingEventStore));
+
+    let request = Request::builder()
+        .method("GET")
+        .uri("/api/sessions/owner%2Frepo%2Fpull_request%2F1")
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+
+    assert_eq!(
+        response.status(),
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "Internal storage errors must surface as 500, not 404"
     );
 }

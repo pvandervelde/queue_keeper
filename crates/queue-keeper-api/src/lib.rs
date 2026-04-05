@@ -36,7 +36,7 @@ use queue_keeper_core::{
     blob_storage::BlobStorage,
     bot_config::BotConfiguration,
     queue_integration::{DefaultEventRouter, EventRouter},
-    EventId, SessionId, Timestamp,
+    EventId, QueueKeeperError, SessionId, Timestamp,
 };
 use queue_runtime::QueueClient;
 use std::{
@@ -413,9 +413,10 @@ async fn get_event(
 
     match state.event_store.get_event(&event_id).await {
         Ok(envelope) => Ok(Json(EventDetailResponse { event: envelope })),
+        Err(QueueKeeperError::NotFound { .. }) => Err(StatusCode::NOT_FOUND),
         Err(e) => {
             error!(error = %e, event_id = %event_id, "Failed to get event");
-            Err(StatusCode::NOT_FOUND)
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
         }
     }
 }
@@ -452,9 +453,10 @@ async fn get_session(
 
     match state.event_store.get_session(&session_id).await {
         Ok(details) => Ok(Json(SessionDetailResponse { session: details })),
+        Err(QueueKeeperError::NotFound { .. }) => Err(StatusCode::NOT_FOUND),
         Err(e) => {
             error!(error = %e, session_id = %session_id, "Failed to get session");
-            Err(StatusCode::NOT_FOUND)
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
         }
     }
 }

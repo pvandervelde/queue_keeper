@@ -152,16 +152,23 @@ async fn test_checksum_tamper_detection() {
 
     // Act: Store payload
     let store_result = storage.store_payload(&event_id, &payload).await;
-    assert!(store_result.is_ok(), "Store should succeed: {:?}", store_result.err());
+    assert!(
+        store_result.is_ok(),
+        "Store should succeed: {:?}",
+        store_result.err()
+    );
     let blob_meta = store_result.unwrap();
 
     // Tamper: read the JSON file on disk and replace the stored body bytes
     // with different content (without updating the checksum).
     let blob_file = storage_path.join(&blob_meta.blob_path);
-    assert!(blob_file.exists(), "Blob file must exist at {:?}", blob_file);
+    assert!(
+        blob_file.exists(),
+        "Blob file must exist at {:?}",
+        blob_file
+    );
 
-    let raw_json = std::fs::read_to_string(&blob_file)
-        .expect("Should be able to read blob file");
+    let raw_json = std::fs::read_to_string(&blob_file).expect("Should be able to read blob file");
 
     // Parse, mutate, reserialise — replacing the body but leaving the checksum intact
     let mut stored_value: serde_json::Value =
@@ -171,8 +178,8 @@ async fn test_checksum_tamper_detection() {
     // different bytes to break the checksum.
     stored_value["payload"]["body"] = serde_json::json!([1u8, 2u8, 3u8, 4u8]);
 
-    let tampered_json = serde_json::to_string_pretty(&stored_value)
-        .expect("Re-serialisation should succeed");
+    let tampered_json =
+        serde_json::to_string_pretty(&stored_value).expect("Re-serialisation should succeed");
 
     let mut file = std::fs::OpenOptions::new()
         .write(true)

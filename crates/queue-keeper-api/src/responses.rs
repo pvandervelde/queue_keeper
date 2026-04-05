@@ -450,6 +450,17 @@ impl HealthChecker for ServiceHealthChecker {
 /// Returns a [`BlobStorageError`] if serialisation or the underlying storage
 /// operation fails. The caller is expected to log the error and treat blob
 /// persistence failures as non-fatal (events are still delivered to queues).
+///
+/// # Storage Path Isolation
+///
+/// `WrappedEvent` blobs and raw-payload blobs (written by `BlobStorageAdapter`)
+/// share the same `webhook-payloads/…/{event_id}.json` path scheme. Path
+/// collisions are prevented by using **separate storage roots** — the call site
+/// must supply a [`BlobStorage`] instance backed by a different directory or
+/// container prefix than the one used for raw payloads. In the service binary
+/// this is enforced via `QK_EVENT_STORAGE_PATH`. `EventId` uniqueness means
+/// keys will never literally collide even if the wrong root is used, but
+/// blob metadata (event_type, repository) would be inconsistent between stores.
 pub async fn store_wrapped_event_to_blob(
     storage: &dyn BlobStorage,
     event: &WrappedEvent,
@@ -472,6 +483,9 @@ pub async fn store_wrapped_event_to_blob(
             event_id: event.event_id,
             event_type: event.event_type.clone(),
             repository,
+            // All WrappedEvents reaching this point have cleared webhook
+            // processing (including signature validation). The flag records
+            // validity at ingestion time; it is not re-checked on read.
             signature_valid: true,
             received_at: event.received_at,
             delivery_id: None,
@@ -496,7 +510,10 @@ fn extract_repository_from_wrapped_event(event: &WrappedEvent) -> Option<Reposit
     let id = repo_data.get("id")?.as_u64()?;
     let name = repo_data.get("name")?.as_str()?.to_string();
     let full_name = repo_data.get("full_name")?.as_str()?.to_string();
-    let private = repo_data.get("private").and_then(|p| p.as_bool()).unwrap_or(false);
+    let private = repo_data
+        .get("private")
+        .and_then(|p| p.as_bool())
+        .unwrap_or(false);
 
     let owner = repo_data.get("owner").and_then(|o| {
         let owner_id = o.get("id")?.as_u64()?;
@@ -578,7 +595,11 @@ impl BlobBackedEventStore {
                 resource: "event".to_string(),
                 id: event_id.to_string(),
             },
-            BlobStorageError::ChecksumMismatch { path, expected, actual } => {
+            BlobStorageError::ChecksumMismatch {
+                path,
+                expected,
+                actual,
+            } => {
                 error!(
                     path = %path,
                     expected_checksum = %expected,
@@ -649,6 +670,19 @@ impl BlobBackedEventStore {
                         "Blob listed but not found during load; may have been deleted"
                     );
                 }
+                Err(BlobStorageError::ChecksumMismatch { path, .. }) => {
+                    error!(
+                        event_id = %meta.event_id,
+                        path = %path,
+                        "Checksum mismatch for event blob — possible tampering detected"
+                    );
+                    return Err(QueueKeeperError::Internal {
+                        message: format!(
+                            "Checksum mismatch for event blob {}: possible tampering",
+                            meta.event_id
+                        ),
+                    });
+                }
                 Err(e) => {
                     warn!(event_id = %meta.event_id, error = %e, "Error loading event blob; skipping");
                 }
@@ -677,20 +711,34 @@ impl EventStore for BlobBackedEventStore {
 
         let all_events = self.load_all_events(&filter).await?;
 
-        // Apply session filter if provided (not a blob-level filter)
-        let filtered: Vec<&WrappedEvent> = if let Some(ref session_filter) = params.session_id {
-            all_events
-                .iter()
-                .filter(|e| {
+        // Parse `since` as an RFC 3339 timestamp. Invalid values are logged
+        // and treated as absent so callers receive a predictable result set
+        // rather than an opaque error.
+        let since_ts: Option<Timestamp> =
+            params
+                .since
+                .as_deref()
+                .and_then(|s| match Timestamp::from_rfc3339(s) {
+                    Ok(ts) => Some(ts),
+                    Err(_) => {
+                        warn!(since = %s, "Invalid 'since' timestamp format; ignoring filter");
+                        None
+                    }
+                });
+
+        // Apply in-memory filters (since, session_id) not supported at blob-list level.
+        let filtered: Vec<&WrappedEvent> = all_events
+            .iter()
+            .filter(|e| since_ts.is_none_or(|ts| e.received_at >= ts))
+            .filter(|e| {
+                params.session_id.as_deref().is_none_or(|s| {
                     e.session_id
                         .as_ref()
-                        .map(|s| s.as_str() == session_filter)
+                        .map(|id| id.as_str() == s)
                         .unwrap_or(false)
                 })
-                .collect()
-        } else {
-            all_events.iter().collect()
-        };
+            })
+            .collect();
 
         let total = filtered.len();
         let events = filtered
@@ -712,10 +760,7 @@ impl EventStore for BlobBackedEventStore {
         match self.storage.get_payload(event_id).await {
             Ok(Some(stored)) => serde_json::from_slice::<WrappedEvent>(&stored.payload.body)
                 .map_err(|e| QueueKeeperError::Internal {
-                    message: format!(
-                        "Failed to deserialise event {}: {}",
-                        event_id, e
-                    ),
+                    message: format!("Failed to deserialise event {}: {}", event_id, e),
                 }),
             Ok(None) => Err(QueueKeeperError::NotFound {
                 resource: "event".to_string(),
@@ -752,7 +797,7 @@ impl EventStore for BlobBackedEventStore {
 
         let mut sessions: Vec<SessionSummary> = session_map
             .iter()
-            .filter(|(sid, events)| {
+            .filter(|(sid, _events)| {
                 // entity_type filter: session_id format is owner/repo/entity_type/entity_id
                 if let Some(ref entity_type_filter) = params.entity_type {
                     let parts: Vec<&str> = sid.splitn(4, '/').collect();
@@ -760,11 +805,10 @@ impl EventStore for BlobBackedEventStore {
                         return false;
                     }
                 }
-                // status filter: we treat all sessions as "active" for now
+                // status filter: only "active" sessions are tracked; all stored
+                // sessions are considered active. Report nothing for any other status.
                 if let Some(ref status_filter) = params.status {
                     if status_filter != "active" {
-                        // Only "active" sessions are currently tracked
-                        let _ = events; // suppress unused warning
                         return false;
                     }
                 }
@@ -776,7 +820,10 @@ impl EventStore for BlobBackedEventStore {
                     .map(|e| e.received_at)
                     .max()
                     .unwrap_or_else(Timestamp::now);
-                let first_event = events[0];
+                // SAFETY: session_map entries always contain at least one event
+                let first_event = events
+                    .first()
+                    .expect("session group is non-empty by construction");
 
                 // Parse repo from session_id: owner/repo/entity_type/entity_id
                 let parts: Vec<&str> = sid.splitn(4, '/').collect();
@@ -789,10 +836,9 @@ impl EventStore for BlobBackedEventStore {
                 let entity_id = parts.get(3).copied().unwrap_or("0").to_string();
 
                 SessionSummary {
-                    session_id: first_event
-                        .session_id
-                        .clone()
-                        .unwrap_or_else(|| SessionId::from_parts("unknown", "unknown", "unknown", "0")),
+                    session_id: first_event.session_id.clone().unwrap_or_else(|| {
+                        SessionId::from_parts("unknown", "unknown", "unknown", "0")
+                    }),
                     repository,
                     entity_type,
                     entity_id,
@@ -801,12 +847,12 @@ impl EventStore for BlobBackedEventStore {
                     last_activity,
                 }
             })
-            .take(limit)
             .collect();
 
         sessions.sort_by(|a, b| b.last_activity.cmp(&a.last_activity));
 
-        let total = sessions.len();
+        let total = sessions.len(); // total before applying the limit
+        sessions.truncate(limit);
         Ok(SessionListResponse { sessions, total })
     }
 
@@ -855,32 +901,13 @@ impl EventStore for BlobBackedEventStore {
             .max()
             .unwrap_or_else(Timestamp::now);
 
-        // Build the Repository from the first event's payload or session_id parts
-        let first_event = session_events[0];
-        let repository = if let Some(full_name) = Self::repo_full_name(first_event) {
-            // Use the canonical Repository type from the payload when available
-            use queue_keeper_core::{Repository, RepositoryId, User, UserId, UserType};
-            let repo_data = first_event.payload.get("repository");
-            let id = repo_data
-                .and_then(|r| r.get("id"))
-                .and_then(|i| i.as_u64())
-                .unwrap_or(0);
-            let (owner_login, name) = full_name
-                .split_once('/')
-                .map(|(o, n)| (o.to_string(), n.to_string()))
-                .unwrap_or_else(|| ("unknown".to_string(), "unknown".to_string()));
-            Repository::new(
-                RepositoryId::new(id),
-                name,
-                full_name,
-                User {
-                    id: UserId::new(0),
-                    login: owner_login,
-                    user_type: UserType::User,
-                },
-                false,
-            )
-        } else {
+        // SAFETY: session_events is non-empty — guarded by the is_empty check above
+        let first_event = session_events
+            .first()
+            .expect("session_events non-empty after is_empty guard");
+        // Use the shared helper for payload-based repository extraction; fall back
+        // to session_id parts when the payload lacks repository metadata.
+        let repository = extract_repository_from_wrapped_event(first_event).unwrap_or_else(|| {
             use queue_keeper_core::{Repository, RepositoryId, User, UserId, UserType};
             let (owner, repo) = if parts.len() >= 2 {
                 (parts[0].to_string(), parts[1].to_string())
@@ -898,10 +925,12 @@ impl EventStore for BlobBackedEventStore {
                 },
                 false,
             )
-        };
+        });
 
-        let event_summaries: Vec<EventSummary> =
-            session_events.iter().map(|e| Self::to_event_summary(e)).collect();
+        let event_summaries: Vec<EventSummary> = session_events
+            .iter()
+            .map(|e| Self::to_event_summary(e))
+            .collect();
 
         Ok(SessionDetails {
             session_id: session_id.clone(),
@@ -917,40 +946,37 @@ impl EventStore for BlobBackedEventStore {
     }
 
     async fn get_statistics(&self) -> Result<StatisticsResponse, QueueKeeperError> {
-        let all_events = self
-            .storage
-            .list_payloads(&PayloadFilter::default())
-            .await
-            .map_err(Self::map_storage_error)?;
+        // Load all event bodies so we can count sessions accurately —
+        // session_id is not stored in BlobMetadata so a metadata-only scan
+        // (list_payloads) cannot determine the session count.
+        let all_events = self.load_all_events(&PayloadFilter::default()).await?;
 
         let total_events = all_events.len() as u64;
 
-        // Estimate events per hour from oldest and newest timestamps
+        // Count distinct session IDs from the loaded event bodies.
+        let active_sessions = all_events
+            .iter()
+            .filter_map(|e| e.session_id.as_ref())
+            .collect::<std::collections::HashSet<_>>()
+            .len() as u64;
+
+        // Estimate events per hour from oldest and newest received_at timestamps.
         let events_per_hour = if total_events >= 2 {
-            let timestamps: Vec<Timestamp> =
-                all_events.iter().map(|m| m.created_at).collect();
-            let oldest = timestamps.iter().min().copied();
-            let newest = timestamps.iter().max().copied();
+            let oldest = all_events.iter().map(|e| e.received_at).min();
+            let newest = all_events.iter().map(|e| e.received_at).max();
             if let (Some(oldest), Some(newest)) = (oldest, newest) {
                 let span_secs = newest
                     .as_datetime()
                     .signed_duration_since(oldest.as_datetime())
                     .num_seconds()
                     .max(1) as f64;
-                let span_hours = span_secs / 3600.0;
-                (total_events as f64) / span_hours
+                (total_events as f64) / (span_secs / 3600.0)
             } else {
                 0.0
             }
         } else {
             0.0
         };
-
-        // Count unique session IDs from stored blob metadata event types
-        // (session_id is not in BlobMetadata, so we use a heuristic: assume
-        // "active sessions" ≈ distinct event counts within the last hour)
-        // A full count would require loading all bodies, which we avoid here.
-        let active_sessions = 0u64; // Conservative default without loading bodies
 
         let uptime_seconds = self.started_at.elapsed().as_secs();
 

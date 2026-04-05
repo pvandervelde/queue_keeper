@@ -4,9 +4,8 @@
 //! `POST /webhook/{provider}`.
 
 use crate::{
-    queue_delivery::spawn_queue_delivery,
-    responses::store_wrapped_event_to_blob,
-    AppState, WebhookHandlerError, WebhookResponse,
+    queue_delivery::spawn_queue_delivery, responses::store_wrapped_event_to_blob, AppState,
+    WebhookHandlerError, WebhookResponse,
 };
 use axum::{
     extract::{Path, State},
@@ -167,7 +166,9 @@ pub async fn handle_provider_webhook(
             let storage = blob_storage.clone();
             let persist_event_id = event_id;
             tokio::spawn(async move {
-                if let Err(e) = store_wrapped_event_to_blob(storage.as_ref(), &event_to_persist).await {
+                if let Err(e) =
+                    store_wrapped_event_to_blob(storage.as_ref(), &event_to_persist).await
+                {
                     warn!(
                         event_id = %persist_event_id,
                         error = %e,

@@ -623,4 +623,124 @@ mod blob_backed_event_store_tests {
 
         let _ = std::fs::remove_dir_all(dir);
     }
+
+    /// `list_events` with a `since` filter returns only events received after the cutoff.
+    #[tokio::test]
+    async fn test_list_events_filters_by_since() {
+        use queue_keeper_core::Timestamp;
+        use std::time::Duration;
+
+        let (storage, dir) = make_storage("list-events-since").await;
+        let store = BlobBackedEventStore::new(Arc::clone(&storage));
+
+        // Store 2 events, then record a timestamp, then store 1 more event
+        for _ in 0..2 {
+            let e = WrappedEvent::new(
+                "github".to_string(),
+                "push".to_string(),
+                None,
+                None,
+                serde_json::json!({}),
+            );
+            store_wrapped_event_to_blob(storage.as_ref(), &e)
+                .await
+                .unwrap();
+        }
+
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        let cutoff = Timestamp::now();
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        let e = WrappedEvent::new(
+            "github".to_string(),
+            "push".to_string(),
+            None,
+            None,
+            serde_json::json!({}),
+        );
+        store_wrapped_event_to_blob(storage.as_ref(), &e)
+            .await
+            .unwrap();
+
+        let params = EventListParams {
+            page: None,
+            per_page: None,
+            event_type: None,
+            repository: None,
+            session_id: None,
+            since: Some(cutoff.to_rfc3339()),
+        };
+        let response = store.list_events(params).await.unwrap();
+
+        assert_eq!(
+            response.total, 1,
+            "only the event after the cutoff should be returned"
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// `list_sessions` with a limit must return the most-recently-active sessions,
+    /// not an arbitrary subset limited before sorting.
+    #[tokio::test]
+    async fn test_list_sessions_limit_returns_most_recent() {
+        use std::time::Duration;
+
+        let (storage, dir) = make_storage("list-sessions-limit").await;
+        let store = BlobBackedEventStore::new(Arc::clone(&storage));
+
+        // Store session A first (oldest), then B (newest)
+        let session_a = SessionId::from_parts("owner", "repo", "issues", "1");
+        let session_b = SessionId::from_parts("owner", "repo", "issues", "2");
+
+        let e_a = WrappedEvent::new(
+            "github".to_string(),
+            "issues".to_string(),
+            None,
+            Some(session_a.clone()),
+            serde_json::json!({}),
+        );
+        store_wrapped_event_to_blob(storage.as_ref(), &e_a)
+            .await
+            .unwrap();
+
+        // Ensure session B has a clearly later timestamp
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let e_b = WrappedEvent::new(
+            "github".to_string(),
+            "issues".to_string(),
+            None,
+            Some(session_b.clone()),
+            serde_json::json!({}),
+        );
+        store_wrapped_event_to_blob(storage.as_ref(), &e_b)
+            .await
+            .unwrap();
+
+        // Request only 1 session — must be the most-recently-active one (session B)
+        let params = SessionListParams {
+            repository: None,
+            entity_type: None,
+            status: None,
+            limit: Some(1),
+        };
+        let response = store.list_sessions(params).await.unwrap();
+
+        assert_eq!(
+            response.sessions.len(),
+            1,
+            "limit=1 must return exactly 1 session"
+        );
+        assert_eq!(
+            response.sessions[0].session_id, session_b,
+            "the most recently active session must be returned when limit=1"
+        );
+        assert_eq!(
+            response.total, 2,
+            "total includes all sessions before the limit"
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
