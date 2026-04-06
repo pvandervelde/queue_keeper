@@ -1,8 +1,10 @@
 //! HTTP middleware for security and request handling.
 //!
 //! Provides:
-//! - IP-based authentication failure rate limiting ([`IpFailureTracker`],
-//!   [`ip_rate_limit_middleware`]) — spec assertion #19
+//! - IP-based authentication failure rate limiting with three-tier escalation
+//!   ([`IpFailureTracker`], [`IpTier`], [`ip_rate_limit_middleware`]) — spec
+//!   assertion #19 and `specs/security/rate-limiting.md` §"Security Response
+//!   Escalation"
 //! - Admin endpoint authentication ([`admin_auth_middleware`])
 
 use std::{
@@ -18,39 +20,164 @@ use axum::{
     middleware::Next,
     response::Response,
 };
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::AppState;
+
+// ============================================================================
+// IP Escalation Tier
+// ============================================================================
+
+/// The current access tier for a source IP address.
+///
+/// Tier transitions are triggered by authentication failure counts:
+///
+/// | Failures (5 min window) | Tier | Duration |
+/// |-------------------------|------|----------|
+/// | < 10 | [`Normal`] | — |
+/// | 10 – 50 | [`RateRestricted`] | 1 hour |
+/// | > 50 | [`Blocked`] | 24 hours |
+///
+/// Once an IP enters [`RateRestricted`] or [`Blocked`], the tier is held for
+/// the fixed duration regardless of subsequent sliding-window counts. After
+/// the duration elapses the IP returns to [`Normal`].  Escalation upward
+/// (from [`RateRestricted`] to [`Blocked`]) can happen before the lower tier
+/// expires.
+///
+/// # Spec Reference
+///
+/// `specs/security/rate-limiting.md` §"Security Response Escalation"
+///
+/// [`Normal`]: IpTier::Normal
+/// [`RateRestricted`]: IpTier::RateRestricted
+/// [`Blocked`]: IpTier::Blocked
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IpTier {
+    /// Fewer than 10 failures in the 5-minute window — requests pass through.
+    Normal,
+    /// 10–50 failures — requests are rejected with HTTP 429 for 1 hour.
+    RateRestricted {
+        /// Monotonic instant at which this restriction expires.
+        until: Instant,
+    },
+    /// More than 50 failures — requests are rejected with HTTP 429 for 24 hours.
+    Blocked {
+        /// Monotonic instant at which this block expires.
+        until: Instant,
+    },
+}
+
+impl IpTier {
+    /// Returns `true` when the tier causes requests to be rejected.
+    pub fn is_restricted(&self) -> bool {
+        !matches!(self, Self::Normal)
+    }
+
+    /// Seconds the caller should wait before retrying, per this tier.
+    ///
+    /// Returns `0` for [`Normal`] (no waiting required).
+    ///
+    /// [`Normal`]: IpTier::Normal
+    pub fn retry_after_secs(&self) -> u64 {
+        match self {
+            Self::Normal => 0,
+            Self::RateRestricted { .. } => 3600,
+            Self::Blocked { .. } => 86400,
+        }
+    }
+
+    /// Returns `true` when this tier has a fixed-duration expiry that has
+    /// already passed relative to `now`.
+    fn is_expired(&self, now: Instant) -> bool {
+        match self {
+            Self::Normal => false,
+            Self::RateRestricted { until } | Self::Blocked { until } => now >= *until,
+        }
+    }
+}
+
+// ============================================================================
+// Per-IP State (private)
+// ============================================================================
+
+/// Internal state held per source IP address.
+#[derive(Debug)]
+struct IpState {
+    /// Timestamps of authentication failures within the sliding window.
+    failures: Vec<Instant>,
+    /// Current escalation tier (may have a fixed-duration expiry).
+    tier: IpTier,
+}
+
+impl IpState {
+    fn new() -> Self {
+        Self {
+            failures: Vec::new(),
+            tier: IpTier::Normal,
+        }
+    }
+}
 
 // ============================================================================
 // IP-Based Authentication Failure Rate Limiter
 // ============================================================================
 
-/// Sliding-window counter of authentication failures per source IP.
+/// Three-tier IP authentication failure tracker.
 ///
-/// Every call to [`is_blocked`] and [`record_failure`] prunes entries older
-/// than `window` before operating, so memory usage is bounded by the number
-/// of distinct IPs that have transmitted requests within the window.
+/// Counts authentication failures per source IP within a sliding window and
+/// escalates the IP through three restriction tiers based on cumulative failure
+/// counts:
+///
+/// 1. **Normal** — fewer than `rate_restrict_threshold` failures: allow all
+///    requests.
+/// 2. **RateRestricted** — `rate_restrict_threshold`–`block_threshold`
+///    failures: reject with HTTP 429 for `rate_restrict_duration`.
+/// 3. **Blocked** — more than `block_threshold` failures: reject with HTTP 429
+///    for `block_duration`.
+///
+/// Tier upgrades happen immediately when the failure count crosses a threshold.
+/// Tier downgrades happen only when the fixed-duration penalty expires; the IP
+/// then returns to **Normal** regardless of stale window entries.
+///
+/// # Thread Safety
+///
+/// All state is locked behind a `Mutex`; the tracker is `Send + Sync` and can
+/// be wrapped in `Arc` for shared ownership across Axum handler tasks.
 ///
 /// # Spec Reference
 ///
-/// Assertion #19: "Repeated authentication failures from the same IP address
-/// MUST trigger rate limiting after 10 failures in 5 minutes."
-///
-/// [`is_blocked`]: IpFailureTracker::is_blocked
-/// [`record_failure`]: IpFailureTracker::record_failure
+/// `specs/security/rate-limiting.md` §"Security Response Escalation";
+/// spec assertion #19.
 #[derive(Debug)]
 pub struct IpFailureTracker {
-    /// Failure timestamps keyed by IP string.
-    failures: Mutex<HashMap<String, Vec<Instant>>>,
-    /// Duration of the sliding window.
+    /// Per-IP state: failure timestamps and current tier.
+    states: Mutex<HashMap<String, IpState>>,
+    /// Duration of the sliding failure-counting window.
     window: Duration,
-    /// Number of failures that triggers blocking.
-    max_failures: usize,
+    /// Failure count that triggers the [`IpTier::RateRestricted`] tier.
+    rate_restrict_threshold: usize,
+    /// Failure count that triggers the [`IpTier::Blocked`] tier.
+    block_threshold: usize,
+    /// How long an IP stays in the [`IpTier::RateRestricted`] tier.
+    rate_restrict_duration: Duration,
+    /// How long an IP stays in the [`IpTier::Blocked`] tier.
+    block_duration: Duration,
 }
 
 impl IpFailureTracker {
-    /// Create a new tracker with the given failure threshold and time window.
+    /// Create a tracker with fully specified thresholds and durations.
+    ///
+    /// # Parameters
+    ///
+    /// - `rate_restrict_threshold` — failure count (within `window`) that
+    ///   triggers the [`IpTier::RateRestricted`] tier. Spec default: 10.
+    /// - `block_threshold` — failure count that triggers the
+    ///   [`IpTier::Blocked`] tier. Spec default: 50.
+    /// - `window` — sliding window for failure counting. Spec default: 5 min.
+    /// - `rate_restrict_duration` — how long an IP is rate-restricted. Spec
+    ///   default: 1 hour.
+    /// - `block_duration` — how long an IP is completely blocked. Spec
+    ///   default: 24 hours.
     ///
     /// # Examples
     ///
@@ -58,71 +185,155 @@ impl IpFailureTracker {
     /// use std::time::Duration;
     /// use queue_keeper_api::middleware::IpFailureTracker;
     ///
-    /// // Block after 10 failures in 5 minutes (assertion #19)
-    /// let tracker = IpFailureTracker::new(10, Duration::from_secs(300));
+    /// // Spec-specified defaults
+    /// let tracker = IpFailureTracker::new(
+    ///     10,
+    ///     50,
+    ///     Duration::from_secs(300),
+    ///     Duration::from_secs(3_600),
+    ///     Duration::from_secs(86_400),
+    /// );
     /// ```
-    pub fn new(max_failures: usize, window: Duration) -> Self {
+    pub fn new(
+        rate_restrict_threshold: usize,
+        block_threshold: usize,
+        window: Duration,
+        rate_restrict_duration: Duration,
+        block_duration: Duration,
+    ) -> Self {
         Self {
-            failures: Mutex::new(HashMap::new()),
+            states: Mutex::new(HashMap::new()),
             window,
-            max_failures,
+            rate_restrict_threshold,
+            block_threshold,
+            rate_restrict_duration,
+            block_duration,
         }
     }
 
-    /// Maximum number of failures before an IP is blocked.
-    pub fn max_failures(&self) -> usize {
-        self.max_failures
+    /// Threshold at which an IP enters the [`IpTier::RateRestricted`] tier.
+    pub fn rate_restrict_threshold(&self) -> usize {
+        self.rate_restrict_threshold
     }
 
-    /// Duration of the sliding failure window.
+    /// Threshold at which an IP enters the [`IpTier::Blocked`] tier.
+    pub fn block_threshold(&self) -> usize {
+        self.block_threshold
+    }
+
+    /// Duration of the sliding failure-counting window.
     pub fn window(&self) -> Duration {
         self.window
     }
 
-    /// Return `true` if `ip` has reached or exceeded the failure threshold
-    /// within the current sliding window.
-    pub fn is_blocked(&self, ip: &str) -> bool {
-        let mut map = self.failures.lock().unwrap();
+    /// How long an IP stays in the [`IpTier::RateRestricted`] tier.
+    pub fn rate_restrict_duration(&self) -> Duration {
+        self.rate_restrict_duration
+    }
+
+    /// How long an IP stays in the [`IpTier::Blocked`] tier.
+    pub fn block_duration(&self) -> Duration {
+        self.block_duration
+    }
+
+    /// Return the current [`IpTier`] for `ip`.
+    ///
+    /// If a timed tier ([`IpTier::RateRestricted`] or [`IpTier::Blocked`]) has
+    /// expired, the IP is automatically reset to [`IpTier::Normal`] and its
+    /// failure history is pruned.
+    pub fn check_tier(&self, ip: &str) -> IpTier {
+        let mut states = self.states.lock().unwrap();
         let now = Instant::now();
         let window = self.window;
 
-        if let Some(entry) = map.get_mut(ip) {
-            entry.retain(|t| now.duration_since(*t) < window);
-            if entry.is_empty() {
-                map.remove(ip);
-                return false;
+        if let Some(state) = states.get_mut(ip) {
+            // Expire timed tiers that have passed their deadline.
+            if state.tier.is_expired(now) {
+                state.tier = IpTier::Normal;
+                state.failures.retain(|t| now.duration_since(*t) < window);
+                if state.failures.is_empty() {
+                    states.remove(ip);
+                    return IpTier::Normal;
+                }
             }
-            entry.len() >= self.max_failures
+            state.tier.clone()
         } else {
-            false
+            IpTier::Normal
         }
     }
 
-    /// Record one authentication failure for `ip`.
-    pub fn record_failure(&self, ip: &str) {
-        let mut map = self.failures.lock().unwrap();
-        let now = Instant::now();
-        let window = self.window;
-        let entry = map.entry(ip.to_string()).or_default();
-        entry.retain(|t| now.duration_since(*t) < window);
-        entry.push(now);
+    /// Return `true` if `ip` is currently in a restricted tier.
+    ///
+    /// Convenience wrapper around [`check_tier`].
+    ///
+    /// [`check_tier`]: IpFailureTracker::check_tier
+    pub fn is_blocked(&self, ip: &str) -> bool {
+        self.check_tier(ip).is_restricted()
     }
 
-    /// Return the number of failures recorded within the current window for `ip`.
+    /// Record one authentication failure for `ip` and escalate its tier if
+    /// the new failure count crosses a threshold.
     ///
-    /// Exposed for monitoring and testing.
-    pub fn failure_count(&self, ip: &str) -> usize {
-        let mut map = self.failures.lock().unwrap();
+    /// Escalation rules (evaluated after appending the new failure):
+    ///
+    /// - Count > `block_threshold` AND tier is not already [`IpTier::Blocked`]
+    ///   → upgrade to **Blocked** for `block_duration`, overwriting
+    ///   [`IpTier::RateRestricted`] if present.
+    /// - Count ≥ `rate_restrict_threshold` AND tier is [`IpTier::Normal`]
+    ///   → upgrade to **RateRestricted** for `rate_restrict_duration`.
+    ///
+    /// The tier is never downgraded by this method; downgrading happens only
+    /// when a timed tier expires (see [`check_tier`]).
+    ///
+    /// [`check_tier`]: IpFailureTracker::check_tier
+    pub fn record_failure(&self, ip: &str) {
+        let mut states = self.states.lock().unwrap();
         let now = Instant::now();
         let window = self.window;
 
-        if let Some(entry) = map.get_mut(ip) {
-            entry.retain(|t| now.duration_since(*t) < window);
-            if entry.is_empty() {
-                map.remove(ip);
+        let state = states.entry(ip.to_string()).or_insert_with(IpState::new);
+
+        // Prune failures outside the sliding window.
+        state.failures.retain(|t| now.duration_since(*t) < window);
+        state.failures.push(now);
+
+        let count = state.failures.len();
+
+        // Expire the current tier if its deadline has passed before evaluating
+        // whether to escalate, so we don't skip transitions on expiry.
+        if state.tier.is_expired(now) {
+            state.tier = IpTier::Normal;
+        }
+
+        // Escalate based on the new failure count.
+        if count > self.block_threshold && !matches!(state.tier, IpTier::Blocked { .. }) {
+            state.tier = IpTier::Blocked {
+                until: now + self.block_duration,
+            };
+        } else if count >= self.rate_restrict_threshold && matches!(state.tier, IpTier::Normal) {
+            state.tier = IpTier::RateRestricted {
+                until: now + self.rate_restrict_duration,
+            };
+        }
+    }
+
+    /// Return the number of failures recorded within the current sliding
+    /// window for `ip`.
+    ///
+    /// This reflects only the raw sliding-window count and does not consider
+    /// active timed tiers. Exposed for monitoring and testing.
+    pub fn failure_count(&self, ip: &str) -> usize {
+        let mut states = self.states.lock().unwrap();
+        let now = Instant::now();
+        let window = self.window;
+
+        if let Some(state) = states.get_mut(ip) {
+            state.failures.retain(|t| now.duration_since(*t) < window);
+            if state.failures.is_empty() && matches!(state.tier, IpTier::Normal) {
+                states.remove(ip);
                 return 0;
             }
-            entry.len()
+            state.failures.len()
         } else {
             0
         }
@@ -135,21 +346,27 @@ impl IpFailureTracker {
 
 /// IP-based authentication failure rate limiting middleware.
 ///
-/// Before forwarding a request to the inner handler, checks whether the source
-/// IP has accumulated enough 401 responses within the configured sliding window.
-/// If the failure count has reached the threshold, returns HTTP 429 immediately
-/// with a `Retry-After: 300` header.
+/// Implements the three-tier progressive response defined in
+/// `specs/security/rate-limiting.md` §"Security Response Escalation":
 ///
-/// After the handler responds, any HTTP 401 is interpreted as an authentication
-/// failure and increments the per-IP counter via [`IpFailureTracker::record_failure`].
+/// | Tier | Condition | HTTP Response |
+/// |------|-----------|---------------|
+/// | Normal | < 10 failures | Pass through |
+/// | RateRestricted | 10–50 failures | 429, `Retry-After: 3600` |
+/// | Blocked | > 50 failures | 429, `Retry-After: 86400` |
+///
+/// Before forwarding a request, the middleware resolves the source IP's current
+/// [`IpTier`]. If restricted, it returns HTTP 429 immediately.  After the
+/// handler responds, any HTTP 401 is recorded as an authentication failure via
+/// [`IpFailureTracker::record_failure`], which may escalate the IP's tier.
 ///
 /// The middleware is a transparent pass-through when `AppState::ip_rate_limiter`
 /// is `None` (i.e. when [`SecurityConfig::enable_ip_rate_limiting`] is `false`).
 ///
 /// # Spec Reference
 ///
-/// Assertion #19: "Repeated authentication failures from the same IP address
-/// MUST trigger rate limiting after 10 failures in 5 minutes."
+/// Spec assertion #19; `specs/security/rate-limiting.md` §"Security Response
+/// Escalation".
 ///
 /// [`SecurityConfig::enable_ip_rate_limiting`]: crate::config::SecurityConfig::enable_ip_rate_limiting
 pub async fn ip_rate_limit_middleware(
@@ -163,26 +380,46 @@ pub async fn ip_rate_limit_middleware(
     };
 
     let client_ip = extract_client_ip(request.headers());
+    let tier = tracker.check_tier(&client_ip);
 
-    if tracker.is_blocked(&client_ip) {
+    if tier.is_restricted() {
+        let retry_after = tier.retry_after_secs();
         warn!(
             client_ip = %client_ip,
+            tier = ?tier,
+            retry_after_secs = retry_after,
             "IP rate limited: too many authentication failures"
         );
-        return build_too_many_requests_response(
-            tracker.max_failures(),
-            tracker.window().as_secs(),
-        );
+        return build_too_many_requests_response(retry_after);
     }
 
     let response = next.run(request).await;
 
     if response.status() == StatusCode::UNAUTHORIZED {
         tracker.record_failure(&client_ip);
-        warn!(
-            client_ip = %client_ip,
-            "Authentication failure recorded for IP rate limiter"
-        );
+        let new_tier = tracker.check_tier(&client_ip);
+        match &new_tier {
+            IpTier::Normal => {}
+            IpTier::RateRestricted { .. } => {
+                warn!(
+                    client_ip = %client_ip,
+                    "IP escalated to RateRestricted tier after authentication failure"
+                );
+            }
+            IpTier::Blocked { .. } => {
+                warn!(
+                    client_ip = %client_ip,
+                    "IP escalated to Blocked tier after authentication failure"
+                );
+            }
+        }
+        if matches!(new_tier, IpTier::Normal) {
+            info!(
+                client_ip = %client_ip,
+                failure_count = tracker.failure_count(&client_ip),
+                "Authentication failure recorded for IP"
+            );
+        }
     }
 
     response
@@ -281,16 +518,15 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
         == 0
 }
 
-fn build_too_many_requests_response(limit: usize, window_secs: u64) -> Response {
+fn build_too_many_requests_response(retry_after_secs: u64) -> Response {
     Response::builder()
         .status(StatusCode::TOO_MANY_REQUESTS)
         .header("content-type", "application/json")
-        .header("retry-after", window_secs.to_string())
-        .header("x-ratelimit-limit", limit.to_string())
+        .header("retry-after", retry_after_secs.to_string())
         .header("x-ratelimit-remaining", "0")
         .body(Body::from(format!(
             r#"{{"error":"Too many authentication failures","retry_after_seconds":{}}}"#,
-            window_secs
+            retry_after_secs
         )))
         .unwrap()
 }
