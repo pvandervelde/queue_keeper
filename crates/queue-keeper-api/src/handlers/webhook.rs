@@ -3,7 +3,10 @@
 //! Exposes [`handle_provider_webhook`] which is registered at
 //! `POST /webhook/{provider}`.
 
-use crate::{queue_delivery::spawn_queue_delivery, AppState, WebhookHandlerError, WebhookResponse};
+use crate::{
+    queue_delivery::spawn_queue_delivery, responses::store_wrapped_event_to_blob, AppState,
+    WebhookHandlerError, WebhookResponse,
+};
 use axum::{
     extract::{Path, State},
     http::HeaderMap,
@@ -15,7 +18,7 @@ use queue_keeper_core::{
     webhook::{ProcessingOutput, WebhookHeaders, WebhookRequest},
 };
 use std::collections::HashMap;
-use tracing::{error, info, instrument};
+use tracing::{error, info, instrument, warn};
 
 /// Handle a webhook for a specific provider.
 ///
@@ -154,6 +157,28 @@ pub async fn handle_provider_webhook(
     // Direct-mode events are forwarded as raw payloads and do not go through
     // the event router.
     if let ProcessingOutput::Wrapped(wrapped_event) = processing_output {
+        // Persist the wrapped event to blob storage so that /api/events queries
+        // return real data. This is fire-and-forget: a storage failure does not
+        // fail the webhook response — the event has already been enqueued for
+        // delivery. Storage errors are logged for investigation.
+        if let Some(ref blob_storage) = state.event_blob_storage {
+            let event_to_persist = wrapped_event.clone();
+            let storage = blob_storage.clone();
+            let persist_event_id = event_id;
+            tokio::spawn(async move {
+                if let Err(e) =
+                    store_wrapped_event_to_blob(storage.as_ref(), &event_to_persist).await
+                {
+                    warn!(
+                        event_id = %persist_event_id,
+                        error = %e,
+                        "Failed to persist WrappedEvent to blob; \
+                         event was delivered but will not appear in /api/events"
+                    );
+                }
+            });
+        }
+
         if let Some(queue_client) = &state.queue_client {
             let handle = spawn_queue_delivery(
                 wrapped_event,

@@ -33,9 +33,10 @@ use axum::{
 };
 use prometheus::TextEncoder;
 use queue_keeper_core::{
+    blob_storage::BlobStorage,
     bot_config::BotConfiguration,
     queue_integration::{DefaultEventRouter, EventRouter},
-    EventId, SessionId, Timestamp,
+    EventId, QueueKeeperError, SessionId, Timestamp,
 };
 use queue_runtime::QueueClient;
 use std::{
@@ -125,6 +126,14 @@ pub struct AppState {
     /// In production, supply this via the `QK__SECURITY__ADMIN_API_KEY`
     /// environment variable.
     pub admin_api_key: Option<String>,
+
+    /// Blob storage used to persist [`WrappedEvent`] objects after processing.
+    ///
+    /// When `Some`, the webhook handler writes each successfully processed
+    /// event to this store so that `GET /api/events` and related endpoints
+    /// can return real data. When `None`, those endpoints return empty results
+    /// (development / testing mode with no storage configured).
+    pub event_blob_storage: Option<Arc<dyn BlobStorage>>,
 }
 
 impl AppState {
@@ -144,6 +153,7 @@ impl AppState {
         delivery_config: QueueDeliveryConfig,
         ip_rate_limiter: Option<Arc<IpFailureTracker>>,
         admin_api_key: Option<String>,
+        event_blob_storage: Option<Arc<dyn BlobStorage>>,
     ) -> Self {
         Self {
             config,
@@ -159,6 +169,7 @@ impl AppState {
             delivery_config,
             ip_rate_limiter,
             admin_api_key,
+            event_blob_storage,
         }
     }
 }
@@ -237,6 +248,7 @@ pub fn create_router(state: AppState) -> Router {
 }
 
 /// Start HTTP server
+#[allow(clippy::too_many_arguments)]
 pub async fn start_server(
     config: ServiceConfig,
     provider_registry: Arc<ProviderRegistry>,
@@ -245,6 +257,7 @@ pub async fn start_server(
     generic_provider_ids: HashSet<String>,
     queue_client: Option<Arc<dyn QueueClient>>,
     bot_config: Arc<BotConfiguration>,
+    event_blob_storage: Option<Arc<dyn BlobStorage>>,
 ) -> Result<(), ServiceError> {
     // Validate configuration before initializing any infrastructure
     config.validate().map_err(ServiceError::Configuration)?;
@@ -303,6 +316,7 @@ pub async fn start_server(
         QueueDeliveryConfig::default(),
         ip_rate_limiter,
         admin_api_key,
+        event_blob_storage,
     );
     let app = create_router(state);
 
@@ -399,9 +413,10 @@ async fn get_event(
 
     match state.event_store.get_event(&event_id).await {
         Ok(envelope) => Ok(Json(EventDetailResponse { event: envelope })),
+        Err(QueueKeeperError::NotFound { .. }) => Err(StatusCode::NOT_FOUND),
         Err(e) => {
             error!(error = %e, event_id = %event_id, "Failed to get event");
-            Err(StatusCode::NOT_FOUND)
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
         }
     }
 }
@@ -438,9 +453,10 @@ async fn get_session(
 
     match state.event_store.get_session(&session_id).await {
         Ok(details) => Ok(Json(SessionDetailResponse { session: details })),
+        Err(QueueKeeperError::NotFound { .. }) => Err(StatusCode::NOT_FOUND),
         Err(e) => {
             error!(error = %e, session_id = %session_id, "Failed to get session");
-            Err(StatusCode::NOT_FOUND)
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
         }
     }
 }
