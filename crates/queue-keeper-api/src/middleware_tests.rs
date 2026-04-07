@@ -192,7 +192,16 @@ mod ip_tier_escalation_tests {
             "Expected RateRestricted, got {:?}",
             tier
         );
-        assert_eq!(tier.retry_after_secs(), 3_600);
+        // retry_after_secs returns remaining time (RFC 7231 §7.1.3); must be
+        // positive and at most the configured rate_restrict_duration (3600 s).
+        assert!(
+            tier.retry_after_secs() > 0,
+            "retry_after_secs must be positive for RateRestricted tier"
+        );
+        assert!(
+            tier.retry_after_secs() <= 3_600,
+            "retry_after_secs must not exceed rate_restrict_duration"
+        );
         assert!(tier.is_restricted());
     }
 
@@ -216,7 +225,16 @@ mod ip_tier_escalation_tests {
             "Expected Blocked, got {:?}",
             tier
         );
-        assert_eq!(tier.retry_after_secs(), 86_400);
+        // retry_after_secs returns remaining time (RFC 7231 §7.1.3); must be
+        // positive and at most the configured block_duration (86400 s).
+        assert!(
+            tier.retry_after_secs() > 0,
+            "retry_after_secs must be positive for Blocked tier"
+        );
+        assert!(
+            tier.retry_after_secs() <= 86_400,
+            "retry_after_secs must not exceed block_duration"
+        );
         assert!(tier.is_restricted());
     }
 
@@ -404,12 +422,18 @@ mod extract_client_ip_tests {
         );
         assert_eq!(extract_client_ip(&h), "203.0.113.1");
     }
-
     /// Verify that surrounding whitespace in X-Forwarded-For IPs is trimmed.
     #[test]
     fn test_x_forwarded_for_ip_is_trimmed() {
         let headers = headers_with("x-forwarded-for", "  203.0.113.2  , 10.0.0.1");
         assert_eq!(extract_client_ip(&headers), "203.0.113.2");
+    }
+    /// Verify that an IP string longer than 45 characters (max valid IPv6 length)
+    /// is rejected and falls back to \"unknown\".
+    #[test]
+    fn test_overlong_ip_is_rejected() {
+        let headers = headers_with("x-forwarded-for", &"a".repeat(46));
+        assert_eq!(extract_client_ip(&headers), "unknown");
     }
 }
 

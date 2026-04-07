@@ -51,7 +51,7 @@ use crate::AppState;
 /// [`Normal`]: IpTier::Normal
 /// [`RateRestricted`]: IpTier::RateRestricted
 /// [`Blocked`]: IpTier::Blocked
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum IpTier {
     /// Fewer than 10 failures in the 5-minute window — requests pass through.
     Normal,
@@ -73,28 +73,54 @@ impl IpTier {
         !matches!(self, Self::Normal)
     }
 
-    /// Seconds the caller should wait before retrying, per this tier.
+    /// Seconds the caller should wait before retrying based on the **remaining**
+    /// penalty time, as required by RFC 7231 §7.1.3.
     ///
-    /// Returns `0` for [`Normal`] (no waiting required).
+    /// Returns `0` for [`Normal`] (no waiting required) or when the tier has
+    /// already expired (defensive — `check_tier` auto-expires before returning).
     ///
     /// [`Normal`]: IpTier::Normal
     pub fn retry_after_secs(&self) -> u64 {
         match self {
             Self::Normal => 0,
-            Self::RateRestricted { .. } => 3600,
-            Self::Blocked { .. } => 86400,
+            Self::RateRestricted { until } | Self::Blocked { until } => {
+                until.saturating_duration_since(Instant::now()).as_secs()
+            }
         }
     }
 
     /// Returns `true` when this tier has a fixed-duration expiry that has
     /// already passed relative to `now`.
-    fn is_expired(&self, now: Instant) -> bool {
+    pub(crate) fn is_expired(&self, now: Instant) -> bool {
         match self {
             Self::Normal => false,
             Self::RateRestricted { until } | Self::Blocked { until } => now >= *until,
         }
     }
 }
+
+// ============================================================================
+// Manual PartialEq / Eq for IpTier
+// ============================================================================
+
+/// Compare only the variant, ignoring the `until` timestamp.
+///
+/// Two `RateRestricted` or two `Blocked` values are equal regardless of when
+/// their penalty expires. This prevents a foot-gun where two independently
+/// created tiers with identical semantics but different expiry `Instant`s
+/// compare as unequal.
+impl PartialEq for IpTier {
+    fn eq(&self, other: &Self) -> bool {
+        matches!(
+            (self, other),
+            (Self::Normal, Self::Normal)
+                | (Self::RateRestricted { .. }, Self::RateRestricted { .. })
+                | (Self::Blocked { .. }, Self::Blocked { .. })
+        )
+    }
+}
+
+impl Eq for IpTier {}
 
 // ============================================================================
 // Per-IP State (private)
@@ -285,36 +311,63 @@ impl IpFailureTracker {
     /// The tier is never downgraded by this method; downgrading happens only
     /// when a timed tier expires (see [`check_tier`]).
     ///
+    /// Returns the new [`IpTier`] for `ip` after recording the failure, so
+    /// callers do not need a second lock acquisition to read the updated state.
+    ///
+    /// After modifying the target IP's state this method also sweeps expired
+    /// entries from the map to prevent unbounded memory growth under sustained
+    /// attacks from many distinct source addresses.
+    ///
     /// [`check_tier`]: IpFailureTracker::check_tier
-    pub fn record_failure(&self, ip: &str) {
+    pub fn record_failure(&self, ip: &str) -> IpTier {
         let mut states = self.states.lock().unwrap();
         let now = Instant::now();
         let window = self.window;
 
-        let state = states.entry(ip.to_string()).or_insert_with(IpState::new);
+        // Update the target IP's state and capture the new tier.
+        let new_tier = {
+            let state = states.entry(ip.to_string()).or_insert_with(IpState::new);
 
-        // Prune failures outside the sliding window.
-        state.failures.retain(|t| now.duration_since(*t) < window);
-        state.failures.push(now);
+            // Prune failures outside the sliding window.
+            state.failures.retain(|t| now.duration_since(*t) < window);
+            state.failures.push(now);
 
-        let count = state.failures.len();
+            let count = state.failures.len();
 
-        // Expire the current tier if its deadline has passed before evaluating
-        // whether to escalate, so we don't skip transitions on expiry.
-        if state.tier.is_expired(now) {
-            state.tier = IpTier::Normal;
-        }
+            // Expire the current tier if its deadline has passed before evaluating
+            // whether to escalate, so we don't skip transitions on expiry.
+            if state.tier.is_expired(now) {
+                state.tier = IpTier::Normal;
+            }
 
-        // Escalate based on the new failure count.
-        if count > self.block_threshold && !matches!(state.tier, IpTier::Blocked { .. }) {
-            state.tier = IpTier::Blocked {
-                until: now + self.block_duration,
-            };
-        } else if count >= self.rate_restrict_threshold && matches!(state.tier, IpTier::Normal) {
-            state.tier = IpTier::RateRestricted {
-                until: now + self.rate_restrict_duration,
-            };
-        }
+            // Escalate based on the new failure count.
+            if count > self.block_threshold && !matches!(state.tier, IpTier::Blocked { .. }) {
+                state.tier = IpTier::Blocked {
+                    until: now + self.block_duration,
+                };
+            } else if count >= self.rate_restrict_threshold
+                && matches!(state.tier, IpTier::Normal)
+            {
+                state.tier = IpTier::RateRestricted {
+                    until: now + self.rate_restrict_duration,
+                };
+            }
+
+            state.tier.clone()
+        };
+
+        // Sweep all entries to evict those whose tier has expired and whose
+        // sliding window is empty, preventing unbounded HashMap growth under
+        // attacks from many distinct source IPs.
+        states.retain(|_, s| {
+            if s.tier.is_expired(now) {
+                s.tier = IpTier::Normal;
+                s.failures.retain(|t| now.duration_since(*t) < window);
+            }
+            !s.failures.is_empty() || s.tier.is_restricted()
+        });
+
+        new_tier
     }
 
     /// Return the number of failures recorded within the current sliding
@@ -396,10 +449,15 @@ pub async fn ip_rate_limit_middleware(
     let response = next.run(request).await;
 
     if response.status() == StatusCode::UNAUTHORIZED {
-        tracker.record_failure(&client_ip);
-        let new_tier = tracker.check_tier(&client_ip);
-        match &new_tier {
-            IpTier::Normal => {}
+        // record_failure returns the new tier in the same lock acquisition,
+        // eliminating the need for a separate check_tier call.
+        match tracker.record_failure(&client_ip) {
+            IpTier::Normal => {
+                info!(
+                    client_ip = %client_ip,
+                    "Authentication failure recorded for IP"
+                );
+            }
             IpTier::RateRestricted { .. } => {
                 warn!(
                     client_ip = %client_ip,
@@ -412,13 +470,6 @@ pub async fn ip_rate_limit_middleware(
                     "IP escalated to Blocked tier after authentication failure"
                 );
             }
-        }
-        if matches!(new_tier, IpTier::Normal) {
-            info!(
-                client_ip = %client_ip,
-                failure_count = tracker.failure_count(&client_ip),
-                "Authentication failure recorded for IP"
-            );
         }
     }
 
@@ -474,10 +525,16 @@ pub async fn admin_auth_middleware(
 /// load balancer) is the only entity that can set `X-Forwarded-For` and
 /// `X-Real-IP` before this service receives the request.
 pub fn extract_client_ip(headers: &HeaderMap) -> String {
+    // 45 chars is the maximum length of a valid IP address string
+    // (IPv6 mapped IPv4, e.g. "0000:0000:0000:0000:0000:0000:255.255.255.255").
+    // Values longer than this are not valid IPs and must not be used as map
+    // keys to prevent adversarially large strings from bloating the tracker.
+    const MAX_IP_LEN: usize = 45;
+
     if let Some(xff) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
         if let Some(first) = xff.split(',').next() {
             let ip = first.trim();
-            if !ip.is_empty() {
+            if !ip.is_empty() && ip.len() <= MAX_IP_LEN {
                 return ip.to_string();
             }
         }
@@ -485,7 +542,7 @@ pub fn extract_client_ip(headers: &HeaderMap) -> String {
 
     if let Some(real_ip) = headers.get("x-real-ip").and_then(|v| v.to_str().ok()) {
         let ip = real_ip.trim();
-        if !ip.is_empty() {
+        if !ip.is_empty() && ip.len() <= MAX_IP_LEN {
             return ip.to_string();
         }
     }
