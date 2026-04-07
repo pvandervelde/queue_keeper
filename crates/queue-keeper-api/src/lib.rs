@@ -60,7 +60,7 @@ pub use config::{
 };
 pub use errors::{ConfigError, ServiceError, WebhookHandlerError};
 pub use metrics::{ServiceMetrics, TelemetryConfig};
-pub use middleware::IpFailureTracker;
+pub use middleware::{IpFailureTracker, IpTier};
 pub use provider_registry::{InvalidProviderIdError, ProviderId, ProviderRegistry};
 pub use responses::*;
 
@@ -289,12 +289,15 @@ pub async fn start_server(
 
     let event_router: Arc<dyn EventRouter> = Arc::new(DefaultEventRouter::new());
 
-    // Build IP rate limiter if enabled (assertion #19).
-    // Threshold and window are configurable via SecurityConfig.
+    // Build IP rate limiter if enabled (spec assertion #19, three-tier escalation).
+    // All thresholds and durations are configurable via SecurityConfig.
     let ip_rate_limiter = if config.security.enable_ip_rate_limiting {
         Some(Arc::new(IpFailureTracker::new(
             config.security.auth_failure_threshold,
+            config.security.auth_block_threshold,
             Duration::from_secs(config.security.auth_failure_window_secs),
+            Duration::from_secs(config.security.auth_rate_restrict_duration_secs),
+            Duration::from_secs(config.security.auth_block_duration_secs),
         )))
     } else {
         None

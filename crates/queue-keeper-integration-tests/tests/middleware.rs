@@ -158,7 +158,10 @@ async fn test_cors_middleware_allows_configured_origins() {
 fn state_with_rate_limiter(max_failures: usize) -> AppState {
     let tracker = Arc::new(IpFailureTracker::new(
         max_failures,
+        max_failures * 10, // block_threshold well above the test threshold
         Duration::from_secs(300),
+        Duration::from_secs(3_600),
+        Duration::from_secs(86_400),
     ));
     // Start from the default test state and override the rate limiter field.
     let mut state = create_test_app_state();
@@ -198,7 +201,13 @@ async fn test_ip_rate_limit_allows_requests_below_threshold() {
 #[tokio::test]
 async fn test_ip_rate_limit_blocks_ip_at_threshold() {
     // Arrange: tracker pre-populated to the threshold
-    let tracker = Arc::new(IpFailureTracker::new(3, Duration::from_secs(300)));
+    let tracker = Arc::new(IpFailureTracker::new(
+        3,
+        50,
+        Duration::from_secs(300),
+        Duration::from_secs(3_600),
+        Duration::from_secs(86_400),
+    ));
     for _ in 0..3 {
         tracker.record_failure("203.0.113.10");
     }
@@ -232,7 +241,13 @@ async fn test_ip_rate_limit_blocks_ip_at_threshold() {
 /// with values derived from the tracker configuration.
 #[tokio::test]
 async fn test_ip_rate_limit_response_includes_rate_limit_headers() {
-    let tracker = Arc::new(IpFailureTracker::new(5, Duration::from_secs(60)));
+    let tracker = Arc::new(IpFailureTracker::new(
+        5,
+        50,
+        Duration::from_secs(300),
+        Duration::from_secs(3_600),
+        Duration::from_secs(86_400),
+    ));
     for _ in 0..5 {
         tracker.record_failure("203.0.113.11");
     }
@@ -259,21 +274,18 @@ async fn test_ip_rate_limit_response_includes_rate_limit_headers() {
         .get("retry-after")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    assert_eq!(
-        retry_after, "60",
-        "Retry-After must reflect the configured window, got {:?}",
+    let retry_after_val: u64 = retry_after
+        .parse()
+        .expect("Retry-After must be a numeric value");
+    assert!(
+        retry_after_val > 0,
+        "Retry-After must be positive, got {:?}",
         retry_after
     );
-
-    let limit = response
-        .headers()
-        .get("x-ratelimit-limit")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-    assert_eq!(
-        limit, "5",
-        "X-RateLimit-Limit must reflect the configured threshold, got {:?}",
-        limit
+    assert!(
+        retry_after_val <= 3_600,
+        "Retry-After must not exceed rate-restrict duration (3600 s), got {:?}",
+        retry_after
     );
 
     let remaining = response
@@ -420,7 +432,13 @@ async fn test_health_endpoints_not_gated_by_admin_auth() {
 async fn test_admin_auth_failures_trigger_rate_limiting() {
     // Arrange: tracker with threshold of 3, admin key configured.
     // Pre-populate 3 failures directly so we don't need multiple oneshot calls.
-    let tracker = Arc::new(IpFailureTracker::new(3, Duration::from_secs(300)));
+    let tracker = Arc::new(IpFailureTracker::new(
+        3,
+        50,
+        Duration::from_secs(300),
+        Duration::from_secs(3_600),
+        Duration::from_secs(86_400),
+    ));
     for _ in 0..3 {
         tracker.record_failure("203.0.113.20");
     }

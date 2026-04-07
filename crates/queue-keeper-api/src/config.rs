@@ -506,12 +506,36 @@ pub struct SecurityConfig {
     #[serde(default = "SecurityConfig::default_auth_failure_threshold")]
     pub auth_failure_threshold: usize,
 
+    /// Failure count that escalates an IP to the completely-blocked tier.
+    ///
+    /// When a source IP exceeds this many authentication failures within
+    /// `auth_failure_window_secs`, it is blocked for `auth_block_duration_secs`
+    /// regardless of the sliding window expiry. Defaults to 50.
+    ///
+    /// Configure via `QK__SECURITY__AUTH_BLOCK_THRESHOLD`.
+    #[serde(default = "SecurityConfig::default_auth_block_threshold")]
+    pub auth_block_threshold: usize,
+
     /// Duration of the sliding window for authentication failure counting,
     /// in seconds. Defaults to 300 (5 minutes, spec assertion #19).
     ///
     /// Configure via `QK__SECURITY__AUTH_FAILURE_WINDOW_SECS`.
     #[serde(default = "SecurityConfig::default_auth_failure_window_secs")]
     pub auth_failure_window_secs: u64,
+
+    /// How long (seconds) an IP stays in the rate-restricted tier after
+    /// crossing `auth_failure_threshold`. Defaults to 3600 (1 hour).
+    ///
+    /// Configure via `QK__SECURITY__AUTH_RATE_RESTRICT_DURATION_SECS`.
+    #[serde(default = "SecurityConfig::default_auth_rate_restrict_duration_secs")]
+    pub auth_rate_restrict_duration_secs: u64,
+
+    /// How long (seconds) an IP stays in the completely-blocked tier after
+    /// crossing `auth_block_threshold`. Defaults to 86400 (24 hours).
+    ///
+    /// Configure via `QK__SECURITY__AUTH_BLOCK_DURATION_SECS`.
+    #[serde(default = "SecurityConfig::default_auth_block_duration_secs")]
+    pub auth_block_duration_secs: u64,
 
     /// Enable request logging
     #[serde(default = "SecurityConfig::default_log_requests")]
@@ -544,7 +568,13 @@ impl std::fmt::Debug for SecurityConfig {
             .field("enable_ip_rate_limiting", &self.enable_ip_rate_limiting)
             .field("ip_rate_limit", &self.ip_rate_limit)
             .field("auth_failure_threshold", &self.auth_failure_threshold)
+            .field("auth_block_threshold", &self.auth_block_threshold)
             .field("auth_failure_window_secs", &self.auth_failure_window_secs)
+            .field(
+                "auth_rate_restrict_duration_secs",
+                &self.auth_rate_restrict_duration_secs,
+            )
+            .field("auth_block_duration_secs", &self.auth_block_duration_secs)
             .field("log_requests", &self.log_requests)
             .field("log_request_bodies", &self.log_request_bodies)
             .field(
@@ -580,8 +610,20 @@ impl SecurityConfig {
         10
     }
 
+    fn default_auth_block_threshold() -> usize {
+        50
+    }
+
     fn default_auth_failure_window_secs() -> u64 {
         300
+    }
+
+    fn default_auth_rate_restrict_duration_secs() -> u64 {
+        3_600
+    }
+
+    fn default_auth_block_duration_secs() -> u64 {
+        86_400
     }
 }
 
@@ -593,7 +635,11 @@ impl Default for SecurityConfig {
             enable_ip_rate_limiting: true,
             ip_rate_limit: 100,
             auth_failure_threshold: SecurityConfig::default_auth_failure_threshold(),
+            auth_block_threshold: SecurityConfig::default_auth_block_threshold(),
             auth_failure_window_secs: SecurityConfig::default_auth_failure_window_secs(),
+            auth_rate_restrict_duration_secs:
+                SecurityConfig::default_auth_rate_restrict_duration_secs(),
+            auth_block_duration_secs: SecurityConfig::default_auth_block_duration_secs(),
             log_requests: true,
             log_request_bodies: false,
             admin_api_key: None,
