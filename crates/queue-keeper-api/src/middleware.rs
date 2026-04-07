@@ -345,8 +345,7 @@ impl IpFailureTracker {
                 state.tier = IpTier::Blocked {
                     until: now + self.block_duration,
                 };
-            } else if count >= self.rate_restrict_threshold
-                && matches!(state.tier, IpTier::Normal)
+            } else if count >= self.rate_restrict_threshold && matches!(state.tier, IpTier::Normal)
             {
                 state.tier = IpTier::RateRestricted {
                     until: now + self.rate_restrict_duration,
