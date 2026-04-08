@@ -551,7 +551,7 @@ async fn replay_event(
 ) -> Result<Json<ReplayResponse>, StatusCode> {
     // TODO: Implement event replay
     // See specs/interfaces/http-service.md
-    unimplemented!("Event replay not yet implemented")
+    Err(StatusCode::NOT_IMPLEMENTED)
 }
 
 /// Reset session state
@@ -561,7 +561,7 @@ async fn reset_session(
 ) -> Result<Json<ResetResponse>, StatusCode> {
     // TODO: Implement session reset
     // See specs/interfaces/http-service.md
-    unimplemented!("Session reset not yet implemented")
+    Err(StatusCode::NOT_IMPLEMENTED)
 }
 
 /// Get current configuration

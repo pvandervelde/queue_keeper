@@ -138,7 +138,8 @@ Basic health check. Returns the aggregate service status without checking extern
   "version": "0.2.0",
   "timestamp": "2026-04-08T10:00:00Z",
   "checks": {
-    "service": "ok"
+    "service": { "healthy": true, "message": "Service is running", "duration_ms": 0 },
+    "providers": { "healthy": true, "message": "2 webhook provider(s) registered", "duration_ms": 0 }
   }
 }
 ```
@@ -164,9 +165,8 @@ Deep health check. Validates external dependencies (blob storage, queue, Key Vau
   "version": "0.2.0",
   "timestamp": "2026-04-08T10:00:00Z",
   "checks": {
-    "blob_storage": "ok",
-    "queue": "ok",
-    "key_vault": "ok"
+    "service": { "healthy": true, "message": "Service is running", "duration_ms": 1 },
+    "providers": { "healthy": true, "message": "2 webhook provider(s) registered", "duration_ms": 1 }
   }
 }
 ```
@@ -345,8 +345,9 @@ environment variable.
 
 ### `GET /admin/config`
 
-Return the active service configuration. Literal webhook secrets are redacted
-(`"<REDACTED>"`) in the response.
+Return the active service configuration. Note: webhook secrets are returned as
+configured; redaction is not yet implemented. Production deployments should use
+Key Vault references rather than literal secrets.
 
 ```bash
 curl -H "Authorization: Bearer $ADMIN_TOKEN" \
@@ -384,7 +385,7 @@ Change the trace sampling rate at runtime.
 **Request Body**
 
 ```json
-{ "sampling_rate": 0.1 }
+{ "sampling_ratio": 0.1 }
 ```
 
 ---
@@ -400,6 +401,8 @@ Reset all Prometheus counters and histograms to zero. Useful after a failed depl
 Re-queue a previously stored event for reprocessing. The original payload is read
 from blob storage and passed through the full routing pipeline.
 
+> **Note:** This endpoint is not yet implemented and returns `501 Not Implemented`.
+
 **Path Parameters**
 
 | Parameter | Description |
@@ -410,9 +413,7 @@ from blob storage and passed through the full routing pipeline.
 
 | Status | Description |
 |--------|-------------|
-| `202 Accepted` | Replay enqueued |
-| `404 Not Found` | Event not found |
-| `409 Conflict` | Event already being replayed |
+| `501 Not Implemented` | This endpoint is not yet implemented |
 
 ---
 
@@ -420,6 +421,8 @@ from blob storage and passed through the full routing pipeline.
 
 Reset the ordering session for the given session ID. Unblocks a stuck session when
 a message in the session cannot be processed and must be skipped.
+
+> **Note:** This endpoint is not yet implemented and returns `501 Not Implemented`.
 
 **Path Parameters**
 
