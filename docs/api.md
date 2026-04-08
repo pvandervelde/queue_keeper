@@ -214,8 +214,9 @@ List stored webhook events. Results are paginated.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `provider` | string | — | Filter by provider ID |
+| `repository` | string | — | Filter by `owner/repo` |
 | `event_type` | string | — | Filter by event type |
+| `session_id` | string | — | Filter by session ID |
 | `since` | ISO 8601 | — | Only events received after this timestamp |
 | `page` | integer | 1 | Page number (1-based) |
 | `per_page` | integer | 50 | Results per page (maximum 500) |
@@ -227,13 +228,11 @@ List stored webhook events. Results are paginated.
   "events": [
     {
       "event_id": "01JQZM7XK4B3VYFNHD0G2T8P1X",
-      "provider": "github",
       "event_type": "pull_request",
-      "action": "opened",
-      "received_at": "2026-04-08T10:00:00Z",
       "repository": "myorg/myrepo",
-      "entity_type": "pull_request",
-      "entity_id": "42"
+      "session_id": "myorg/myrepo/pull_request/42",
+      "occurred_at": "2026-04-08T10:00:00Z",
+      "status": "processed"
     }
   ],
   "total": 1,
@@ -273,7 +272,8 @@ List active or historical sessions.
 |-----------|------|-------------|
 | `repository` | string | Filter by `owner/repo` |
 | `entity_type` | string | `pull_request`, `issue`, etc. |
-| `page` / `page_size` | integer | Pagination |
+| `status` | string | Filter by session status |
+| `limit` | integer | Maximum number of results to return |
 
 ---
 
@@ -297,13 +297,10 @@ Return aggregate statistics about processed events.
 
 ```json
 {
-  "total_events_received": 12500,
-  "total_events_queued": 12480,
-  "total_events_dead_lettered": 20,
-  "events_per_provider": {
-    "github": 12000,
-    "jira": 500
-  },
+  "total_events": 12500,
+  "events_per_hour": 145.8,
+  "active_sessions": 42,
+  "error_rate": 0.0016,
   "uptime_seconds": 86400
 }
 ```
