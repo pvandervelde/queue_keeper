@@ -2,7 +2,7 @@
 
 ## System Context
 
-Queue-Keeper serves as the central nervous system for OffAxis Dynamics' GitHub automation infrastructure. It acts as a reliable, ordered message broker between GitHub webhooks and downstream automation bots.
+Queue-Keeper is a standalone, reliable message broker between **multiple webhook sources** (GitHub and any other HTTP webhook provider) and downstream automation bots.
 
 ```mermaid
 C4Context
@@ -10,20 +10,49 @@ C4Context
 
     Person(dev, "Developer", "Performs actions on GitHub repositories")
     System_Ext(github, "GitHub", "Source control platform generating webhook events")
+    System_Ext(external, "External Systems", "Jira, Slack, GitLab, or any webhook-capable system")
 
-    System_Boundary(offaxis, "OffAxis Dynamics") {
-        System(qk, "Queue-Keeper", "Webhook intake and routing service")
-        System(bots, "Automation Bots", "Task-Tactician, Merge-Warden, Spec-Sentinel")
+    System_Boundary(boundary, "Your Organisation") {
+        System(qk, "Queue-Keeper", "Multi-provider webhook intake and routing service")
+        System(bots, "Automation Bots", "Downstream consumers of queued events")
     }
 
     System_Ext(azure, "Azure Services", "Cloud infrastructure and services")
 
     Rel(dev, github, "Creates PRs, Issues, Pushes")
-    Rel(github, qk, "Sends webhooks", "HTTPS")
+    Rel(github, qk, "Sends webhooks to /webhook/github", "HTTPS")
+    Rel(external, qk, "Sends webhooks to /webhook/{provider}", "HTTPS")
     Rel(qk, bots, "Routes events", "Service Bus")
     Rel(qk, azure, "Stores data, manages secrets", "HTTPS")
     Rel(bots, azure, "Reads queues", "Service Bus")
 ```
+
+## Multi-Provider Architecture
+
+Queue-Keeper supports webhooks from multiple sources through a provider abstraction layer.
+Each provider registers at its own URL path (`POST /webhook/{provider}`) and is processed
+by an independent handler. This allows new webhook sources to be added without modifying
+existing providers.
+
+### Provider Types
+
+| Provider Type | Description | Configuration |
+|---------------|-------------|---------------|
+| **GitHub Provider** | Built-in handler for GitHub webhooks with full event normalization into `EventEnvelope` | `providers:` list in service config |
+| **Generic Direct Provider** | Forwards raw payload bytes to a configured Azure Service Bus queue without transformation | `generic_providers:` with `processing_mode: direct` |
+| **Generic Wrap Provider** | Parses JSON payload, extracts fields via JSON paths, and produces a `WrappedEvent` for standard bot routing | `generic_providers:` with `processing_mode: wrap` |
+
+### URL Routing Strategy
+
+All incoming webhooks arrive at `POST /webhook/{provider}`:
+
+- The `{provider}` segment is a URL-safe ASCII identifier (`[a-z0-9\-_]+`).
+- The `ProviderRegistry` maps provider IDs to `WebhookProcessor` implementations.
+- Unknown provider IDs return `404 Not Found` immediately, before any processing.
+- The GitHub provider is always registered at `/webhook/github`.
+
+See [ADR-0001](../../docs/adr/ADR-0001-provider-routing-strategy.md) for the routing strategy decision and
+[ADR-0002](../../docs/adr/ADR-0002-generic-provider-abstraction.md) for the generic provider abstraction decision.
 
 ## Container Architecture
 
@@ -31,7 +60,8 @@ C4Context
 C4Container
     title Container Diagram for Queue-Keeper
 
-    System_Ext(github, "GitHub", "Webhook source")
+    System_Ext(github, "GitHub", "Webhook source at /webhook/github")
+    System_Ext(external, "External Systems", "Any provider at /webhook/{provider}")
 
     Container_Boundary(azure_infra, "Azure Infrastructure") {
         Container(apim, "API Gateway", "Azure Front Door", "Load balancing, SSL termination")
@@ -48,7 +78,8 @@ C4Container
         Container(bot3, "Spec-Sentinel", "Azure Function", "Documentation validation")
     }
 
-    Rel(github, apim, "POST webhook", "HTTPS")
+    Rel(github, apim, "POST /webhook/github", "HTTPS")
+    Rel(external, apim, "POST /webhook/{provider}", "HTTPS")
     Rel(apim, app, "Forward request", "HTTPS")
     Rel(app, blob, "Store raw payload", "HTTPS")
     Rel(app, kv, "Get webhook secrets (cached)", "HTTPS")
@@ -66,8 +97,11 @@ C4Container
 
 ```mermaid
 graph TB
-    subgraph "Queue-Keeper Function"
-        WH[Webhook Handler]
+    subgraph "Queue-Keeper Service"
+        WH[Webhook Handler<br/>POST /webhook/{provider}]
+        PR[Provider Registry<br/>ProviderRegistry]
+        GP[GitHub Provider<br/>GithubWebhookProvider]
+        GN[Generic Provider<br/>GenericWebhookProvider]
         SV[Signature Validator]
         PS[Payload Storer]
         EN[Event Normalizer]
@@ -78,6 +112,7 @@ graph TB
 
     subgraph "External Dependencies"
         GH[GitHub Webhooks]
+        EXT[Other Providers]
         KV[Azure Key Vault]
         BS[Blob Storage]
         SB[Service Bus Queues]
@@ -85,7 +120,12 @@ graph TB
     end
 
     GH --> WH
-    WH --> SV
+    EXT --> WH
+    WH --> PR
+    PR --> GP
+    PR --> GN
+    GP --> SV
+    GN --> SV
     SV --> KV
     SV --> PS
     PS --> BS
@@ -102,17 +142,50 @@ graph TB
     EM --> AI
 ```
 
+    QR --> EM
+    EM --> AI
+
+```
+
 ## Component Responsibilities
 
 ### Webhook Handler
 
-- **Purpose**: HTTP endpoint for GitHub webhook delivery
+- **Purpose**: HTTP endpoint for webhook delivery from any configured provider
 - **Responsibilities**:
-  - Accept HTTP POST requests from GitHub
-  - Extract webhook headers and payload
-  - Route to signature validation
-  - Return appropriate HTTP responses
+  - Accept `POST /webhook/{provider}` requests
+  - Extract the provider identifier from the URL path
+  - Dispatch to the correct `WebhookProcessor` via the `ProviderRegistry`
+  - Return `404 Not Found` for unknown provider IDs
+  - Return appropriate HTTP responses (202, 400, 401, 500)
   - Handle GitHub retry behavior
+
+### Provider Registry
+
+- **Purpose**: Map provider identifiers to `WebhookProcessor` implementations
+- **Responsibilities**:
+  - Hold a `HashMap<ProviderId, Arc<dyn WebhookProcessor>>` built at startup
+  - Validate provider IDs against the `[a-z0-9\-_]+` character set
+  - Ensure provider IDs are unique across `providers` and `generic_providers` lists
+  - Always register the GitHub provider at `"github"` regardless of configuration
+
+### GitHub Provider (`GithubWebhookProvider`)
+
+- **Purpose**: Process GitHub-specific webhook payloads
+- **Responsibilities**:
+  - Validate `X-GitHub-Event` and `X-GitHub-Delivery` headers
+  - Perform HMAC-SHA256 signature validation using the configured secret
+  - Normalize the GitHub payload into a standard `EventEnvelope`
+  - Extract entity information (`Issue`, `PullRequest`, `Repository`, etc.)
+
+### Generic Provider (`GenericWebhookProvider`)
+
+- **Purpose**: Configuration-driven processing for non-GitHub webhook sources
+- **Responsibilities**:
+  - Support **direct mode**: forward raw payload bytes to a configured queue
+  - Support **wrap mode**: extract fields via JSON paths and produce a `WrappedEvent`
+  - Perform optional HMAC-SHA256 or bearer-token signature validation
+  - Read event type, delivery ID, and entity fields from configurable sources (header, JSON path, static value, auto-generated)
 
 ### Signature Validator
 
@@ -172,41 +245,68 @@ graph TB
 
 ## Data Flow Architecture
 
-### Normal Processing Flow
+### Normal Processing Flow (GitHub Provider)
 
 ```mermaid
 sequenceDiagram
     participant GH as GitHub
     participant AG as API Gateway
     participant QK as Queue-Keeper
+    participant PR as ProviderRegistry
     participant KV as Key Vault
     participant BS as Blob Storage
     participant SB as Service Bus
     participant BOT as Bot Function
 
-    GH->>AG: POST webhook
+    GH->>AG: POST /webhook/github
     AG->>QK: Forward request
 
+    QK->>PR: Lookup "github" processor
+    PR-->>QK: GithubWebhookProvider
     QK->>KV: Get webhook secret
     KV-->>QK: Return secret
-    QK->>QK: Validate signature
+    QK->>QK: Validate HMAC-SHA256 signature
 
     QK->>BS: Store raw payload
     BS-->>QK: Confirm storage
 
-    QK->>QK: Normalize event
-    QK->>QK: Determine routing
+    QK->>QK: Normalize event (EventEnvelope)
+    QK->>QK: Determine routing via bot subscriptions
 
     loop For each target queue
         QK->>SB: Send normalized event
         SB-->>QK: Confirm delivery
     end
 
-    QK-->>AG: HTTP 200 OK
-    AG-->>GH: HTTP 200 OK
+    QK-->>AG: HTTP 202 Accepted
+    AG-->>GH: HTTP 202 Accepted
 
     SB->>BOT: Trigger function
     BOT->>SB: Process message
+```
+
+### Normal Processing Flow (Generic Direct Provider)
+
+```mermaid
+sequenceDiagram
+    participant EXT as External System
+    participant AG as API Gateway
+    participant QK as Queue-Keeper
+    participant PR as ProviderRegistry
+    participant SB as Target Queue
+
+    EXT->>AG: POST /webhook/jira
+    AG->>QK: Forward request
+
+    QK->>PR: Lookup "jira" processor
+    PR-->>QK: GenericWebhookProvider (direct mode)
+    QK->>QK: Validate signature (optional)
+
+    QK->>SB: Forward raw payload bytes
+    SB-->>QK: Confirm delivery
+
+    QK-->>AG: HTTP 202 Accepted
+    AG-->>EXT: HTTP 202 Accepted
 ```
 
 ### Error Handling Flow
@@ -373,8 +473,8 @@ azure_functions:
     plan: Premium (EP1)
 
 service_bus:
-  - namespace: offaxis-automation-prod
-    queues: [task-tactician, merge-warden, spec-sentinel, dead-letter]
+  - namespace: your-servicebus-namespace
+    queues: [queue-keeper-bot-a, queue-keeper-bot-b, queue-keeper-dead-letter]
 
 storage_accounts:
   - name: queuekeeperblobs

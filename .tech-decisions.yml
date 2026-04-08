@@ -1,0 +1,156 @@
+# Technical Decisions and Quality Thresholds
+#
+# This file captures language-specific quality standards, code quality limits,
+# testing requirements, and security standards for the Queue-Keeper project.
+# AI coding agents use this file as a source of non-negotiable constraints.
+#
+# See AGENTS.md §"Bootstrap Framework Integration" for usage instructions.
+
+# =============================================================================
+# Language Standards
+# =============================================================================
+languages:
+  rust:
+    edition: "2021"
+    minimum_toolchain: "stable"
+    required_lints:
+      - "deny(warnings)" # All clippy warnings treated as errors in CI
+      - "deny(unused)" # Unused code is always a bug
+    formatting: cargo-fmt # Enforced by pre-commit hook
+
+# =============================================================================
+# Code Quality Limits
+# =============================================================================
+code_quality:
+  # Maximum number of lines for a single function body (excluding docs/tests)
+  max_function_length: 80
+
+  # Maximum cyclomatic complexity per function
+  max_complexity: 10
+
+  # No duplicate code blocks exceeding this line threshold
+  max_duplicate_lines: 6
+
+  # Naming conventions (enforced by clippy)
+  naming:
+    types: PascalCase
+    functions: snake_case
+    modules: snake_case
+    constants: SCREAMING_SNAKE_CASE
+
+# =============================================================================
+# Testing Requirements
+# =============================================================================
+testing:
+  # Minimum unit test coverage for core domain crates (queue-keeper-core, queue-keeper-api)
+  unit_coverage_minimum: 80 # percentage
+
+  # Required test types per feature
+  required_test_types:
+    - unit # Tests in *_tests.rs alongside source files
+    - integration # Tests in crates/queue-keeper-integration-tests/
+
+  # Integration test runner
+  integration_test_command: "cargo test --package queue-keeper-integration-tests"
+
+  # E2E test runner (requires built container image)
+  e2e_test_command: "cargo test --package queue-keeper-e2e-tests"
+
+  # Test naming convention
+  test_prefix: "test_" # All test functions must start with test_
+
+  # Async test runtime
+  async_test_macro: "#[tokio::test]"
+
+# =============================================================================
+# Security Standards
+# =============================================================================
+security:
+  # Secrets must never be hard-coded; use environment variables or Key Vault
+  no_hardcoded_secrets: true
+
+  # Secret management strategy
+  secret_management:
+    production: azure_key_vault # Always use Key Vault for production secrets
+    development: env_vars # Environment variables for local dev
+    ci: env_vars # Environment variables injected by CI pipeline
+
+  # Debug implementations on types containing secrets must redact the value
+  sensitive_debug_redaction: true # Use "<REDACTED>" placeholder
+
+  # HMAC validation is required for all providers with require_signature: true
+  webhook_signature_required_by_default: true
+
+  # Rate limiting is enabled by default
+  ip_rate_limiting_enabled_by_default: true
+
+  # HTTPS enforcement for production deployments
+  require_https_in_production: true
+
+# =============================================================================
+# HTTP Client Standards
+# =============================================================================
+http:
+  # Maximum request body size accepted by the webhook endpoint (bytes)
+  max_payload_size_bytes: 26214400 # 25 MB
+
+  # Request timeout for outbound HTTP calls from the service (seconds)
+  outbound_timeout_seconds: 30
+
+  # Webhook handler must return a response within this many seconds
+  # (GitHub enforces a 10-second timeout on webhook delivery)
+  webhook_response_timeout_seconds: 9
+
+# =============================================================================
+# Documentation Requirements
+# =============================================================================
+documentation:
+  # All public Rust items must have rustdoc comments
+  require_rustdoc: true
+
+  # Rustdoc must include these sections for fallible public functions
+  required_rustdoc_sections:
+    - "# Examples"
+    - "# Errors"
+
+  # Public trait methods must document their contract (preconditions, postconditions)
+  require_trait_contracts: true
+
+# =============================================================================
+# Dependency Management
+# =============================================================================
+dependencies:
+  # New dependencies must be added to workspace-level Cargo.toml, not crate-level
+  workspace_deps_required: true
+
+  # Permitted license categories (SPDX expressions)
+  allowed_licenses:
+    - "MIT"
+    - "Apache-2.0"
+    - "MIT OR Apache-2.0"
+    - "Apache-2.0 WITH LLVM-exception"
+
+  # cargo-deny is used to enforce the above (see deny.toml)
+  deny_tool: "cargo deny check"
+
+# =============================================================================
+# Observability Standards
+# =============================================================================
+observability:
+  # Structured logging is required (JSON format in production)
+  structured_logging: true
+  log_format_production: json
+  log_format_development: text
+
+  # All public operations must emit at least one log entry at INFO or higher
+  min_log_level_for_public_ops: info
+
+  # Sensitive data must never appear in log output
+  no_sensitive_data_in_logs: true
+
+  # Prometheus metrics endpoint must be exposed
+  metrics_endpoint: "/metrics"
+
+  # Distributed tracing (correlation IDs on all requests)
+  tracing_required: true
+  correlation_id_header: "X-Correlation-ID"

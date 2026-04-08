@@ -182,7 +182,7 @@ use azure_identity::DefaultAzureCredential;
 // Create client with managed identity
 let credential = DefaultAzureCredential::default();
 let client = ServiceBusClient::new(
-    "offaxis-automation.servicebus.windows.net",
+    "<your-namespace>.servicebus.windows.net",
     credential,
 ).await?;
 ```
