@@ -142,11 +142,6 @@ graph TB
     EM --> AI
 ```
 
-    QR --> EM
-    EM --> AI
-
-```
-
 ## Component Responsibilities
 
 ### Webhook Handler

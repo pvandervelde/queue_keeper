@@ -75,7 +75,7 @@ generic_providers:
     processing_mode: direct
     target_queue: "queue-keeper-jira"
     event_type_source:
-      source: header
+      type: header
       name: "X-Atlassian-Event"
     signature:
       header_name: "X-Hub-Signature"
@@ -121,7 +121,7 @@ generic_providers:
   - provider_id: "gitlab"
     processing_mode: wrap
     event_type_source:
-      source: header
+      type: header
       name: "X-Gitlab-Event"
     signature:
       header_name: "X-Gitlab-Token"
@@ -193,10 +193,10 @@ generic_providers:
   - provider_id: "slack"
     processing_mode: wrap
     event_type_source:
-      source: json_path
+      type: json_path
       path: "event.type"            # e.g. "message", "app_mention"
     delivery_id_source:
-      source: auto_generate         # Slack has no delivery ID header
+      type: auto_generate         # Slack has no delivery ID header
     # No signature configured — rely on Slack's URL verification challenge
     field_extraction:
       repository_path: "team_id"   # Slack workspace ID used as the "repository"
@@ -241,10 +241,10 @@ generic_providers:
     processing_mode: direct
     target_queue: "queue-keeper-ci-events"
     event_type_source:
-      source: json_path
+      type: json_path
       path: "event_type"
     delivery_id_source:
-      source: json_path
+      type: json_path
       path: "build_id"
     # No signature — internal network trust model
 ```
@@ -288,7 +288,7 @@ generic_providers:
   - provider_id: "gitlab"
     processing_mode: wrap
     event_type_source:
-      source: header
+      type: header
       name: "X-Gitlab-Event"
     signature:
       header_name: "X-Gitlab-Token"
@@ -305,7 +305,7 @@ generic_providers:
     processing_mode: direct
     target_queue: "queue-keeper-jira"
     event_type_source:
-      source: header
+      type: header
       name: "X-Atlassian-Event"
     signature:
       header_name: "X-Hub-Signature"

@@ -42,7 +42,9 @@ code_quality:
 # Testing Requirements
 # =============================================================================
 testing:
-  # Minimum unit test coverage for core domain crates (queue-keeper-core, queue-keeper-api)
+  # Minimum unit test coverage floor enforced by CI tooling.
+  # Note: AGENTS.md requires 100% coverage for core business logic specifically.
+  # This floor applies to the overall workspace; core domain crates should target 100%.
   unit_coverage_minimum: 80 # percentage
 
   # Required test types per feature

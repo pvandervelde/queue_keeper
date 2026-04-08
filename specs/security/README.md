@@ -112,7 +112,7 @@ pub enum ValidationError {
 
 **Payload Validation**:
 
-- Maximum payload size: 1MB (GitHub's limit)
+- Maximum payload size: 25 MB (configurable via `webhooks.max_payload_size` in service config)
 - Valid JSON structure required
 - Schema validation for known event types
 - Sanitization of string fields in normalized events

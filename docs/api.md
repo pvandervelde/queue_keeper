@@ -65,10 +65,9 @@ Raw JSON webhook payload (maximum 25 MB).
 ```json
 {
   "event_id": "01JQZM7XK4B3VYFNHD0G2T8P1X",
-  "delivery_id": "12345678-1234-1234-1234-123456789012",
-  "provider": "github",
-  "queued_count": 3,
-  "timestamp": "2026-04-08T10:00:00Z"
+  "session_id": "myorg/myrepo/pull_request/42",
+  "status": "accepted",
+  "message": "Webhook accepted for processing"
 }
 ```
 
@@ -219,7 +218,7 @@ List stored webhook events. Results are paginated.
 | `event_type` | string | — | Filter by event type |
 | `since` | ISO 8601 | — | Only events received after this timestamp |
 | `page` | integer | 1 | Page number (1-based) |
-| `page_size` | integer | 50 | Results per page (maximum 200) |
+| `per_page` | integer | 50 | Results per page (maximum 500) |
 
 **Response Body (200)**
 
@@ -239,7 +238,7 @@ List stored webhook events. Results are paginated.
   ],
   "total": 1,
   "page": 1,
-  "page_size": 50
+  "per_page": 50
 }
 ```
 
@@ -330,13 +329,13 @@ queue_keeper_webhooks_total{provider="jira",status="success"} 500
 
 ### `GET /debug/pprof`
 
-CPU profiling data (development mode only).
+CPU profiling data. Registered unconditionally — restrict access at the network/gateway level in production.
 
 ---
 
 ### `GET /debug/vars`
 
-Runtime variables dump (development mode only).
+Runtime variables dump. Registered unconditionally — restrict access at the network/gateway level in production.
 
 ---
 
