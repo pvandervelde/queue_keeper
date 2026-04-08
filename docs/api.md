@@ -183,6 +183,17 @@ Kubernetes liveness probe. Returns `200 OK` when the process is alive.
 |--------|-------------|
 | `200 OK` | Process is alive |
 
+**Response Body**
+
+```json
+{
+  "status": "alive",
+  "version": "0.2.0",
+  "timestamp": "2026-04-08T10:00:00Z",
+  "checks": {}
+}
+```
+
 ---
 
 ### `GET /ready`
@@ -258,6 +269,7 @@ Retrieve a specific event by its ULID.
 | Status | Description |
 |--------|-------------|
 | `200 OK` | Event found |
+| `400 Bad Request` | `event_id` is not a valid ULID |
 | `404 Not Found` | Event not found |
 
 ---
@@ -275,6 +287,25 @@ List active or historical sessions.
 | `status` | string | Filter by session status |
 | `limit` | integer | Maximum number of results to return |
 
+**Response Body (200)**
+
+```json
+{
+  "sessions": [
+    {
+      "session_id": "myorg/myrepo/pull_request/42",
+      "repository": "myorg/myrepo",
+      "entity_type": "pull_request",
+      "entity_id": "42",
+      "status": "active",
+      "event_count": 5,
+      "last_activity": "2026-04-08T10:00:00Z"
+    }
+  ],
+  "total": 1
+}
+```
+
 ---
 
 ### `GET /api/sessions/{session_id}`
@@ -286,6 +317,33 @@ Retrieve a specific session by ID.
 | Parameter | Description |
 |-----------|-------------|
 | `session_id` | Session ID in `owner/repo/entity_type/entity_id` format |
+
+**Response Body (200)**
+
+```json
+{
+  "session": {
+    "session_id": "myorg/myrepo/pull_request/42",
+    "repository": "myorg/myrepo",
+    "entity_type": "pull_request",
+    "entity_id": "42",
+    "status": "active",
+    "created_at": "2026-04-08T09:00:00Z",
+    "last_activity": "2026-04-08T10:00:00Z",
+    "event_count": 5,
+    "events": [
+      {
+        "event_id": "01JQZM7XK4B3VYFNHD0G2T8P1X",
+        "event_type": "pull_request",
+        "repository": "myorg/myrepo",
+        "session_id": "myorg/myrepo/pull_request/42",
+        "occurred_at": "2026-04-08T10:00:00Z",
+        "status": "processed"
+      }
+    ]
+  }
+}
+```
 
 ---
 
