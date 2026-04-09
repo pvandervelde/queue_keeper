@@ -54,8 +54,9 @@ Raw JSON webhook payload (maximum 25 MB).
 | Status | Description |
 |--------|-------------|
 | `200 OK` | Webhook processed successfully |
-| `400 Bad Request` | Malformed request (missing required headers, invalid JSON, payload too large, signature validation failed) |
+| `400 Bad Request` | Malformed request (missing required headers, invalid JSON, signature validation failed) |
 | `404 Not Found` | Provider ID is not registered |
+| `413 Payload Too Large` | Request body exceeds the 25 MB maximum |
 | `429 Too Many Requests` | IP rate limit exceeded (10 authentication failures within 5 minutes) |
 | `500 Internal Server Error` | Unexpected processing error |
 | `503 Service Unavailable` | Transient processing failure; use `Retry-After` header |
@@ -71,7 +72,7 @@ Raw JSON webhook payload (maximum 25 MB).
 }
 ```
 
-**Response Body (400/404/500/503)**
+**Response Body (400/404/413/500/503)**
 
 ```json
 {
