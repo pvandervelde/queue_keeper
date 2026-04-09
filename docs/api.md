@@ -318,13 +318,27 @@ Retrieve a specific session by ID.
 |-----------|-------------|
 | `session_id` | Session ID in `owner/repo/entity_type/entity_id` format |
 
+**Responses**
+
+| Status | Description |
+|--------|-------------|
+| `200 OK` | Session found |
+| `400 Bad Request` | `session_id` is not a valid session identifier |
+| `404 Not Found` | Session not found |
+
 **Response Body (200)**
 
 ```json
 {
   "session": {
     "session_id": "myorg/myrepo/pull_request/42",
-    "repository": "myorg/myrepo",
+    "repository": {
+      "id": 12345,
+      "name": "myrepo",
+      "full_name": "myorg/myrepo",
+      "owner": { "id": 67890, "login": "myorg", "type": "Organization" },
+      "private": false
+    },
     "entity_type": "pull_request",
     "entity_id": "42",
     "status": "active",
