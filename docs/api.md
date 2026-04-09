@@ -75,9 +75,8 @@ Raw JSON webhook payload (maximum 25 MB).
 
 ```json
 {
-  "error": "ProviderNotFound",
-  "message": "provider 'acme' is not registered",
-  "correlation_id": "01JQZM7XK4B3VYFNHD0G2T8P1X",
+  "error": "Webhook provider not found: acme",
+  "status": 404,
   "timestamp": "2026-04-08T10:00:00Z"
 }
 ```
@@ -521,20 +520,21 @@ Rate limiting applies to all `/webhook/{provider}` and `/admin/*` endpoints.
 
 ## Error Response Format
 
-All 4xx/5xx responses share a consistent JSON structure:
+Only the `/webhook/{provider}` endpoint returns a JSON body on error. All other
+endpoints (`/api/*`, `/admin/*`) return bare HTTP status codes with no body.
+
+Webhook error response structure:
 
 ```json
 {
-  "error": "ErrorType",
-  "message": "Human-readable description",
-  "correlation_id": "01JQZM7XK4B3VYFNHD0G2T8P1X",
+  "error": "Webhook provider not found: acme",
+  "status": 404,
   "timestamp": "2026-04-08T10:00:00Z"
 }
 ```
 
 | Field | Description |
 |-------|-------------|
-| `error` | Machine-readable error category |
-| `message` | Operator-readable description |
-| `correlation_id` | Use this to correlate with service logs |
-| `timestamp` | UTC timestamp of the error |
+| `error` | Human-readable error message |
+| `status` | Numeric HTTP status code |
+| `timestamp` | UTC timestamp of the error (RFC 3339) |
