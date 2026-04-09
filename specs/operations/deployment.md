@@ -352,14 +352,14 @@ az monitor log-analytics query \
 # Check queue depth across all bot queues
 az servicebus queue show \
   --resource-group rg-queue-keeper-prod \
-  --namespace-name sb-offaxis-automation-prod \
+  --namespace-name <your-servicebus-namespace> \
   --name queue-keeper-task-tactician \
   --query "messageCount"
 
 # Check dead letter queue for failed messages
 az servicebus queue show \
   --resource-group rg-queue-keeper-prod \
-  --namespace-name sb-offaxis-automation-prod \
+  --namespace-name <your-servicebus-namespace> \
   --name queue-keeper-dead-letter \
   --query "messageCount"
 ```

@@ -112,7 +112,7 @@ pub enum ValidationError {
 
 **Payload Validation**:
 
-- Maximum payload size: 1MB (GitHub's limit)
+- Maximum payload size: 25 MB (configurable via `webhooks.max_payload_size` in service config)
 - Valid JSON structure required
 - Schema validation for known event types
 - Sanitization of string fields in normalized events
@@ -182,7 +182,7 @@ use azure_identity::DefaultAzureCredential;
 // Create client with managed identity
 let credential = DefaultAzureCredential::default();
 let client = ServiceBusClient::new(
-    "offaxis-automation.servicebus.windows.net",
+    "<your-namespace>.servicebus.windows.net",
     credential,
 ).await?;
 ```
