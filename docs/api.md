@@ -53,25 +53,25 @@ Raw JSON webhook payload (maximum 25 MB).
 
 | Status | Description |
 |--------|-------------|
-| `202 Accepted` | Webhook accepted and queued for processing |
-| `400 Bad Request` | Malformed request (missing required headers, invalid JSON, payload too large) |
-| `401 Unauthorized` | Signature validation failed |
+| `200 OK` | Webhook processed successfully |
+| `400 Bad Request` | Malformed request (missing required headers, invalid JSON, payload too large, signature validation failed) |
 | `404 Not Found` | Provider ID is not registered |
 | `429 Too Many Requests` | IP rate limit exceeded (10 authentication failures within 5 minutes) |
 | `500 Internal Server Error` | Unexpected processing error |
+| `503 Service Unavailable` | Transient processing failure; use `Retry-After` header |
 
-**Response Body (202)**
+**Response Body (200)**
 
 ```json
 {
   "event_id": "01JQZM7XK4B3VYFNHD0G2T8P1X",
   "session_id": "myorg/myrepo/pull_request/42",
-  "status": "accepted",
-  "message": "Webhook accepted for processing"
+  "status": "processed",
+  "message": "Webhook processed successfully"
 }
 ```
 
-**Response Body (400/401/404/500)**
+**Response Body (400/404/500/503)**
 
 ```json
 {
