@@ -15,12 +15,12 @@
   },
   "osvVulnerabilityAlerts": true,
   "minimumReleaseAge": "48 hours",
-  "stabilityDays": 2,
   "internalChecksFilter": "strict",
   "packageRules": [
     {
       "description": "Security patches bypass the 48h delay — merge fast but still require review",
       "matchUpdateTypes": [
+        "minor",
         "patch"
       ],
       "matchCategories": [
@@ -44,21 +44,6 @@
         "breaking-change",
         "dependencies"
       ]
-    },
-    {
-      "description": "Pin all CI action digests to a full commit SHA, not a tag",
-      "matchManagers": [
-        "github-actions"
-      ],
-      "pinDigests": true
-    },
-    {
-      "description": "Docker images pinned to digest",
-      "matchManagers": [
-        "dockerfile",
-        "docker-compose"
-      ],
-      "pinDigests": true
     },
     {
       "matchPackageNames": [
