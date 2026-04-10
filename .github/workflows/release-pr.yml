@@ -48,7 +48,9 @@ jobs:
         run: cargo binstall -y conventional_commits_next_version
 
       - name: Install git-cliff
-        run: cargo binstall -y git-cliff
+        uses: taiki-e/install-action@v2
+        with:
+          tool: git-cliff
 
       - name: Calculate next version
         id: calc_version
