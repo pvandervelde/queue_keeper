@@ -81,8 +81,8 @@ clap = { version = "4.4", features = ["derive", "env"] }
 # Note: azure_core and azure_identity are kept at 0.21 to match the version used
 # by queue-keeper-core's optional azure feature. The crate pins these directly
 # (not via workspace = true); both must be bumped together when upgrading.
-azure_core = "0.21"
-azure_identity = "0.21"
+azure_core = "0.34"
+azure_identity = "0.34"
 azure_storage_blobs = "0.21"
 azure_security_keyvault = "0.21"
 azure_messaging_servicebus = "0.21"
