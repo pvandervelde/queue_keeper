@@ -154,7 +154,7 @@ jobs:
 
       - name: Validate Docker image
         run: |
-          SKIP_BUILD=true TAG=queue-keeper:release-validate bash ./scripts/validate-container.sh
+          SKIP_BUILD=true bash ./scripts/validate-container.sh queue-keeper:release-validate
           echo "✅ Container validation passed"
 
       - name: Cleanup validation container

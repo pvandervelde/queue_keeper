@@ -178,7 +178,7 @@ jobs:
 
       - name: Validate Docker image
         run: |
-          SKIP_BUILD=true TAG=queue-keeper:ci-test bash ./scripts/validate-container.sh
+          SKIP_BUILD=true bash ./scripts/validate-container.sh queue-keeper:ci-test
           echo "✅ Container validation passed"
 
       - name: Cleanup validation container
