@@ -82,10 +82,10 @@ TESTS_FAILED=0
 step "Test 1: Verify image exists"
 if docker images "$TAG" --format "{{.Repository}}:{{.Tag}}" | grep -q "$TAG"; then
     success "Image exists: $TAG"
-    ((TESTS_PASSED++))
+    (( TESTS_PASSED += 1 ))
 else
     failure "Image not found: $TAG"
-    ((TESTS_FAILED++))
+    (( TESTS_FAILED += 1 ))
 fi
 
 # Test 2: Image size check
@@ -106,14 +106,14 @@ if [[ "$IMAGE_SIZE" =~ ^([0-9.]+)(MB|GB)$ ]]; then
     # Compare as integer (truncate decimals)
     if [ "${SIZE_MB%.*}" -lt 200 ]; then
         success "Image size is within limits"
-        ((TESTS_PASSED++))
+        (( TESTS_PASSED += 1 ))
     else
         warning "Image size exceeds recommended 200MB limit"
-        ((TESTS_PASSED++))
+        (( TESTS_PASSED += 1 ))
     fi
 else
     warning "Could not parse image size: $IMAGE_SIZE"
-    ((TESTS_PASSED++))
+    (( TESTS_PASSED += 1 ))
 fi
 
 # Test 3: Container starts
@@ -123,7 +123,7 @@ docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
 
 if docker run -d --name "$CONTAINER_NAME" -p 8090:8080 "$TAG" > /dev/null; then
     success "Container started successfully"
-    ((TESTS_PASSED++))
+    (( TESTS_PASSED += 1 ))
 
     # Wait for startup
     echo "  Waiting for service startup (5s)..."
@@ -133,24 +133,24 @@ if docker run -d --name "$CONTAINER_NAME" -p 8090:8080 "$TAG" > /dev/null; then
     step "Test 4: Verify health endpoint responds"
     if RESPONSE=$(curl -f -s http://localhost:8090/health); then
         success "Health endpoint returned 200 OK"
-        ((TESTS_PASSED++))
+        (( TESTS_PASSED += 1 ))
 
         # Parse and display response
         echo "  Status: $(echo "$RESPONSE" | grep -o '"status":"[^"]*"' | cut -d'"' -f4)"
         echo "  Version: $(echo "$RESPONSE" | grep -o '"version":"[^"]*"' | cut -d'"' -f4)"
     else
         failure "Health endpoint request failed"
-        ((TESTS_FAILED++))
+        (( TESTS_FAILED += 1 ))
     fi
 
     # Test 5: Readiness check responds
     step "Test 5: Verify readiness endpoint responds"
     if curl -f -s http://localhost:8090/ready > /dev/null; then
         success "Readiness endpoint returned 200 OK"
-        ((TESTS_PASSED++))
+        (( TESTS_PASSED += 1 ))
     else
         failure "Readiness endpoint request failed"
-        ((TESTS_FAILED++))
+        (( TESTS_FAILED += 1 ))
     fi
 
     # Test 6: Graceful shutdown
@@ -163,17 +163,17 @@ if docker run -d --name "$CONTAINER_NAME" -p 8090:8080 "$TAG" > /dev/null; then
 
     if [ $STOP_EXIT -eq 0 ] && [ "$STOP_DURATION" -lt 35 ]; then
         success "Container stopped gracefully in ${STOP_DURATION}s"
-        ((TESTS_PASSED++))
+        (( TESTS_PASSED += 1 ))
     else
         failure "Container shutdown issue (timeout or error)"
-        ((TESTS_FAILED++))
+        (( TESTS_FAILED += 1 ))
     fi
 
     # Cleanup
     docker rm -f "$CONTAINER_NAME" > /dev/null 2>&1 || true
 else
     failure "Container failed to start"
-    ((TESTS_FAILED++))
+    (( TESTS_FAILED += 1 ))
 fi
 
 # Test 7: Non-root user verification
@@ -181,10 +181,10 @@ step "Test 7: Verify container runs as non-root user"
 USER_ID=$(docker run --rm "$TAG" id -u)
 if [ "$USER_ID" = "1000" ]; then
     success "Container runs as non-root user (UID: $USER_ID)"
-    ((TESTS_PASSED++))
+    (( TESTS_PASSED += 1 ))
 else
     failure "Container runs as root or unexpected user (UID: $USER_ID)"
-    ((TESTS_FAILED++))
+    (( TESTS_FAILED += 1 ))
 fi
 
 # Summary
