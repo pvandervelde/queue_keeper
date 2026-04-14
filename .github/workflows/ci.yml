@@ -171,9 +171,20 @@ jobs:
         with:
           context: .
           push: false
+          load: true
           tags: queue-keeper:ci-test
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Validate Docker image
+        run: |
+          SKIP_BUILD=true bash ./scripts/validate-container.sh queue-keeper:ci-test
+          echo "✅ Container validation passed"
+
+      - name: Cleanup validation container
+        if: always()
+        run: |
+          docker rm -f queue-keeper-validation-test 2>/dev/null || true
 
   # bench_test:
   #   name: bench-tests
