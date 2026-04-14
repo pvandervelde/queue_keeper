@@ -33,6 +33,9 @@ uuid = { workspace = true }
 ulid = { workspace = true, features = ["serde"] }
 bytes = { workspace = true }
 
+# Memory security
+zeroize = { workspace = true }
+
 # Cryptography
 hmac = { workspace = true }
 sha2 = "0.10"

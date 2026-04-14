@@ -36,7 +36,7 @@ use queue_keeper_core::{
     blob_storage::BlobStorage,
     bot_config::BotConfiguration,
     queue_integration::{DefaultEventRouter, EventRouter},
-    EventId, QueueKeeperError, SessionId, Timestamp,
+    EventId, QueueKeeperError, SessionId,
 };
 use queue_runtime::QueueClient;
 use std::{
@@ -284,7 +284,8 @@ pub async fn start_server(
 
     let telemetry_config = Arc::new(TelemetryConfig::new(
         "queue-keeper".to_string(),
-        "development".to_string(), // TODO: Get from environment
+        std::env::var("QK__TELEMETRY__ENVIRONMENT")
+            .unwrap_or_else(|_| "production".to_string()),
     ));
 
     let event_router: Arc<dyn EventRouter> = Arc::new(DefaultEventRouter::new());
@@ -498,14 +499,9 @@ async fn metrics_endpoint(State(_state): State<AppState>) -> Result<String, Stat
 async fn debug_profile(
     State(_state): State<AppState>,
 ) -> Result<Json<DebugProfileResponse>, StatusCode> {
-    // TODO: Implement profiling data collection
-    // See specs/interfaces/http-service.md
-    Ok(Json(DebugProfileResponse {
-        profile_type: "cpu".to_string(),
-        duration_seconds: 30,
-        samples: 0,
-        message: "Profiling not yet implemented".to_string(),
-    }))
+    // Profiling data collection is not yet implemented.
+    // Return 501 to avoid misleading callers with a stub 200 response.
+    Err(StatusCode::NOT_IMPLEMENTED)
 }
 
 /// Debug variables endpoint
@@ -570,73 +566,48 @@ async fn get_config(State(state): State<AppState>) -> Json<ServiceConfig> {
 }
 
 /// Get current log level
-async fn get_log_level(State(_state): State<AppState>) -> Json<LogLevelResponse> {
-    Json(LogLevelResponse {
-        level: "info".to_string(), // TODO: Get actual current log level
-    })
+async fn get_log_level(State(_state): State<AppState>) -> Result<Json<LogLevelResponse>, StatusCode> {
+    // Dynamic log-level queries are not yet implemented.
+    // Return 501 rather than a hardcoded value to avoid misleading operators.
+    Err(StatusCode::NOT_IMPLEMENTED)
 }
 
 /// Set log level at runtime
 async fn set_log_level(
     State(_state): State<AppState>,
-    Json(request): Json<SetLogLevelRequest>,
+    Json(_request): Json<SetLogLevelRequest>,
 ) -> Result<Json<LogLevelResponse>, StatusCode> {
-    // In a real implementation, this would update the global tracing subscriber
-    // For now, we just validate the level
-    match request.level.to_lowercase().as_str() {
-        "trace" | "debug" | "info" | "warn" | "error" => {
-            // TODO: Update global tracing subscriber level
-            info!("Log level change requested: {}", request.level);
-            Ok(Json(LogLevelResponse {
-                level: request.level,
-            }))
-        }
-        _ => Err(StatusCode::BAD_REQUEST),
-    }
+    // Dynamic log-level updates are not yet implemented.
+    // Return 501 rather than silently accepting and discarding the change.
+    Err(StatusCode::NOT_IMPLEMENTED)
 }
 
 /// Get current trace sampling configuration
-async fn get_trace_sampling(State(_state): State<AppState>) -> Json<TraceSamplingResponse> {
-    Json(TraceSamplingResponse {
-        sampling_ratio: 1.0, // TODO: Get actual sampling ratio
-        service_name: "queue-keeper".to_string(),
-    })
+async fn get_trace_sampling(
+    State(_state): State<AppState>,
+) -> Result<Json<TraceSamplingResponse>, StatusCode> {
+    // Dynamic sampling-ratio queries are not yet implemented.
+    // Return 501 rather than a hardcoded value to avoid misleading operators.
+    Err(StatusCode::NOT_IMPLEMENTED)
 }
 
 /// Set trace sampling ratio at runtime
 async fn set_trace_sampling(
     State(_state): State<AppState>,
-    Json(request): Json<SetTraceSamplingRequest>,
+    Json(_request): Json<SetTraceSamplingRequest>,
 ) -> Result<Json<TraceSamplingResponse>, StatusCode> {
-    if !(0.0..=1.0).contains(&request.sampling_ratio) {
-        return Err(StatusCode::BAD_REQUEST);
-    }
-
-    // TODO: Update OpenTelemetry sampler configuration
-    info!(
-        "Trace sampling change requested: {}",
-        request.sampling_ratio
-    );
-
-    Ok(Json(TraceSamplingResponse {
-        sampling_ratio: request.sampling_ratio,
-        service_name: "queue-keeper".to_string(),
-    }))
+    // Dynamic sampling-ratio updates are not yet implemented.
+    // Return 501 rather than silently accepting and discarding the change.
+    Err(StatusCode::NOT_IMPLEMENTED)
 }
 
 /// Reset metrics (for development/testing)
 async fn reset_metrics(
     State(_state): State<AppState>,
 ) -> Result<Json<MetricsResetResponse>, StatusCode> {
-    // TODO: Implement metrics reset
-    // This would clear all prometheus metrics registries
-    info!("Metrics reset requested");
-
-    Ok(Json(MetricsResetResponse {
-        status: "success".to_string(),
-        message: "Metrics reset not yet implemented".to_string(),
-        timestamp: Timestamp::now(),
-    }))
+    // Metrics reset is not yet implemented.
+    // Return 501 rather than misleading callers with a 200 success response.
+    Err(StatusCode::NOT_IMPLEMENTED)
 }
 
 // ============================================================================

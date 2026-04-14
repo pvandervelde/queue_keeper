@@ -176,30 +176,18 @@ impl ReplayType {
     ) -> Result<usize, ReplayError> {
         match self {
             ReplayType::SingleEvent { .. } => Ok(1),
-            ReplayType::Session { session_id: _ } => {
-                // TODO: Implement session event count estimation
-                unimplemented!("Session event count estimation not yet implemented")
-            }
-            ReplayType::Repository {
-                repository: _,
-                start_time: _,
-                end_time: _,
-            } => {
-                // TODO: Implement repository event count estimation
-                unimplemented!("Repository event count estimation not yet implemented")
-            }
-            ReplayType::Filtered {
-                filter: _,
-                start_time: _,
-                end_time: _,
-            } => {
-                // TODO: Implement filtered event count estimation
-                unimplemented!("Filtered event count estimation not yet implemented")
-            }
-            ReplayType::DeadLetterQueue { .. } => {
-                // TODO: Implement DLQ event count estimation
-                unimplemented!("DLQ event count estimation not yet implemented")
-            }
+            ReplayType::Session { .. } => Err(ReplayError::Internal {
+                message: "Session event count estimation not yet implemented".to_string(),
+            }),
+            ReplayType::Repository { .. } => Err(ReplayError::Internal {
+                message: "Repository event count estimation not yet implemented".to_string(),
+            }),
+            ReplayType::Filtered { .. } => Err(ReplayError::Internal {
+                message: "Filtered event count estimation not yet implemented".to_string(),
+            }),
+            ReplayType::DeadLetterQueue { .. } => Err(ReplayError::Internal {
+                message: "DLQ event count estimation not yet implemented".to_string(),
+            }),
         }
     }
 
@@ -1331,24 +1319,30 @@ pub struct DefaultEventReplayService;
 #[async_trait]
 impl EventReplayService for DefaultEventReplayService {
     async fn submit_replay(&self, _request: ReplayRequest) -> Result<ReplayId, ReplayError> {
-        unimplemented!(
-            "Event replay service not yet implemented - see specs/interfaces/event-replay.md"
-        )
+        Err(ReplayError::Internal {
+            message:
+                "Event replay service not yet implemented - see specs/interfaces/event-replay.md"
+                    .to_string(),
+        })
     }
 
     async fn get_replay_status(&self, _replay_id: ReplayId) -> Result<ReplayStatus, ReplayError> {
-        unimplemented!(
-            "Event replay service not yet implemented - see specs/interfaces/event-replay.md"
-        )
+        Err(ReplayError::Internal {
+            message:
+                "Event replay service not yet implemented - see specs/interfaces/event-replay.md"
+                    .to_string(),
+        })
     }
 
     async fn list_replays(
         &self,
         _filter: Option<ReplayListFilter>,
     ) -> Result<Vec<ReplayStatus>, ReplayError> {
-        unimplemented!(
-            "Event replay service not yet implemented - see specs/interfaces/event-replay.md"
-        )
+        Err(ReplayError::Internal {
+            message:
+                "Event replay service not yet implemented - see specs/interfaces/event-replay.md"
+                    .to_string(),
+        })
     }
 
     async fn cancel_replay(
@@ -1356,30 +1350,38 @@ impl EventReplayService for DefaultEventReplayService {
         _replay_id: ReplayId,
         _requester: String,
     ) -> Result<(), ReplayError> {
-        unimplemented!(
-            "Event replay service not yet implemented - see specs/interfaces/event-replay.md"
-        )
+        Err(ReplayError::Internal {
+            message:
+                "Event replay service not yet implemented - see specs/interfaces/event-replay.md"
+                    .to_string(),
+        })
     }
 
     async fn get_replay_results(&self, _replay_id: ReplayId) -> Result<ReplayResults, ReplayError> {
-        unimplemented!(
-            "Event replay service not yet implemented - see specs/interfaces/event-replay.md"
-        )
+        Err(ReplayError::Internal {
+            message:
+                "Event replay service not yet implemented - see specs/interfaces/event-replay.md"
+                    .to_string(),
+        })
     }
 
     async fn validate_replay_request(
         &self,
         _request: &ReplayRequest,
     ) -> Result<ReplayEstimate, ReplayError> {
-        unimplemented!(
-            "Event replay service not yet implemented - see specs/interfaces/event-replay.md"
-        )
+        Err(ReplayError::Internal {
+            message:
+                "Event replay service not yet implemented - see specs/interfaces/event-replay.md"
+                    .to_string(),
+        })
     }
 
     async fn get_service_status(&self) -> Result<ReplayServiceStatus, ReplayError> {
-        unimplemented!(
-            "Event replay service not yet implemented - see specs/interfaces/event-replay.md"
-        )
+        Err(ReplayError::Internal {
+            message:
+                "Event replay service not yet implemented - see specs/interfaces/event-replay.md"
+                    .to_string(),
+        })
     }
 }
 
@@ -1389,14 +1391,20 @@ pub struct DefaultEventRetriever;
 #[async_trait]
 impl EventRetriever for DefaultEventRetriever {
     async fn get_event(&self, _event_id: EventId) -> Result<Option<StoredEvent>, ReplayError> {
-        unimplemented!("Event retriever not yet implemented - see specs/interfaces/event-replay.md")
+        Err(ReplayError::Internal {
+            message: "Event retriever not yet implemented - see specs/interfaces/event-replay.md"
+                .to_string(),
+        })
     }
 
     async fn get_session_events(
         &self,
         _session_id: SessionId,
     ) -> Result<Vec<StoredEvent>, ReplayError> {
-        unimplemented!("Event retriever not yet implemented - see specs/interfaces/event-replay.md")
+        Err(ReplayError::Internal {
+            message: "Event retriever not yet implemented - see specs/interfaces/event-replay.md"
+                .to_string(),
+        })
     }
 
     async fn get_events_by_filter(
@@ -1406,7 +1414,10 @@ impl EventRetriever for DefaultEventRetriever {
         _end_time: Timestamp,
         _limit: Option<usize>,
     ) -> Result<Vec<StoredEvent>, ReplayError> {
-        unimplemented!("Event retriever not yet implemented - see specs/interfaces/event-replay.md")
+        Err(ReplayError::Internal {
+            message: "Event retriever not yet implemented - see specs/interfaces/event-replay.md"
+                .to_string(),
+        })
     }
 
     async fn get_repository_events(
@@ -1416,7 +1427,10 @@ impl EventRetriever for DefaultEventRetriever {
         _end_time: Timestamp,
         _limit: Option<usize>,
     ) -> Result<Vec<StoredEvent>, ReplayError> {
-        unimplemented!("Event retriever not yet implemented - see specs/interfaces/event-replay.md")
+        Err(ReplayError::Internal {
+            message: "Event retriever not yet implemented - see specs/interfaces/event-replay.md"
+                .to_string(),
+        })
     }
 
     async fn count_events_by_filter(
@@ -1425,7 +1439,10 @@ impl EventRetriever for DefaultEventRetriever {
         _start_time: Timestamp,
         _end_time: Timestamp,
     ) -> Result<usize, ReplayError> {
-        unimplemented!("Event retriever not yet implemented - see specs/interfaces/event-replay.md")
+        Err(ReplayError::Internal {
+            message: "Event retriever not yet implemented - see specs/interfaces/event-replay.md"
+                .to_string(),
+        })
     }
 
     async fn is_recent_duplicate(
@@ -1433,7 +1450,10 @@ impl EventRetriever for DefaultEventRetriever {
         _event_id: EventId,
         _window: Duration,
     ) -> Result<bool, ReplayError> {
-        unimplemented!("Event retriever not yet implemented - see specs/interfaces/event-replay.md")
+        Err(ReplayError::Internal {
+            message: "Event retriever not yet implemented - see specs/interfaces/event-replay.md"
+                .to_string(),
+        })
     }
 }
 
@@ -1448,7 +1468,10 @@ impl ReplayExecutor for DefaultReplayExecutor {
         _events: Vec<StoredEvent>,
         _options: ReplayExecutionOptions,
     ) -> Result<ReplayResults, ReplayError> {
-        unimplemented!("Replay executor not yet implemented - see specs/interfaces/event-replay.md")
+        Err(ReplayError::Internal {
+            message: "Replay executor not yet implemented - see specs/interfaces/event-replay.md"
+                .to_string(),
+        })
     }
 
     async fn replay_single_event(
@@ -1456,7 +1479,10 @@ impl ReplayExecutor for DefaultReplayExecutor {
         _event: StoredEvent,
         _options: ReplayExecutionOptions,
     ) -> Result<EventReplayResult, ReplayError> {
-        unimplemented!("Replay executor not yet implemented - see specs/interfaces/event-replay.md")
+        Err(ReplayError::Internal {
+            message: "Replay executor not yet implemented - see specs/interfaces/event-replay.md"
+                .to_string(),
+        })
     }
 
     async fn validate_events(
@@ -1464,11 +1490,17 @@ impl ReplayExecutor for DefaultReplayExecutor {
         _events: &[StoredEvent],
         _options: &ReplayExecutionOptions,
     ) -> Result<ReplayValidationResult, ReplayError> {
-        unimplemented!("Replay executor not yet implemented - see specs/interfaces/event-replay.md")
+        Err(ReplayError::Internal {
+            message: "Replay executor not yet implemented - see specs/interfaces/event-replay.md"
+                .to_string(),
+        })
     }
 
     async fn get_execution_capacity(&self) -> Result<ExecutionCapacity, ReplayError> {
-        unimplemented!("Replay executor not yet implemented - see specs/interfaces/event-replay.md")
+        Err(ReplayError::Internal {
+            message: "Replay executor not yet implemented - see specs/interfaces/event-replay.md"
+                .to_string(),
+        })
     }
 }
 

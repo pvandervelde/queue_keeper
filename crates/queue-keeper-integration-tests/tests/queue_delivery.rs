@@ -435,28 +435,3 @@ async fn test_exponential_backoff_with_jitter() {
         "Should not be able to retry at attempt 5"
     );
 }
-
-/// Verify that queue delivery preserves session ordering
-///
-/// Tests Assertion #7: Ordering Guarantee
-#[tokio::test]
-#[ignore = "Requires session-aware queue client integration"]
-async fn test_session_ordering_preserved() {
-    // Arrange: Create multiple events with same session ID
-    let _session_id = SessionId::from_parts("owner", "repo", "pull_request", "123");
-
-    // TODO: Create events and verify they are delivered in order
-    // This requires session-aware queue client integration
-}
-
-/// Verify that different sessions can be delivered concurrently
-///
-/// Tests Assertion #7: Ordering Guarantee (concurrent sessions)
-#[tokio::test]
-#[ignore = "Requires session-aware queue client integration"]
-async fn test_concurrent_session_delivery() {
-    // Arrange: Create events with different session IDs
-
-    // TODO: Verify concurrent delivery is allowed
-    // This requires session-aware queue client integration
-}

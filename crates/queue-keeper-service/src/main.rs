@@ -52,19 +52,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load configuration
     //
     // Sources (applied in order — later sources override earlier ones):
-    //  1. /etc/queue-keeper/service.yaml   — system-wide defaults
-    //  2. ./config/service.yaml            — deployment-local override
-    //  3. Path given by QK_CONFIG_FILE env — operator-specified file
-    //  4. Environment variables prefixed QK__ (double-underscore separator)
+    //  0. ServiceConfig::default()             — built-in Rust defaults (lowest priority)
+    //  1. /etc/queue-keeper/service.yaml       — system-wide defaults
+    //  2. ./config/service.yaml                — deployment-local override
+    //  3. Path given by QK_CONFIG_FILE env     — operator-specified file
+    //  4. Environment variables prefixed QK__  — (highest priority)
     //     e.g. QK__SERVER__PORT=9090 sets server.port = 9090
     //
-    // All service configuration fields carry serde defaults, so absent files
-    // or an entirely unconfigured environment produces a valid service config
-    // with built-in defaults.  A malformed file or an environment variable
-    // that cannot be coerced to the correct type IS a hard error because it
-    // indicates deliberate-but-broken operator configuration.
+    // Source 0 is critical: without it, setting a single QK__SECURITY__*
+    // variable causes the `config` crate to create a partial `security` table.
+    // The deserialiser then fails for sibling fields that are absent from that
+    // partial table, even though they carry `#[serde(default)]` annotations.
+    // Pre-populating every field from the Rust defaults ensures the deserialiser
+    // always sees a fully-populated starting point before file/env overrides.
     // -------------------------------------------------------------------------
+    let defaults_json = serde_json::to_string(&ServiceConfig::default())
+        .expect("ServiceConfig::default() must be JSON-serialisable");
+
     let mut config_builder = config::Config::builder()
+        .add_source(config::File::from_str(
+            &defaults_json,
+            config::FileFormat::Json,
+        ))
         .add_source(
             config::File::with_name("/etc/queue-keeper/service")
                 .required(false)
