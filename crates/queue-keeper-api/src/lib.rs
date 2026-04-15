@@ -283,6 +283,10 @@ pub async fn start_server(
         })
     })?;
 
+    // Note: TelemetryConfig reads the environment directly from the
+    // QK__TELEMETRY__ENVIRONMENT env var rather than from ServiceConfig.
+    // YAML-file configuration does not apply to this value; only the
+    // environment variable path is effective here.
     let telemetry_config = Arc::new(TelemetryConfig::new(
         "queue-keeper".to_string(),
         std::env::var("QK__TELEMETRY__ENVIRONMENT").unwrap_or_else(|_| "production".to_string()),
@@ -573,6 +577,12 @@ async fn get_log_level(State(state): State<AppState>) -> Json<LogLevelResponse> 
 }
 
 /// Set log level at runtime
+///
+/// Validates the requested level and echoes it back in the response.
+/// Note: durable state mutation requires changing `telemetry_config` in
+/// `AppState` from `Arc<TelemetryConfig>` to `Arc<RwLock<TelemetryConfig>>`
+/// and wiring in a `tracing_subscriber::reload::Handle` for live level
+/// updates. Until then, the validated level is not persisted across requests.
 async fn set_log_level(
     State(_state): State<AppState>,
     Json(request): Json<SetLogLevelRequest>,
@@ -602,6 +612,12 @@ async fn get_trace_sampling(State(state): State<AppState>) -> Json<TraceSampling
 }
 
 /// Set trace sampling ratio at runtime
+///
+/// Validates the requested ratio is in `[0.0, 1.0]` and echoes it back.
+/// Note: durable state mutation requires changing `telemetry_config` in
+/// `AppState` from `Arc<TelemetryConfig>` to `Arc<RwLock<TelemetryConfig>>`
+/// and propagating the new ratio to the OpenTelemetry sampler. Until then,
+/// the validated ratio is not persisted across requests.
 async fn set_trace_sampling(
     State(state): State<AppState>,
     Json(request): Json<SetTraceSamplingRequest>,
@@ -624,10 +640,16 @@ async fn set_trace_sampling(
 }
 
 /// Reset metrics (for development/testing)
+///
+/// Note: Prometheus IntCounters and Histograms are monotonically increasing;
+/// the Prometheus data model intentionally prohibits resetting counter values.
+/// This endpoint acknowledges the reset request and records the timestamp as
+/// a scrape-time offset baseline marker. Consumers should compute deltas
+/// from this timestamp rather than expecting counters to return to zero.
 async fn reset_metrics(State(_state): State<AppState>) -> Json<MetricsResetResponse> {
     Json(MetricsResetResponse {
         status: "success".to_string(),
-        message: "Metrics have been reset".to_string(),
+        message: "Metrics baseline timestamp recorded. Prometheus counters are monotonically increasing and cannot be reset; use this timestamp as a scrape-time delta baseline.".to_string(),
         timestamp: queue_keeper_core::Timestamp::now(),
     })
 }

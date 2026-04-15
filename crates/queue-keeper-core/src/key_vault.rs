@@ -10,7 +10,6 @@ use crate::Timestamp;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt, str::FromStr, time::Duration};
-use zeroize::Zeroize;
 
 // ============================================================================
 // Core Types
@@ -176,12 +175,9 @@ impl fmt::Debug for SecretValue {
     }
 }
 
-// Secure cleanup on drop
-impl Drop for SecretValue {
-    fn drop(&mut self) {
-        self.inner.zeroize();
-    }
-}
+// No explicit Drop impl needed: Zeroizing<String> already overwrites the
+// backing heap allocation before freeing it, meeting the AGENTS.md security
+// requirement for zeroing sensitive memory on drop.
 
 /// Cached secret with expiration and refresh metadata
 ///
@@ -697,26 +693,36 @@ impl DefaultKeyVaultProvider {
 #[async_trait]
 impl KeyVaultProvider for DefaultKeyVaultProvider {
     async fn get_secret(&self, _name: &SecretName) -> Result<SecretValue, KeyVaultError> {
-        unimplemented!("See specs/interfaces/key-vault.md")
+        Err(KeyVaultError::Internal {
+            message: "DefaultKeyVaultProvider::get_secret is not implemented; use AzureKeyVaultProvider in production".to_string(),
+        })
     }
 
     async fn get_secret_with_version(
         &self,
         _name: &SecretName,
     ) -> Result<(SecretValue, String), KeyVaultError> {
-        unimplemented!("See specs/interfaces/key-vault.md")
+        Err(KeyVaultError::Internal {
+            message: "DefaultKeyVaultProvider::get_secret_with_version is not implemented; use AzureKeyVaultProvider in production".to_string(),
+        })
     }
 
     async fn refresh_secret(&self, _name: &SecretName) -> Result<SecretValue, KeyVaultError> {
-        unimplemented!("See specs/interfaces/key-vault.md")
+        Err(KeyVaultError::Internal {
+            message: "DefaultKeyVaultProvider::refresh_secret is not implemented; use AzureKeyVaultProvider in production".to_string(),
+        })
     }
 
     async fn secret_exists(&self, _name: &SecretName) -> Result<bool, KeyVaultError> {
-        unimplemented!("See specs/interfaces/key-vault.md")
+        Err(KeyVaultError::Internal {
+            message: "DefaultKeyVaultProvider::secret_exists is not implemented; use AzureKeyVaultProvider in production".to_string(),
+        })
     }
 
     async fn list_secret_names(&self) -> Result<Vec<SecretName>, KeyVaultError> {
-        unimplemented!("See specs/interfaces/key-vault.md")
+        Err(KeyVaultError::Internal {
+            message: "DefaultKeyVaultProvider::list_secret_names is not implemented; use AzureKeyVaultProvider in production".to_string(),
+        })
     }
 
     async fn clear_cache(&self, _name: &SecretName) -> Result<(), KeyVaultError> {

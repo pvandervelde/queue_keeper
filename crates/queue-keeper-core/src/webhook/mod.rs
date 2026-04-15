@@ -933,7 +933,6 @@ impl WebhookProcessor for WebhookProcessorImpl {
                 .await
             {
                 if let Some(audit_logger) = &self.audit_logger {
-                    let event_id = EventId::new();
                     let _ = audit_logger
                         .log_event(AuditEvent::new(
                             AuditEventType::Security,
@@ -960,7 +959,6 @@ impl WebhookProcessor for WebhookProcessorImpl {
                             },
                         ))
                         .await;
-                    let _ = event_id; // suppress unused warning
                 }
                 return Err(err.into());
             }
