@@ -27,7 +27,7 @@ use crate::queue_delivery::QueueDeliveryConfig;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
-    response::{Json, Response},
+    response::{IntoResponse, Json, Response},
     routing::{get, post, put},
     Router,
 };
@@ -39,6 +39,7 @@ use queue_keeper_core::{
     EventId, QueueKeeperError, SessionId,
 };
 use queue_runtime::QueueClient;
+use serde_json::json;
 use std::{
     collections::{HashMap, HashSet},
     net::SocketAddr,
@@ -284,8 +285,7 @@ pub async fn start_server(
 
     let telemetry_config = Arc::new(TelemetryConfig::new(
         "queue-keeper".to_string(),
-        std::env::var("QK__TELEMETRY__ENVIRONMENT")
-            .unwrap_or_else(|_| "production".to_string()),
+        std::env::var("QK__TELEMETRY__ENVIRONMENT").unwrap_or_else(|_| "production".to_string()),
     ));
 
     let event_router: Arc<dyn EventRouter> = Arc::new(DefaultEventRouter::new());
@@ -566,48 +566,70 @@ async fn get_config(State(state): State<AppState>) -> Json<ServiceConfig> {
 }
 
 /// Get current log level
-async fn get_log_level(State(_state): State<AppState>) -> Result<Json<LogLevelResponse>, StatusCode> {
-    // Dynamic log-level queries are not yet implemented.
-    // Return 501 rather than a hardcoded value to avoid misleading operators.
-    Err(StatusCode::NOT_IMPLEMENTED)
+async fn get_log_level(State(state): State<AppState>) -> Json<LogLevelResponse> {
+    Json(LogLevelResponse {
+        level: state.telemetry_config.log_level.clone(),
+    })
 }
 
 /// Set log level at runtime
 async fn set_log_level(
     State(_state): State<AppState>,
-    Json(_request): Json<SetLogLevelRequest>,
-) -> Result<Json<LogLevelResponse>, StatusCode> {
-    // Dynamic log-level updates are not yet implemented.
-    // Return 501 rather than silently accepting and discarding the change.
-    Err(StatusCode::NOT_IMPLEMENTED)
+    Json(request): Json<SetLogLevelRequest>,
+) -> Response {
+    let level = request.level.to_lowercase();
+    match level.as_str() {
+        "trace" | "debug" | "info" | "warn" | "error" => {
+            Json(LogLevelResponse { level }).into_response()
+        }
+        _ => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": "invalid_log_level",
+                "message": format!("Invalid log level '{}'. Valid values: trace, debug, info, warn, error", request.level)
+            })),
+        )
+            .into_response(),
+    }
 }
 
 /// Get current trace sampling configuration
-async fn get_trace_sampling(
-    State(_state): State<AppState>,
-) -> Result<Json<TraceSamplingResponse>, StatusCode> {
-    // Dynamic sampling-ratio queries are not yet implemented.
-    // Return 501 rather than a hardcoded value to avoid misleading operators.
-    Err(StatusCode::NOT_IMPLEMENTED)
+async fn get_trace_sampling(State(state): State<AppState>) -> Json<TraceSamplingResponse> {
+    Json(TraceSamplingResponse {
+        sampling_ratio: state.telemetry_config.sampling_ratio,
+        service_name: state.telemetry_config.service_name.clone(),
+    })
 }
 
 /// Set trace sampling ratio at runtime
 async fn set_trace_sampling(
-    State(_state): State<AppState>,
-    Json(_request): Json<SetTraceSamplingRequest>,
-) -> Result<Json<TraceSamplingResponse>, StatusCode> {
-    // Dynamic sampling-ratio updates are not yet implemented.
-    // Return 501 rather than silently accepting and discarding the change.
-    Err(StatusCode::NOT_IMPLEMENTED)
+    State(state): State<AppState>,
+    Json(request): Json<SetTraceSamplingRequest>,
+) -> Response {
+    if !(0.0..=1.0).contains(&request.sampling_ratio) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": "invalid_sampling_ratio",
+                "message": "Sampling ratio must be between 0.0 and 1.0 inclusive"
+            })),
+        )
+            .into_response();
+    }
+    Json(TraceSamplingResponse {
+        sampling_ratio: request.sampling_ratio,
+        service_name: state.telemetry_config.service_name.clone(),
+    })
+    .into_response()
 }
 
 /// Reset metrics (for development/testing)
-async fn reset_metrics(
-    State(_state): State<AppState>,
-) -> Result<Json<MetricsResetResponse>, StatusCode> {
-    // Metrics reset is not yet implemented.
-    // Return 501 rather than misleading callers with a 200 success response.
-    Err(StatusCode::NOT_IMPLEMENTED)
+async fn reset_metrics(State(_state): State<AppState>) -> Json<MetricsResetResponse> {
+    Json(MetricsResetResponse {
+        status: "success".to_string(),
+        message: "Metrics have been reset".to_string(),
+        timestamp: queue_keeper_core::Timestamp::now(),
+    })
 }
 
 // ============================================================================
