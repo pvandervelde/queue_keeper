@@ -497,6 +497,8 @@ async fn build_queue_client(
 /// Build a [`SignatureValidator`] from a standard [`ProviderConfig`].
 ///
 /// - `Literal` secret → [`LiteralSignatureValidator`] (dev/test only, emits `WARN`).
+/// - `EnvironmentVariable` secret → [`LiteralSignatureValidator`] seeded from the
+///   named env var at startup (cloud-agnostic; emits `WARN`).
 /// - `KeyVault` secret → [`KeyVaultSignatureValidator`] backed by the provided
 ///   [`KeyVaultProvider`]. `key_vault` must be `Some` here; `ServiceConfig::validate()`
 ///   already guarantees this.
@@ -510,6 +512,38 @@ fn build_validator_from_provider_config(
     match provider_config.secret.as_ref()? {
         ProviderSecretConfig::Literal { value } => {
             Some(Arc::new(LiteralSignatureValidator::new(value.clone())))
+        }
+        ProviderSecretConfig::EnvironmentVariable { env_var_name } => {
+            match std::env::var(env_var_name) {
+                Ok(value) if !value.is_empty() => {
+                    warn!(
+                        provider = %provider_config.id,
+                        env_var = %env_var_name,
+                        "Provider uses an environment-variable secret. \
+                         This is acceptable for CI and on-premises deployments \
+                         but prefer Key Vault for production."
+                    );
+                    Some(Arc::new(LiteralSignatureValidator::new(value)))
+                }
+                Ok(_) => {
+                    error!(
+                        provider = %provider_config.id,
+                        env_var = %env_var_name,
+                        "Environment variable for webhook secret is set but empty; \
+                         signature validation will be SKIPPED"
+                    );
+                    None
+                }
+                Err(_) => {
+                    error!(
+                        provider = %provider_config.id,
+                        env_var = %env_var_name,
+                        "Environment variable for webhook secret is not set; \
+                         signature validation will be SKIPPED"
+                    );
+                    None
+                }
+            }
         }
         ProviderSecretConfig::KeyVault { secret_name } => {
             let kv = match key_vault {
@@ -556,6 +590,38 @@ fn build_validator_from_generic_config(
     match generic_config.webhook_secret.as_ref()? {
         WebhookSecretConfig::Literal { value } => {
             Some(Arc::new(LiteralSignatureValidator::new(value.clone())))
+        }
+        WebhookSecretConfig::EnvironmentVariable { env_var_name } => {
+            match std::env::var(env_var_name) {
+                Ok(value) if !value.is_empty() => {
+                    warn!(
+                        provider = %generic_config.provider_id,
+                        env_var = %env_var_name,
+                        "Provider uses an environment-variable secret. \
+                         This is acceptable for CI and on-premises deployments \
+                         but prefer Key Vault for production."
+                    );
+                    Some(Arc::new(LiteralSignatureValidator::new(value)))
+                }
+                Ok(_) => {
+                    error!(
+                        provider = %generic_config.provider_id,
+                        env_var = %env_var_name,
+                        "Environment variable for webhook secret is set but empty; \
+                         signature validation will be SKIPPED"
+                    );
+                    None
+                }
+                Err(_) => {
+                    error!(
+                        provider = %generic_config.provider_id,
+                        env_var = %env_var_name,
+                        "Environment variable for webhook secret is not set; \
+                         signature validation will be SKIPPED"
+                    );
+                    None
+                }
+            }
         }
         WebhookSecretConfig::KeyVault { secret_name } => {
             let kv = match key_vault {

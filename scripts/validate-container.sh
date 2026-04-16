@@ -125,6 +125,17 @@ if docker run -d --name "$CONTAINER_NAME" -p 8090:8080 "$TAG" > /dev/null; then
     success "Container started successfully"
     (( TESTS_PASSED += 1 ))
 
+    # Brief pause then verify the container is still running (not an immediate crash)
+    sleep 2
+    if ! docker inspect "$CONTAINER_NAME" --format='{{.State.Running}}' 2>/dev/null | grep -q "true"; then
+        failure "Container exited immediately after start!"
+        echo "  Exit code: $(docker inspect "$CONTAINER_NAME" --format='{{.State.ExitCode}}' 2>/dev/null)"
+        echo "  Container logs:"
+        docker logs "$CONTAINER_NAME" 2>&1 || true
+        docker rm -f "$CONTAINER_NAME" > /dev/null 2>&1 || true
+        (( TESTS_FAILED += 1 ))
+    else
+
     # Wait for startup with retries (up to 30s)
     echo "  Waiting for service startup (max 30s)..."
     HEALTH_OK=false
@@ -181,6 +192,7 @@ if docker run -d --name "$CONTAINER_NAME" -p 8090:8080 "$TAG" > /dev/null; then
 
     # Cleanup
     docker rm -f "$CONTAINER_NAME" > /dev/null 2>&1 || true
+    fi  # end liveness check else-branch
 else
     failure "Container failed to start"
     (( TESTS_FAILED += 1 ))

@@ -63,13 +63,13 @@ use tracing::{instrument, warn};
 /// Used in [`GenericProviderConfig::webhook_secret`] to supply the HMAC key
 /// or bearer token that the provider uses to sign requests.
 ///
-/// In production deployments, always use [`WebhookSecretConfig::KeyVault`]
-/// to avoid embedding secrets in configuration files or environment variables.
-///
 /// # Security
 ///
 /// [`WebhookSecretConfig::Literal`] is provided for development and testing
 /// only. A startup `WARN` is emitted when a literal secret is active.
+/// For production use [`WebhookSecretConfig::KeyVault`] (Azure) or
+/// [`WebhookSecretConfig::EnvironmentVariable`] when a managed secret store
+/// is not available (e.g. CI, on-premises).
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum WebhookSecretConfig {
@@ -77,6 +77,20 @@ pub enum WebhookSecretConfig {
     KeyVault {
         /// Name of the secret inside the vault.
         secret_name: String,
+    },
+
+    /// Secret read from an environment variable at startup.
+    ///
+    /// The value is read once when the provider initialises and treated as a
+    /// literal thereafter.  Use this instead of [`WebhookSecretConfig::Literal`]
+    /// when the secret must not appear in configuration files, and when a
+    /// managed secret store (e.g. Azure Key Vault) is unavailable — for
+    /// example in CI pipelines or on-premises deployments.
+    ///
+    /// A startup `WARN` is emitted when this variant is active.
+    EnvironmentVariable {
+        /// Name of the environment variable that holds the secret value.
+        env_var_name: String,
     },
 
     /// Literal secret embedded in the configuration.
@@ -96,6 +110,10 @@ impl std::fmt::Debug for WebhookSecretConfig {
                 .debug_struct("WebhookSecretConfig::KeyVault")
                 .field("secret_name", secret_name)
                 .finish(),
+            Self::EnvironmentVariable { env_var_name } => f
+                .debug_struct("WebhookSecretConfig::EnvironmentVariable")
+                .field("env_var_name", env_var_name)
+                .finish(),
             Self::Literal { .. } => f
                 .debug_struct("WebhookSecretConfig::Literal")
                 .field("value", &"<REDACTED>")
@@ -112,6 +130,12 @@ impl serde::Serialize for WebhookSecretConfig {
                 let mut map = serializer.serialize_map(Some(2))?;
                 map.serialize_entry("type", "key_vault")?;
                 map.serialize_entry("secret_name", secret_name)?;
+                map.end()
+            }
+            Self::EnvironmentVariable { env_var_name } => {
+                let mut map = serializer.serialize_map(Some(2))?;
+                map.serialize_entry("type", "environment_variable")?;
+                map.serialize_entry("env_var_name", env_var_name)?;
                 map.end()
             }
             Self::Literal { .. } => {
