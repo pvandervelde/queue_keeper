@@ -125,13 +125,22 @@ if docker run -d --name "$CONTAINER_NAME" -p 8090:8080 "$TAG" > /dev/null; then
     success "Container started successfully"
     (( TESTS_PASSED += 1 ))
 
-    # Wait for startup
-    echo "  Waiting for service startup (5s)..."
-    sleep 5
+    # Wait for startup with retries (up to 30s)
+    echo "  Waiting for service startup (max 30s)..."
+    HEALTH_OK=false
+    for i in $(seq 1 6); do
+        sleep 5
+        if curl -f -s --max-time 5 --connect-timeout 3 http://localhost:8090/health > /dev/null 2>&1; then
+            HEALTH_OK=true
+            break
+        fi
+        echo "  Attempt $i/6: service not ready yet..."
+    done
 
     # Test 4: Health check responds
     step "Test 4: Verify health endpoint responds"
-    if RESPONSE=$(curl -f -s http://localhost:8090/health); then
+    if [ "$HEALTH_OK" = "true" ]; then
+        RESPONSE=$(curl -f -s --max-time 5 --connect-timeout 3 http://localhost:8090/health)
         success "Health endpoint returned 200 OK"
         (( TESTS_PASSED += 1 ))
 
@@ -139,13 +148,14 @@ if docker run -d --name "$CONTAINER_NAME" -p 8090:8080 "$TAG" > /dev/null; then
         echo "  Status: $(echo "$RESPONSE" | grep -o '"status":"[^"]*"' | cut -d'"' -f4)"
         echo "  Version: $(echo "$RESPONSE" | grep -o '"version":"[^"]*"' | cut -d'"' -f4)"
     else
-        failure "Health endpoint request failed"
+        failure "Health endpoint did not respond within 30s"
+        docker logs "$CONTAINER_NAME" || true
         (( TESTS_FAILED += 1 ))
     fi
 
     # Test 5: Readiness check responds
     step "Test 5: Verify readiness endpoint responds"
-    if curl -f -s http://localhost:8090/ready > /dev/null; then
+    if curl -f -s --max-time 5 --connect-timeout 3 http://localhost:8090/ready > /dev/null; then
         success "Readiness endpoint returned 200 OK"
         (( TESTS_PASSED += 1 ))
     else
