@@ -199,8 +199,11 @@ else
 fi
 
 # Test 7: Non-root user verification
+# Use --entrypoint to override ENTRYPOINT in the Dockerfile; without this,
+# 'docker run --rm "$TAG" id -u' passes 'id -u' as arguments to the service
+# binary, which starts the HTTP server and hangs indefinitely.
 step "Test 7: Verify container runs as non-root user"
-USER_ID=$(docker run --rm "$TAG" id -u)
+USER_ID=$(docker run --rm --entrypoint id "$TAG" -u 2>/dev/null)
 if [ "$USER_ID" = "1000" ]; then
     success "Container runs as non-root user (UID: $USER_ID)"
     (( TESTS_PASSED += 1 ))
