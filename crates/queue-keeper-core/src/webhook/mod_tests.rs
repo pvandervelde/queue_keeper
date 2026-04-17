@@ -682,7 +682,7 @@ mod event_normalization_tests {
         assert!(result.is_ok());
 
         let event = result.unwrap();
-        // CorrelationId is UUID format
+        // CorrelationId is a string value (UUID v4 when generated fresh)
         let id_str = event.correlation_id.as_str();
         assert!(!id_str.is_empty());
     }
