@@ -5,7 +5,10 @@
 //! See specs/interfaces/webhook-processing.md for complete specification.
 
 use crate::{
-    audit_logging::{AuditContext, AuditLogger, AuditResult, WebhookProcessingAction},
+    audit_logging::{
+        AuditAction, AuditActor, AuditContext, AuditEvent, AuditEventType, AuditLogger,
+        AuditResource, AuditResult, WebhookProcessingAction,
+    },
     CorrelationId, EventId, Repository, RepositoryId, SessionId, Timestamp, User, UserId, UserType,
     ValidationError,
 };
@@ -922,10 +925,43 @@ impl WebhookProcessor for WebhookProcessorImpl {
         // 1. Validate headers and basic structure
         request.headers.validate()?;
 
-        // 2. Validate webhook signature (if present and validator available)
+        // 2. Validate webhook signature (if present and validator available).
+        //    On failure, log a security audit event before propagating the error.
         if let Some(signature) = request.signature() {
-            self.validate_signature(&request.body, signature, request.event_type())
-                .await?;
+            if let Err(err) = self
+                .validate_signature(&request.body, signature, request.event_type())
+                .await
+            {
+                if let Some(audit_logger) = &self.audit_logger {
+                    let _ = audit_logger
+                        .log_event(AuditEvent::new(
+                            AuditEventType::Security,
+                            AuditActor::ExternalService {
+                                service_name: "github-webhook".to_string(),
+                                service_id: request.delivery_id().to_string(),
+                                authenticated: false,
+                            },
+                            AuditResource::Administrative {
+                                resource_type: "webhook".to_string(),
+                                resource_id: request.delivery_id().to_string(),
+                            },
+                            AuditAction::Validate {
+                                validation_type: "signature".to_string(),
+                            },
+                            AuditResult::Failure {
+                                error_code: "webhook_signature_failure".to_string(),
+                                error_message: err.to_string(),
+                                retryable: false,
+                            },
+                            AuditContext {
+                                request_id: Some(request.delivery_id().to_string()),
+                                ..Default::default()
+                            },
+                        ))
+                        .await;
+                }
+                return Err(err.into());
+            }
         }
 
         // 3. Store raw payload for audit/replay (if storer available)

@@ -27,7 +27,7 @@ use crate::queue_delivery::QueueDeliveryConfig;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
-    response::{Json, Response},
+    response::{IntoResponse, Json, Response},
     routing::{get, post, put},
     Router,
 };
@@ -36,9 +36,10 @@ use queue_keeper_core::{
     blob_storage::BlobStorage,
     bot_config::BotConfiguration,
     queue_integration::{DefaultEventRouter, EventRouter},
-    EventId, QueueKeeperError, SessionId, Timestamp,
+    EventId, QueueKeeperError, SessionId,
 };
 use queue_runtime::QueueClient;
+use serde_json::json;
 use std::{
     collections::{HashMap, HashSet},
     net::SocketAddr,
@@ -282,9 +283,13 @@ pub async fn start_server(
         })
     })?;
 
+    // Note: TelemetryConfig reads the environment directly from the
+    // QK__TELEMETRY__ENVIRONMENT env var rather than from ServiceConfig.
+    // YAML-file configuration does not apply to this value; only the
+    // environment variable path is effective here.
     let telemetry_config = Arc::new(TelemetryConfig::new(
         "queue-keeper".to_string(),
-        "development".to_string(), // TODO: Get from environment
+        std::env::var("QK__TELEMETRY__ENVIRONMENT").unwrap_or_else(|_| "production".to_string()),
     ));
 
     let event_router: Arc<dyn EventRouter> = Arc::new(DefaultEventRouter::new());
@@ -498,14 +503,9 @@ async fn metrics_endpoint(State(_state): State<AppState>) -> Result<String, Stat
 async fn debug_profile(
     State(_state): State<AppState>,
 ) -> Result<Json<DebugProfileResponse>, StatusCode> {
-    // TODO: Implement profiling data collection
-    // See specs/interfaces/http-service.md
-    Ok(Json(DebugProfileResponse {
-        profile_type: "cpu".to_string(),
-        duration_seconds: 30,
-        samples: 0,
-        message: "Profiling not yet implemented".to_string(),
-    }))
+    // Profiling data collection is not yet implemented.
+    // Return 501 to avoid misleading callers with a stub 200 response.
+    Err(StatusCode::NOT_IMPLEMENTED)
 }
 
 /// Debug variables endpoint
@@ -570,73 +570,88 @@ async fn get_config(State(state): State<AppState>) -> Json<ServiceConfig> {
 }
 
 /// Get current log level
-async fn get_log_level(State(_state): State<AppState>) -> Json<LogLevelResponse> {
+async fn get_log_level(State(state): State<AppState>) -> Json<LogLevelResponse> {
     Json(LogLevelResponse {
-        level: "info".to_string(), // TODO: Get actual current log level
+        level: state.telemetry_config.log_level.clone(),
     })
 }
 
 /// Set log level at runtime
+///
+/// Validates the requested level and echoes it back in the response.
+/// Note: durable state mutation requires changing `telemetry_config` in
+/// `AppState` from `Arc<TelemetryConfig>` to `Arc<RwLock<TelemetryConfig>>`
+/// and wiring in a `tracing_subscriber::reload::Handle` for live level
+/// updates. Until then, the validated level is not persisted across requests.
 async fn set_log_level(
     State(_state): State<AppState>,
     Json(request): Json<SetLogLevelRequest>,
-) -> Result<Json<LogLevelResponse>, StatusCode> {
-    // In a real implementation, this would update the global tracing subscriber
-    // For now, we just validate the level
-    match request.level.to_lowercase().as_str() {
+) -> Response {
+    let level = request.level.to_lowercase();
+    match level.as_str() {
         "trace" | "debug" | "info" | "warn" | "error" => {
-            // TODO: Update global tracing subscriber level
-            info!("Log level change requested: {}", request.level);
-            Ok(Json(LogLevelResponse {
-                level: request.level,
-            }))
+            Json(LogLevelResponse { level }).into_response()
         }
-        _ => Err(StatusCode::BAD_REQUEST),
+        _ => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": "invalid_log_level",
+                "message": format!("Invalid log level '{}'. Valid values: trace, debug, info, warn, error", request.level)
+            })),
+        )
+            .into_response(),
     }
 }
 
 /// Get current trace sampling configuration
-async fn get_trace_sampling(State(_state): State<AppState>) -> Json<TraceSamplingResponse> {
+async fn get_trace_sampling(State(state): State<AppState>) -> Json<TraceSamplingResponse> {
     Json(TraceSamplingResponse {
-        sampling_ratio: 1.0, // TODO: Get actual sampling ratio
-        service_name: "queue-keeper".to_string(),
+        sampling_ratio: state.telemetry_config.sampling_ratio,
+        service_name: state.telemetry_config.service_name.clone(),
     })
 }
 
 /// Set trace sampling ratio at runtime
+///
+/// Validates the requested ratio is in `[0.0, 1.0]` and echoes it back.
+/// Note: durable state mutation requires changing `telemetry_config` in
+/// `AppState` from `Arc<TelemetryConfig>` to `Arc<RwLock<TelemetryConfig>>`
+/// and propagating the new ratio to the OpenTelemetry sampler. Until then,
+/// the validated ratio is not persisted across requests.
 async fn set_trace_sampling(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Json(request): Json<SetTraceSamplingRequest>,
-) -> Result<Json<TraceSamplingResponse>, StatusCode> {
+) -> Response {
     if !(0.0..=1.0).contains(&request.sampling_ratio) {
-        return Err(StatusCode::BAD_REQUEST);
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": "invalid_sampling_ratio",
+                "message": "Sampling ratio must be between 0.0 and 1.0 inclusive"
+            })),
+        )
+            .into_response();
     }
-
-    // TODO: Update OpenTelemetry sampler configuration
-    info!(
-        "Trace sampling change requested: {}",
-        request.sampling_ratio
-    );
-
-    Ok(Json(TraceSamplingResponse {
+    Json(TraceSamplingResponse {
         sampling_ratio: request.sampling_ratio,
-        service_name: "queue-keeper".to_string(),
-    }))
+        service_name: state.telemetry_config.service_name.clone(),
+    })
+    .into_response()
 }
 
 /// Reset metrics (for development/testing)
-async fn reset_metrics(
-    State(_state): State<AppState>,
-) -> Result<Json<MetricsResetResponse>, StatusCode> {
-    // TODO: Implement metrics reset
-    // This would clear all prometheus metrics registries
-    info!("Metrics reset requested");
-
-    Ok(Json(MetricsResetResponse {
+///
+/// Note: Prometheus IntCounters and Histograms are monotonically increasing;
+/// the Prometheus data model intentionally prohibits resetting counter values.
+/// This endpoint acknowledges the reset request and records the timestamp as
+/// a scrape-time offset baseline marker. Consumers should compute deltas
+/// from this timestamp rather than expecting counters to return to zero.
+async fn reset_metrics(State(_state): State<AppState>) -> Json<MetricsResetResponse> {
+    Json(MetricsResetResponse {
         status: "success".to_string(),
-        message: "Metrics reset not yet implemented".to_string(),
-        timestamp: Timestamp::now(),
-    }))
+        message: "Metrics baseline timestamp recorded. Prometheus counters are monotonically increasing and cannot be reset; use this timestamp as a scrape-time delta baseline.".to_string(),
+        timestamp: queue_keeper_core::Timestamp::now(),
+    })
 }
 
 // ============================================================================

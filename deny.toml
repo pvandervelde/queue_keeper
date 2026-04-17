@@ -25,6 +25,14 @@ ignore = [
     # Used transitively through azure_core v0.21.0 -> http-types -> fastrand -> instant
     # Will be resolved when Azure SDK updates to newer versions
     "RUSTSEC-2024-0384",
+
+    # Rand unsound with custom logger (RUSTSEC-2026-0097)
+    # Affects rand 0.7.3 (via http-types -> azure_core 0.20/0.21) and rand 0.8.5
+    # (via oauth2 -> azure_identity). rand 0.9.x is updated to 0.9.4 which is fixed.
+    # The 0.7.3 and 0.8.5 versions cannot be updated without a major Azure SDK upgrade.
+    # Risk is low: requires a custom logger that calls rand::rng() during reseeding,
+    # which is not part of our application code. Will be resolved when Azure SDK updates.
+    "RUSTSEC-2026-0097",
 ]
 
 [licenses]

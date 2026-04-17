@@ -148,6 +148,7 @@ impl ServiceConfig {
                     Some(WebhookSecretConfig::KeyVault { .. })
                 )
             });
+        // EnvironmentVariable and Literal secrets do not require Key Vault.
 
         if needs_key_vault {
             match &self.key_vault {
@@ -284,9 +285,6 @@ impl ProviderConfig {
 
 /// Source for a provider's HMAC-SHA256 webhook secret.
 ///
-/// In production deployments, always use [`ProviderSecretConfig::KeyVault`]
-/// to avoid embedding secrets in configuration files or environment variables.
-///
 /// # Security
 ///
 /// [`ProviderSecretConfig::Literal`] is provided for development and testing
@@ -304,6 +302,20 @@ pub enum ProviderSecretConfig {
     KeyVault {
         /// Name of the secret in Azure Key Vault.
         secret_name: String,
+    },
+
+    /// Secret read from an environment variable at startup.
+    ///
+    /// The value is read once when the provider initialises and treated as a
+    /// literal thereafter. Use this instead of [`ProviderSecretConfig::Literal`]
+    /// when the secret must not appear in configuration files, and when a
+    /// managed secret store (e.g. Azure Key Vault) is unavailable — for
+    /// example in CI pipelines or on-premises deployments.
+    ///
+    /// A startup `WARN` is emitted when this variant is active.
+    EnvironmentVariable {
+        /// Name of the environment variable that holds the secret value.
+        env_var_name: String,
     },
 
     /// Literal secret value embedded in the configuration.
@@ -329,6 +341,12 @@ impl serde::Serialize for ProviderSecretConfig {
                 map.serialize_entry("secret_name", secret_name)?;
                 map.end()
             }
+            Self::EnvironmentVariable { env_var_name } => {
+                let mut map = serializer.serialize_map(Some(2))?;
+                map.serialize_entry("type", "environment_variable")?;
+                map.serialize_entry("env_var_name", env_var_name)?;
+                map.end()
+            }
             Self::Literal { .. } => {
                 // Never serialize the raw secret value — replace with a
                 // redaction placeholder so the /admin/config endpoint does
@@ -348,6 +366,10 @@ impl std::fmt::Debug for ProviderSecretConfig {
             Self::KeyVault { secret_name } => f
                 .debug_struct("KeyVault")
                 .field("secret_name", secret_name)
+                .finish(),
+            Self::EnvironmentVariable { env_var_name } => f
+                .debug_struct("EnvironmentVariable")
+                .field("env_var_name", env_var_name)
                 .finish(),
             Self::Literal { .. } => f
                 .debug_struct("Literal")
@@ -372,6 +394,16 @@ impl ProviderSecretConfig {
                     return Err(ConfigError::ProviderValidation {
                         message: format!(
                             "provider '{}': key_vault.secret_name must not be empty",
+                            provider_id
+                        ),
+                    });
+                }
+            }
+            Self::EnvironmentVariable { env_var_name } => {
+                if env_var_name.is_empty() {
+                    return Err(ConfigError::ProviderValidation {
+                        message: format!(
+                            "provider '{}': environment_variable.env_var_name must not be empty",
                             provider_id
                         ),
                     });

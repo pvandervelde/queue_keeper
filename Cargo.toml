@@ -92,6 +92,9 @@ aws-config = "1.0"
 aws-sdk-sqs = "1.0"
 aws-sdk-secretsmanager = "1.0"
 
+# Memory security
+zeroize = { version = "1.8", features = ["derive"] }
+
 # Utilities
 uuid = { version = "1.6", features = ["v4", "serde"] }
 ulid = "1.2"

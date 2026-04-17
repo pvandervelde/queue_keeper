@@ -278,8 +278,15 @@ pub trait EventStore: Send + Sync {
 // Default Implementations
 // ============================================================================
 
-/// Default health checker implementation
-pub struct DefaultHealthChecker;
+/// Minimal health checker for use in tests only.
+///
+/// This implementation always reports healthy/ready because it has no access
+/// to real dependencies (queue, blob storage, key vault). It is intentionally
+/// restricted to test code. Production deployments must use
+/// [`ServiceHealthChecker`], which validates that at least one webhook
+/// provider is registered before reporting ready.
+#[allow(dead_code)]
+pub(crate) struct DefaultHealthChecker;
 
 #[async_trait::async_trait]
 impl HealthChecker for DefaultHealthChecker {

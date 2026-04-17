@@ -115,8 +115,10 @@ impl FromStr for SecretName {
 /// See specs/interfaces/key-vault.md
 #[derive(Clone)]
 pub struct SecretValue {
-    // Internal: Uses secure string or zeroized buffer
-    inner: String, // TODO: Replace with zeroizing string in production
+    // Zeroizing<String> overwrites the backing heap allocation on drop,
+    // preventing sensitive data from lingering in memory after the value
+    // is no longer needed (AGENTS.md security requirement).
+    inner: zeroize::Zeroizing<String>,
 }
 
 impl SecretValue {
@@ -126,13 +128,17 @@ impl SecretValue {
     /// - Original string should be zeroized after creating SecretValue
     /// - SecretValue takes ownership and manages secure cleanup
     pub fn from_string(value: String) -> Self {
-        Self { inner: value }
+        Self {
+            inner: zeroize::Zeroizing::new(value),
+        }
     }
 
     /// Create secret value from bytes
     pub fn from_bytes(value: Vec<u8>) -> Self {
         let string = String::from_utf8_lossy(&value).to_string();
-        Self { inner: string }
+        Self {
+            inner: zeroize::Zeroizing::new(string),
+        }
     }
 
     /// Get secret as string (only for immediate use)
@@ -169,14 +175,9 @@ impl fmt::Debug for SecretValue {
     }
 }
 
-// Secure cleanup on drop
-impl Drop for SecretValue {
-    fn drop(&mut self) {
-        // TODO: Zero memory before deallocation in production
-        // For now, just clear the string
-        self.inner.clear();
-    }
-}
+// No explicit Drop impl needed: Zeroizing<String> already overwrites the
+// backing heap allocation before freeing it, meeting the AGENTS.md security
+// requirement for zeroing sensitive memory on drop.
 
 /// Cached secret with expiration and refresh metadata
 ///
@@ -692,26 +693,36 @@ impl DefaultKeyVaultProvider {
 #[async_trait]
 impl KeyVaultProvider for DefaultKeyVaultProvider {
     async fn get_secret(&self, _name: &SecretName) -> Result<SecretValue, KeyVaultError> {
-        unimplemented!("See specs/interfaces/key-vault.md")
+        Err(KeyVaultError::Internal {
+            message: "DefaultKeyVaultProvider::get_secret is not implemented; use AzureKeyVaultProvider in production".to_string(),
+        })
     }
 
     async fn get_secret_with_version(
         &self,
         _name: &SecretName,
     ) -> Result<(SecretValue, String), KeyVaultError> {
-        unimplemented!("See specs/interfaces/key-vault.md")
+        Err(KeyVaultError::Internal {
+            message: "DefaultKeyVaultProvider::get_secret_with_version is not implemented; use AzureKeyVaultProvider in production".to_string(),
+        })
     }
 
     async fn refresh_secret(&self, _name: &SecretName) -> Result<SecretValue, KeyVaultError> {
-        unimplemented!("See specs/interfaces/key-vault.md")
+        Err(KeyVaultError::Internal {
+            message: "DefaultKeyVaultProvider::refresh_secret is not implemented; use AzureKeyVaultProvider in production".to_string(),
+        })
     }
 
     async fn secret_exists(&self, _name: &SecretName) -> Result<bool, KeyVaultError> {
-        unimplemented!("See specs/interfaces/key-vault.md")
+        Err(KeyVaultError::Internal {
+            message: "DefaultKeyVaultProvider::secret_exists is not implemented; use AzureKeyVaultProvider in production".to_string(),
+        })
     }
 
     async fn list_secret_names(&self) -> Result<Vec<SecretName>, KeyVaultError> {
-        unimplemented!("See specs/interfaces/key-vault.md")
+        Err(KeyVaultError::Internal {
+            message: "DefaultKeyVaultProvider::list_secret_names is not implemented; use AzureKeyVaultProvider in production".to_string(),
+        })
     }
 
     async fn clear_cache(&self, _name: &SecretName) -> Result<(), KeyVaultError> {
@@ -724,108 +735,6 @@ impl KeyVaultProvider for DefaultKeyVaultProvider {
 
     async fn get_cache_stats(&self) -> Result<CacheStatistics, KeyVaultError> {
         self.cache.get_statistics().await
-    }
-}
-
-/// Default secret cache implementation
-///
-/// See specs/interfaces/key-vault.md
-pub struct DefaultSecretCache {
-    // TODO: Implement with secure concurrent HashMap
-}
-
-impl DefaultSecretCache {
-    /// Create new secret cache
-    pub fn new() -> Self {
-        Self {}
-    }
-}
-
-impl Default for DefaultSecretCache {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[async_trait]
-impl SecretCache for DefaultSecretCache {
-    async fn get(&self, _name: &SecretName) -> Option<CachedSecret> {
-        unimplemented!("See specs/interfaces/key-vault.md")
-    }
-
-    async fn put(
-        &self,
-        _name: SecretName,
-        _value: SecretValue,
-        _ttl: Duration,
-    ) -> Result<(), KeyVaultError> {
-        unimplemented!("See specs/interfaces/key-vault.md")
-    }
-
-    async fn put_with_version(
-        &self,
-        _name: SecretName,
-        _value: SecretValue,
-        _version: String,
-        _ttl: Duration,
-    ) -> Result<(), KeyVaultError> {
-        unimplemented!("See specs/interfaces/key-vault.md")
-    }
-
-    async fn remove(&self, _name: &SecretName) -> Result<(), KeyVaultError> {
-        unimplemented!("See specs/interfaces/key-vault.md")
-    }
-
-    async fn clear(&self) -> Result<(), KeyVaultError> {
-        unimplemented!("See specs/interfaces/key-vault.md")
-    }
-
-    async fn get_expiring_secrets(
-        &self,
-        _threshold: Duration,
-    ) -> Result<Vec<SecretName>, KeyVaultError> {
-        unimplemented!("See specs/interfaces/key-vault.md")
-    }
-
-    async fn cleanup_expired(&self) -> Result<usize, KeyVaultError> {
-        unimplemented!("See specs/interfaces/key-vault.md")
-    }
-
-    async fn get_statistics(&self) -> Result<CacheStatistics, KeyVaultError> {
-        unimplemented!("See specs/interfaces/key-vault.md")
-    }
-}
-
-/// Default secret rotation handler
-///
-/// See specs/interfaces/key-vault.md
-pub struct DefaultSecretRotationHandler;
-
-#[async_trait]
-impl SecretRotationHandler for DefaultSecretRotationHandler {
-    async fn on_secret_rotated(
-        &self,
-        _name: &SecretName,
-        _old_version: Option<String>,
-        _new_version: String,
-    ) -> Result<(), KeyVaultError> {
-        unimplemented!("See specs/interfaces/key-vault.md")
-    }
-
-    async fn on_secret_expiring(
-        &self,
-        _name: &SecretName,
-        _expires_in: Duration,
-    ) -> Result<(), KeyVaultError> {
-        unimplemented!("See specs/interfaces/key-vault.md")
-    }
-
-    async fn on_secret_unavailable(
-        &self,
-        _name: &SecretName,
-        _error: &KeyVaultError,
-    ) -> Result<(), KeyVaultError> {
-        unimplemented!("See specs/interfaces/key-vault.md")
     }
 }
 

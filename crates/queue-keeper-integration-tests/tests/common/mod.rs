@@ -748,6 +748,7 @@ pub fn create_default_wrapped_event() -> WrappedEvent {
 #[allow(dead_code)]
 pub struct MockAuditLogger {
     logged_events: Arc<Mutex<Vec<AuditEvent>>>,
+    webhook_processing_calls: Arc<Mutex<usize>>,
 }
 
 #[allow(dead_code)]
@@ -755,6 +756,7 @@ impl MockAuditLogger {
     pub fn new() -> Self {
         Self {
             logged_events: Arc::new(Mutex::new(Vec::new())),
+            webhook_processing_calls: Arc::new(Mutex::new(0)),
         }
     }
 
@@ -763,14 +765,20 @@ impl MockAuditLogger {
         self.logged_events.lock().unwrap().clone()
     }
 
-    /// Get count of logged events
+    /// Get count of logged events (via `log_event`)
     pub fn event_count(&self) -> usize {
         self.logged_events.lock().unwrap().len()
     }
 
-    /// Clear all logged events
+    /// Get count of `log_webhook_processing` calls
+    pub fn webhook_processing_call_count(&self) -> usize {
+        *self.webhook_processing_calls.lock().unwrap()
+    }
+
+    /// Clear all logged events and call counts
     pub fn clear(&self) {
         self.logged_events.lock().unwrap().clear();
+        *self.webhook_processing_calls.lock().unwrap() = 0;
     }
 }
 
@@ -790,7 +798,7 @@ impl AuditLogger for MockAuditLogger {
         _result: AuditResult,
         _context: AuditContext,
     ) -> Result<AuditLogId, AuditError> {
-        // Create a dummy event for testing
+        *self.webhook_processing_calls.lock().unwrap() += 1;
         let audit_id = AuditLogId::new();
         Ok(audit_id)
     }
@@ -829,5 +837,41 @@ impl AuditLogger for MockAuditLogger {
 
     async fn flush(&self) -> Result<(), AuditError> {
         Ok(())
+    }
+}
+
+// ============================================================================
+// Always-Failing Signature Validator (for security audit tests)
+// ============================================================================
+
+/// A signature validator that always rejects the signature, used to test
+/// the security audit logging path in `WebhookProcessorImpl`.
+#[derive(Clone)]
+#[allow(dead_code)]
+pub struct AlwaysFailingSignatureValidator;
+
+#[async_trait::async_trait]
+impl queue_keeper_core::webhook::SignatureValidator for AlwaysFailingSignatureValidator {
+    async fn validate_signature(
+        &self,
+        _payload: &[u8],
+        _signature: &str,
+        _secret_key: &str,
+    ) -> Result<(), queue_keeper_core::ValidationError> {
+        Err(queue_keeper_core::ValidationError::InvalidFormat {
+            field: "x-hub-signature-256".to_string(),
+            message: "simulated signature validation failure".to_string(),
+        })
+    }
+
+    async fn get_webhook_secret(
+        &self,
+        _event_type: &str,
+    ) -> Result<String, queue_keeper_core::webhook::SecretError> {
+        Ok("dummy-secret".to_string())
+    }
+
+    fn supports_constant_time_comparison(&self) -> bool {
+        true
     }
 }
