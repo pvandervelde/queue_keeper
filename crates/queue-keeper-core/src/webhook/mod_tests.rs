@@ -279,6 +279,75 @@ mod webhook_request_tests {
 
         assert_eq!(request.body.len(), 0);
     }
+
+    /// Verify that `WebhookRequest::new` sets `trace_context` to `None`.
+    #[test]
+    fn test_webhook_request_new_has_no_trace_context() {
+        let headers = WebhookHeaders::from_http_headers(&create_test_headers()).unwrap();
+        let request = WebhookRequest::new(headers, Bytes::from("{}"));
+        assert!(request.trace_context.is_none());
+    }
+
+    /// Verify that `with_raw_headers` extracts `traceparent` into `trace_context`.
+    #[test]
+    fn test_webhook_request_with_raw_headers_extracts_traceparent() {
+        let tp = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+        let webhook_headers = WebhookHeaders::from_http_headers(&create_test_headers()).unwrap();
+        let mut raw = create_test_headers();
+        raw.insert("traceparent".to_string(), tp.to_string());
+        let request = WebhookRequest::with_raw_headers(webhook_headers, raw, Bytes::from("{}"));
+        assert_eq!(request.trace_context.as_ref().map(|c| c.as_str()), Some(tp));
+    }
+
+    /// Verify that `with_raw_headers` extracts `x-correlation-id` when no `traceparent`.
+    #[test]
+    fn test_webhook_request_with_raw_headers_extracts_correlation_id() {
+        let webhook_headers = WebhookHeaders::from_http_headers(&create_test_headers()).unwrap();
+        let mut raw = create_test_headers();
+        raw.insert("x-correlation-id".to_string(), "corr-abc".to_string());
+        let request = WebhookRequest::with_raw_headers(webhook_headers, raw, Bytes::from("{}"));
+        assert_eq!(
+            request.trace_context.as_ref().map(|c| c.as_str()),
+            Some("corr-abc")
+        );
+    }
+
+    /// Verify that `with_raw_headers` extracts `x-request-id` when no higher-priority header.
+    #[test]
+    fn test_webhook_request_with_raw_headers_extracts_request_id() {
+        let webhook_headers = WebhookHeaders::from_http_headers(&create_test_headers()).unwrap();
+        let mut raw = create_test_headers();
+        raw.insert("x-request-id".to_string(), "req-xyz".to_string());
+        let request = WebhookRequest::with_raw_headers(webhook_headers, raw, Bytes::from("{}"));
+        assert_eq!(
+            request.trace_context.as_ref().map(|c| c.as_str()),
+            Some("req-xyz")
+        );
+    }
+
+    /// Verify that `traceparent` wins when all three trace headers are present.
+    #[test]
+    fn test_webhook_request_with_raw_headers_traceparent_wins() {
+        let webhook_headers = WebhookHeaders::from_http_headers(&create_test_headers()).unwrap();
+        let mut raw = create_test_headers();
+        raw.insert("traceparent".to_string(), "tp-val".to_string());
+        raw.insert("x-correlation-id".to_string(), "corr-val".to_string());
+        raw.insert("x-request-id".to_string(), "req-val".to_string());
+        let request = WebhookRequest::with_raw_headers(webhook_headers, raw, Bytes::from("{}"));
+        assert_eq!(
+            request.trace_context.as_ref().map(|c| c.as_str()),
+            Some("tp-val")
+        );
+    }
+
+    /// Verify that `trace_context` is `None` when no trace headers are in `raw_headers`.
+    #[test]
+    fn test_webhook_request_with_raw_headers_no_trace_headers_gives_none() {
+        let webhook_headers = WebhookHeaders::from_http_headers(&create_test_headers()).unwrap();
+        let raw = create_test_headers(); // only github-specific headers, no trace headers
+        let request = WebhookRequest::with_raw_headers(webhook_headers, raw, Bytes::from("{}"));
+        assert!(request.trace_context.is_none());
+    }
 }
 
 // ============================================================================

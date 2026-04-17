@@ -9,8 +9,8 @@ use crate::{
         AuditAction, AuditActor, AuditContext, AuditEvent, AuditEventType, AuditLogger,
         AuditResource, AuditResult, WebhookProcessingAction,
     },
-    CorrelationId, EventId, Repository, RepositoryId, SessionId, Timestamp, User, UserId, UserType,
-    ValidationError,
+    CorrelationId, EventId, Repository, RepositoryId, SessionId, Timestamp, TraceContext, User,
+    UserId, UserType, ValidationError,
 };
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -33,6 +33,12 @@ pub struct WebhookRequest {
     /// Populated by [`WebhookRequest::with_raw_headers`]; empty when constructed via
     /// [`WebhookRequest::new`] for backward compatibility.
     pub raw_headers: HashMap<String, String>,
+    /// Trace context extracted from incoming headers.
+    ///
+    /// Set by [`WebhookRequest::with_raw_headers`] by scanning `raw_headers` for
+    /// `traceparent`, `x-correlation-id`, and `x-request-id` (in priority order).
+    /// `None` when constructed via [`WebhookRequest::new`] (backward compat).
+    pub trace_context: Option<TraceContext>,
 }
 
 impl WebhookRequest {
@@ -43,6 +49,7 @@ impl WebhookRequest {
             body,
             received_at: Timestamp::now(),
             raw_headers: HashMap::new(),
+            trace_context: None,
         }
     }
 
@@ -52,17 +59,22 @@ impl WebhookRequest {
     /// provider-specific [`FieldSource`] configuration rather than relying on
     /// the pre-parsed GitHub-specific fields on [`WebhookHeaders`].
     ///
+    /// The `trace_context` field is automatically populated by scanning `raw_headers`
+    /// for `traceparent`, `x-correlation-id`, and `x-request-id` (in priority order).
+    ///
     /// [`FieldSource`]: crate::webhook::generic_provider::FieldSource
     pub fn with_raw_headers(
         headers: WebhookHeaders,
         raw_headers: HashMap<String, String>,
         body: Bytes,
     ) -> Self {
+        let trace_context = TraceContext::from_headers(&raw_headers);
         Self {
             headers,
             body,
             received_at: Timestamp::now(),
             raw_headers,
+            trace_context,
         }
     }
 
