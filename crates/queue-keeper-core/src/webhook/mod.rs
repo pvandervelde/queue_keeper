@@ -1122,6 +1122,7 @@ impl WebhookProcessor for WebhookProcessorImpl {
             action,
             Some(session_id),
             payload,
+            request.trace_context.clone(),
         );
 
         info!(

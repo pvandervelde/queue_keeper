@@ -1112,6 +1112,7 @@ impl WebhookProcessor for GenericWebhookProvider {
             action,
             None, // Generic providers do not impose session-based ordering
             payload,
+            request.trace_context.clone(),
         );
 
         tracing::info!(
@@ -1160,6 +1161,7 @@ impl GenericWebhookProvider {
             action,
             None, // Generic providers do not support session-based ordering
             payload,
+            request.trace_context.clone(),
         );
 
         tracing::info!(
@@ -1181,6 +1183,7 @@ impl GenericWebhookProvider {
         let metadata = DirectQueueMetadata::new(
             self.config.provider_id.as_str(),
             request.headers.content_type.as_str(),
+            request.trace_context.clone(),
         );
 
         tracing::info!(
