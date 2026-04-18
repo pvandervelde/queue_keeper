@@ -736,6 +736,7 @@ pub fn create_default_wrapped_event() -> WrappedEvent {
                 "owner": {"login": "owner"}
             }
         }),
+        None,
     )
 }
 

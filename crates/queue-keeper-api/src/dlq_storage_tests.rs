@@ -144,6 +144,7 @@ fn create_test_event() -> WrappedEvent {
             },
             "pull_request": {"number": 42}
         }),
+        None,
     )
 }
 

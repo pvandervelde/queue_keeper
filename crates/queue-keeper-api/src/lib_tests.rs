@@ -95,6 +95,7 @@ fn test_wrapped_event() -> WrappedEvent {
         None,
         None,
         serde_json::json!({}),
+        None,
     )
 }
 

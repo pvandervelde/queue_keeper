@@ -39,6 +39,7 @@ fn create_test_event() -> WrappedEvent {
                 "owner": {"login": "test-owner"}
             }
         }),
+        None,
     )
 }
 
