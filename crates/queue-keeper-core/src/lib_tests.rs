@@ -224,4 +224,57 @@ mod trace_context_tests {
         let ctx = TraceContext::from_headers(&headers).unwrap();
         assert_eq!(ctx.as_str(), "req-789");
     }
+
+    /// Verify that an empty string value for a recognised header is skipped.
+    ///
+    /// An empty value is treated as absent: the extractor moves on to the
+    /// next header in priority order.
+    #[test]
+    fn test_trace_context_empty_value_is_skipped() {
+        let headers = make_headers(&[("traceparent", "")]);
+        let ctx = TraceContext::from_headers(&headers);
+        assert!(ctx.is_none(), "empty traceparent must be skipped");
+    }
+
+    /// Verify that a whitespace-only value for a recognised header is skipped.
+    #[test]
+    fn test_trace_context_whitespace_only_value_is_skipped() {
+        let headers = make_headers(&[("x-correlation-id", "   ")]);
+        let ctx = TraceContext::from_headers(&headers);
+        assert!(
+            ctx.is_none(),
+            "whitespace-only x-correlation-id must be skipped"
+        );
+    }
+
+    /// Verify that an empty higher-priority header falls through to the next
+    /// valid header in priority order.
+    #[test]
+    fn test_trace_context_empty_traceparent_falls_through_to_correlation_id() {
+        let headers = make_headers(&[
+            ("traceparent", ""),
+            ("x-correlation-id", "valid-correlation"),
+        ]);
+        let ctx = TraceContext::from_headers(&headers).unwrap();
+        assert_eq!(
+            ctx.as_str(),
+            "valid-correlation",
+            "must fall through to x-correlation-id when traceparent is empty"
+        );
+    }
+
+    /// Verify that all three headers being empty or whitespace returns `None`.
+    #[test]
+    fn test_trace_context_all_empty_or_whitespace_returns_none() {
+        let headers = make_headers(&[
+            ("traceparent", ""),
+            ("x-correlation-id", "  "),
+            ("x-request-id", "\t"),
+        ]);
+        let ctx = TraceContext::from_headers(&headers);
+        assert!(
+            ctx.is_none(),
+            "all empty/whitespace headers must return None"
+        );
+    }
 }
