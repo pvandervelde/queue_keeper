@@ -640,7 +640,11 @@ impl TraceContext {
     /// 2. `x-correlation-id` — Queue-Keeper convention
     /// 3. `x-request-id` — common de-facto standard
     ///
-    /// Returns `None` when none of the three headers are present.
+    /// Returns `None` when none of the three headers are present **or when all
+    /// present values are empty or whitespace-only**. An absent or blank header
+    /// is treated identically: the extractor falls through to the next header in
+    /// priority order, and generates a fresh [`CorrelationId`] when all are
+    /// exhausted.
     ///
     /// # Examples
     ///
@@ -654,11 +658,21 @@ impl TraceContext {
     /// headers.insert("x-correlation-id".to_string(), "other-id".to_string());
     /// let ctx = TraceContext::from_headers(&headers).unwrap();
     /// assert_eq!(ctx.as_str(), "00-abc-def-01");
+    ///
+    /// // An empty traceparent falls through to x-correlation-id
+    /// let mut headers2 = HashMap::new();
+    /// headers2.insert("traceparent".to_string(), "".to_string());
+    /// headers2.insert("x-correlation-id".to_string(), "my-id".to_string());
+    /// let ctx2 = TraceContext::from_headers(&headers2).unwrap();
+    /// assert_eq!(ctx2.as_str(), "my-id");
     /// ```
     pub fn from_headers(raw_headers: &HashMap<String, String>) -> Option<Self> {
         for key in &["traceparent", "x-correlation-id", "x-request-id"] {
             if let Some(value) = raw_headers.get(*key) {
-                return Some(Self(value.clone()));
+                let trimmed = value.trim();
+                if !trimmed.is_empty() {
+                    return Some(Self(trimmed.to_string()));
+                }
             }
         }
         None
