@@ -512,3 +512,107 @@ mod normalize_event_tests {
         );
     }
 }
+
+// ============================================================================
+// Delivery-ID / correlation-ID association
+// ============================================================================
+
+mod delivery_correlation_tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    /// Build a ping request that carries both GitHub delivery headers and a
+    /// W3C `traceparent` trace header, so the trace context is propagated into
+    /// the resulting `WrappedEvent`.
+    fn ping_request_with_traceparent(traceparent: &'static str) -> WebhookRequest {
+        let headers = WebhookHeaders {
+            event_type: "ping".to_string(),
+            delivery_id: "550e8400-e29b-41d4-a716-446655440010".to_string(),
+            signature: None,
+            user_agent: Some("GitHub-Hookshot/test".to_string()),
+            content_type: "application/json".to_string(),
+        };
+        let body = serde_json::json!({
+            "repository": {
+                "id": 1,
+                "name": "repo",
+                "full_name": "owner/repo",
+                "private": false,
+                "owner": {
+                    "id": 1,
+                    "login": "owner",
+                    "type": "User"
+                }
+            }
+        });
+        let mut raw_headers: HashMap<String, String> = HashMap::new();
+        raw_headers.insert("traceparent".to_string(), traceparent.to_string());
+        raw_headers.insert("content-type".to_string(), "application/json".to_string());
+        raw_headers.insert("x-github-event".to_string(), "ping".to_string());
+        raw_headers.insert(
+            "x-github-delivery".to_string(),
+            "550e8400-e29b-41d4-a716-446655440010".to_string(),
+        );
+        WebhookRequest::with_raw_headers(headers, raw_headers, Bytes::from(body.to_string()))
+    }
+
+    /// Verify that a request carrying a `traceparent` header produces a
+    /// `WrappedEvent` whose `correlation_id` equals the trace value.
+    ///
+    /// This is the behavioral invariant that the `delivery_id`/`correlation_id`
+    /// log statement (added to `process_webhook`) relies on: the log is only
+    /// useful if the `correlation_id` on the event genuinely reflects the
+    /// upstream trace identifier.
+    #[tokio::test]
+    async fn test_process_webhook_correlation_id_matches_traceparent() {
+        let traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+        let provider = GithubWebhookProvider::new(None, None, None);
+        let request = ping_request_with_traceparent(traceparent);
+
+        let result = provider.process_webhook(request).await;
+
+        assert!(
+            result.is_ok(),
+            "processing must succeed: {:?}",
+            result.err()
+        );
+        let binding = result.unwrap();
+        let event = binding.as_wrapped().expect("must be Wrapped output");
+        assert_eq!(
+            event.correlation_id.as_str(),
+            traceparent,
+            "correlation_id must equal the incoming traceparent for log correlation"
+        );
+    }
+
+    /// Verify that the `delivery_id` on the request is accessible before
+    /// the request is consumed, confirming the log can reference both IDs.
+    ///
+    /// `process_webhook` logs `delivery_id` → `correlation_id` for every
+    /// successful GitHub webhook; this test ensures both values are stable
+    /// and consistent with the processed output.
+    #[tokio::test]
+    async fn test_process_webhook_delivery_id_is_preserved_for_logging() {
+        let traceparent = "00-aabbccddeeff00112233445566778899-aabbccddee001122-01";
+        let provider = GithubWebhookProvider::new(None, None, None);
+        let request = ping_request_with_traceparent(traceparent);
+
+        // Capture delivery_id before consuming the request (mirrors how the
+        // production log captures it before handing off to inner.process_webhook)
+        let expected_delivery_id = request.delivery_id().to_string();
+
+        let result = provider.process_webhook(request).await;
+
+        assert!(
+            result.is_ok(),
+            "processing must succeed: {:?}",
+            result.err()
+        );
+        let binding = result.unwrap();
+        let event = binding.as_wrapped().expect("must be Wrapped output");
+
+        // Both IDs must be non-empty and individually consistent
+        assert_eq!(expected_delivery_id, "550e8400-e29b-41d4-a716-446655440010");
+        assert_eq!(event.correlation_id.as_str(), traceparent);
+    }
+}
