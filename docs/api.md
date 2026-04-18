@@ -117,6 +117,53 @@ curl -X POST https://queue-keeper.example.com/webhook/gitlab \
 
 ---
 
+## Trace Context
+
+Queue-Keeper preserves an upstream distributed trace identifier when one is present in the incoming webhook request. The extracted value is used as the `correlation_id` on every queue message and audit log entry produced during that request's processing, allowing operators to correlate GitHub delivery logs, Queue-Keeper processing logs, and downstream bot logs using a single identifier.
+
+### Recognised Headers
+
+Queue-Keeper checks the following headers in priority order. The first header whose value is non-empty and non-whitespace wins; if none are present the service generates a fresh UUID v4 `correlation_id` for the event.
+
+| Priority | Header | Standard |
+|----------|--------|----------|
+| 1 | `traceparent` | W3C Trace Context (RFC 7230) — recommended |
+| 2 | `X-Correlation-ID` | Queue-Keeper convention |
+| 3 | `X-Request-ID` | Common de-facto standard |
+
+### Propagation
+
+The extracted identifier flows into:
+
+- `correlation_id` field of every `WrappedEvent` queue message
+- `correlation_id` field of every `DirectQueueMetadata` metadata block (direct-mode providers)
+- Audit log entries produced during the same request
+- A structured log line pairing the GitHub `X-GitHub-Delivery` ID with the `correlation_id` (GitHub provider only)
+
+### Example
+
+Send a webhook carrying a W3C `traceparent` header:
+
+```bash
+curl -X POST https://queue-keeper.example.com/webhook/github \
+  -H "Content-Type: application/json" \
+  -H "X-GitHub-Event: push" \
+  -H "X-GitHub-Delivery: 12345678-1234-1234-1234-123456789012" \
+  -H "traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01" \
+  -d '{"ref":"refs/heads/main","repository":{"full_name":"myorg/myrepo"}}'
+```
+
+The resulting queue message will contain:
+
+```json
+{
+  "correlation_id": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+  ...
+}
+```
+
+---
+
 ## Health Endpoints
 
 ### `GET /health`

@@ -47,12 +47,22 @@ sequenceDiagram
 
 ### Trace ID Generation Strategy
 
-**OpenTelemetry Trace Management Requirements**:
+**Upstream Trace Context Preservation**:
 
-- Generate unique trace IDs for each webhook delivery using OpenTelemetry specification
-- Prefix trace IDs with `qk_` to identify Queue-Keeper origin
-- Include GitHub delivery ID and event type as span attributes
-- Support Jaeger exporter for distributed tracing visualization
+Queue-Keeper preserves an upstream trace identifier when one arrives with the incoming webhook request. Headers are checked in the following priority order; the first non-empty, non-whitespace value is used:
+
+1. `traceparent` — W3C Trace Context (RFC 7230); recommended for new integrations
+2. `X-Correlation-ID` — Queue-Keeper convention
+3. `X-Request-ID` — common de-facto standard
+
+When none of these headers are present (or all values are blank), Queue-Keeper generates a fresh UUID v4 as the `correlation_id` for the event.
+
+The extracted or generated value is stamped onto:
+- Every `WrappedEvent` queue message (`correlation_id` field)
+- Every `DirectQueueMetadata` block for direct-mode providers
+- Audit log entries produced during the same request
+
+For GitHub webhooks, a structured log event pairs the GitHub `X-GitHub-Delivery` ID with the resulting `correlation_id` so operators can cross-reference GitHub's delivery logs with Queue-Keeper's processing logs using either identifier.
 
 **Trace Context Propagation**:
 
