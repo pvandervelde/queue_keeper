@@ -633,18 +633,41 @@ impl FromStr for CorrelationId {
 pub struct TraceContext(String);
 
 impl TraceContext {
+    /// Maximum accepted length for a trace header value, in bytes.
+    ///
+    /// W3C `traceparent` is exactly 55 bytes. `X-Correlation-ID` and
+    /// `X-Request-ID` are typically under 128 bytes. 256 bytes is a generous
+    /// ceiling that rejects malicious over-length payloads.
+    const MAX_VALUE_LEN: usize = 256;
+
     /// Extract a trace context from a raw HTTP header map.
     ///
     /// Headers are checked in priority order:
-    /// 1. `traceparent` — W3C Trace Context (RFC 7230)
+    /// 1. `traceparent` — W3C Trace Context specification
     /// 2. `x-correlation-id` — Queue-Keeper convention
     /// 3. `x-request-id` — common de-facto standard
     ///
     /// Returns `None` when none of the three headers are present **or when all
-    /// present values are empty or whitespace-only**. An absent or blank header
-    /// is treated identically: the extractor falls through to the next header in
-    /// priority order, and generates a fresh [`CorrelationId`] when all are
-    /// exhausted.
+    /// candidate values fail validation**. A value is rejected, causing
+    /// fall-through to the next header in priority order, when it is:
+    /// - empty or whitespace-only,
+    /// - longer than [`Self::MAX_VALUE_LEN`] (256 bytes), or
+    /// - contains any ASCII/Unicode control character (including `\n`, `\r`,
+    ///   `\t`, and other characters with code points < U+0020 or in the
+    ///   `Cc`/`Cf` categories).
+    ///
+    /// Control-character rejection prevents log injection attacks where a
+    /// crafted header value could split structured log lines in downstream
+    /// aggregators.
+    ///
+    /// # Precondition
+    ///
+    /// Header keys in `raw_headers` **must be lowercased** before this call.
+    /// The function performs exact key lookups using lowercase literals
+    /// (`"traceparent"`, `"x-correlation-id"`, `"x-request-id"`); mixed-case
+    /// keys will be silently missed. The HTTP handler in `queue-keeper-api`
+    /// lowercases all header keys before constructing `WebhookRequest`, so this
+    /// precondition is satisfied for all production call-sites.
     ///
     /// # Examples
     ///
@@ -670,7 +693,10 @@ impl TraceContext {
         for key in &["traceparent", "x-correlation-id", "x-request-id"] {
             if let Some(value) = raw_headers.get(*key) {
                 let trimmed = value.trim();
-                if !trimmed.is_empty() {
+                if !trimmed.is_empty()
+                    && trimmed.len() <= Self::MAX_VALUE_LEN
+                    && trimmed.chars().all(|c| !c.is_control())
+                {
                     return Some(Self(trimmed.to_string()));
                 }
             }

@@ -51,7 +51,7 @@ sequenceDiagram
 
 Queue-Keeper preserves an upstream trace identifier when one arrives with the incoming webhook request. Headers are checked in the following priority order; the first non-empty, non-whitespace value is used:
 
-1. `traceparent` — W3C Trace Context (RFC 7230); recommended for new integrations
+1. `traceparent` — W3C Trace Context specification; recommended for new integrations
 2. `X-Correlation-ID` — Queue-Keeper convention
 3. `X-Request-ID` — common de-facto standard
 

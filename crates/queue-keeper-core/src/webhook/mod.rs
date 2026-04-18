@@ -247,6 +247,14 @@ pub struct EventEnvelope {
 
 impl EventEnvelope {
     /// Create new event envelope
+    ///
+    /// # Trace Context
+    ///
+    /// This constructor always generates a fresh UUID v4 `correlation_id`.
+    /// Upstream trace context (`traceparent`, `X-Correlation-ID`,
+    /// `X-Request-ID`) is **not** propagated through this path. If you need
+    /// trace context preserved in the outgoing envelope, use
+    /// [`WrappedEvent::new`] instead, which accepts an `Option<TraceContext>`.
     pub fn new(
         event_type: String,
         action: Option<String>,

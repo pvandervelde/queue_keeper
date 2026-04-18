@@ -127,7 +127,7 @@ Queue-Keeper checks the following headers in priority order. The first header wh
 
 | Priority | Header | Standard |
 |----------|--------|----------|
-| 1 | `traceparent` | W3C Trace Context (RFC 7230) — recommended |
+| 1 | `traceparent` | W3C Trace Context specification — recommended |
 | 2 | `X-Correlation-ID` | Queue-Keeper convention |
 | 3 | `X-Request-ID` | Common de-facto standard |
 
