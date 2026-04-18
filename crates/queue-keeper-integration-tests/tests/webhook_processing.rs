@@ -312,3 +312,122 @@ async fn test_failed_signature_validation_logs_security_event() {
         "Audit event must carry the canonical error code for signature failures"
     );
 }
+
+// ============================================================================
+// Trace Context Propagation Integration Tests
+// ============================================================================
+
+/// Verify that a `traceparent` header is extracted from the HTTP request
+/// and stored on the `WebhookRequest` received by the processor.
+///
+/// This validates that the API layer passes all headers to
+/// `WebhookRequest::with_raw_headers`, which calls `TraceContext::from_headers`
+/// internally, so the trace value is available downstream.
+#[tokio::test]
+async fn test_traceparent_header_is_propagated_to_webhook_request() {
+    // Arrange: processor that captures the incoming WebhookRequest
+    let processor = MockWebhookProcessor::new();
+    let state = create_test_app_state_with_processor(Arc::new(processor.clone()));
+
+    let mut headers = create_valid_webhook_headers();
+    let trace_value = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+    headers.insert(
+        "traceparent",
+        axum::http::HeaderValue::from_static(trace_value),
+    );
+    let body = Bytes::from(r#"{"action":"opened","number":123}"#);
+
+    // Act
+    let result = queue_keeper_api::handle_provider_webhook(
+        State(state),
+        Path("github".to_string()),
+        headers,
+        body,
+    )
+    .await;
+
+    // Assert: processing succeeded
+    assert!(result.is_ok(), "Expected successful webhook response");
+
+    // Assert: the processor received the WebhookRequest with trace_context set
+    let calls = processor.get_calls();
+    assert_eq!(calls.len(), 1, "Expected exactly one processor call");
+    let request = &calls[0];
+    assert!(
+        request.trace_context.is_some(),
+        "trace_context must be populated when traceparent header is present"
+    );
+    assert_eq!(
+        request.trace_context.as_ref().map(|tc| tc.as_str()),
+        Some(trace_value),
+        "trace_context value must match the incoming traceparent header"
+    );
+}
+
+/// Verify that when no trace headers are present the `trace_context` field
+/// on the `WebhookRequest` is `None`.
+#[tokio::test]
+async fn test_no_trace_header_leaves_trace_context_none() {
+    // Arrange: standard headers without any trace header
+    let processor = MockWebhookProcessor::new();
+    let state = create_test_app_state_with_processor(Arc::new(processor.clone()));
+
+    let headers = create_valid_webhook_headers();
+    let body = Bytes::from(r#"{"action":"opened","number":123}"#);
+
+    // Act
+    let result = queue_keeper_api::handle_provider_webhook(
+        State(state),
+        Path("github".to_string()),
+        headers,
+        body,
+    )
+    .await;
+
+    // Assert
+    assert!(result.is_ok(), "Expected successful webhook response");
+
+    let calls = processor.get_calls();
+    assert_eq!(calls.len(), 1, "Expected exactly one processor call");
+    assert!(
+        calls[0].trace_context.is_none(),
+        "trace_context must be None when no trace headers are present"
+    );
+}
+
+/// Verify that `x-correlation-id` is used as trace context when no
+/// `traceparent` header is present.
+#[tokio::test]
+async fn test_x_correlation_id_header_is_propagated_when_no_traceparent() {
+    // Arrange
+    let processor = MockWebhookProcessor::new();
+    let state = create_test_app_state_with_processor(Arc::new(processor.clone()));
+
+    let mut headers = create_valid_webhook_headers();
+    let correlation_value = "my-correlation-id-12345";
+    headers.insert(
+        "x-correlation-id",
+        axum::http::HeaderValue::from_static(correlation_value),
+    );
+    let body = Bytes::from(r#"{"action":"opened","number":123}"#);
+
+    // Act
+    let result = queue_keeper_api::handle_provider_webhook(
+        State(state),
+        Path("github".to_string()),
+        headers,
+        body,
+    )
+    .await;
+
+    // Assert
+    assert!(result.is_ok(), "Expected successful webhook response");
+
+    let calls = processor.get_calls();
+    assert_eq!(calls.len(), 1, "Expected exactly one processor call");
+    assert_eq!(
+        calls[0].trace_context.as_ref().map(|tc| tc.as_str()),
+        Some(correlation_value),
+        "trace_context must equal x-correlation-id when no traceparent is present"
+    );
+}

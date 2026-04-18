@@ -1577,6 +1577,7 @@ mod tests {
                         "owner": {"id": 456, "login": "owner", "type": "User"}
                     }
                 }),
+                None,
             ),
             storage_metadata: StorageMetadata {
                 blob_path: "path".to_string(),

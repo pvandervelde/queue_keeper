@@ -334,6 +334,7 @@ mod bot_configuration_tests {
                     "owner": {"id": 1, "login": owner, "type": "User"}
                 }
             }),
+            None,
         )
     }
 
@@ -455,6 +456,7 @@ mod bot_subscription_tests {
                     "owner": {"id": 1, "login": owner, "type": "User"}
                 }
             }),
+            None,
         )
     }
 
@@ -554,6 +556,7 @@ mod event_matcher_tests {
                     "owner": {"id": 1, "login": owner, "type": "User"}
                 }
             }),
+            None,
         )
     }
 

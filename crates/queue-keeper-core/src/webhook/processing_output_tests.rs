@@ -16,6 +16,7 @@ fn test_wrapped_event() -> WrappedEvent {
         None,
         None,
         serde_json::json!({}),
+        None,
     )
 }
 
@@ -29,6 +30,7 @@ fn test_wrapped_event_with_session() -> WrappedEvent {
         Some("opened".to_string()),
         Some(session),
         serde_json::json!({"action": "opened"}),
+        None,
     )
 }
 
@@ -55,7 +57,7 @@ mod processing_output_variants {
     #[test]
     fn test_direct_variant_holds_payload_and_metadata() {
         let payload = Bytes::from(r#"{"key":"value"}"#);
-        let metadata = DirectQueueMetadata::new("jira", "application/json");
+        let metadata = DirectQueueMetadata::new("jira", "application/json", None);
 
         let output = ProcessingOutput::Direct {
             payload: payload.clone(),
@@ -89,7 +91,7 @@ mod processing_output_variants {
     /// Verify `event_id()` returns the metadata's event ID for direct outputs.
     #[test]
     fn test_event_id_returns_metadata_id_for_direct() {
-        let metadata = DirectQueueMetadata::new("gitlab", "application/json");
+        let metadata = DirectQueueMetadata::new("gitlab", "application/json", None);
         let expected_id = metadata.event_id();
         let output = ProcessingOutput::Direct {
             payload: Bytes::new(),
@@ -112,7 +114,7 @@ mod processing_output_variants {
     /// Verify `correlation_id()` returns the metadata's value for direct outputs.
     #[test]
     fn test_correlation_id_returns_metadata_id_for_direct() {
-        let metadata = DirectQueueMetadata::new("slack", "application/json");
+        let metadata = DirectQueueMetadata::new("slack", "application/json", None);
         let expected = metadata.correlation_id().clone();
         let output = ProcessingOutput::Direct {
             payload: Bytes::new(),
@@ -151,7 +153,7 @@ mod processing_output_variants {
     fn test_session_id_returns_none_for_direct() {
         let output = ProcessingOutput::Direct {
             payload: Bytes::new(),
-            metadata: DirectQueueMetadata::new("jira", "application/json"),
+            metadata: DirectQueueMetadata::new("jira", "application/json", None),
         };
 
         assert!(
@@ -178,7 +180,7 @@ mod processing_output_variants {
     fn test_event_type_returns_none_for_direct() {
         let output = ProcessingOutput::Direct {
             payload: Bytes::new(),
-            metadata: DirectQueueMetadata::new("jira", "application/json"),
+            metadata: DirectQueueMetadata::new("jira", "application/json", None),
         };
 
         assert!(
@@ -208,7 +210,7 @@ mod processing_output_variants {
     fn test_as_wrapped_returns_none_for_direct() {
         let output = ProcessingOutput::Direct {
             payload: Bytes::new(),
-            metadata: DirectQueueMetadata::new("jira", "application/json"),
+            metadata: DirectQueueMetadata::new("jira", "application/json", None),
         };
 
         assert!(
@@ -235,6 +237,7 @@ mod wrapped_event_tests {
             None,
             None,
             serde_json::json!({}),
+            None,
         );
         assert!(
             !event.event_id.as_str().is_empty(),
@@ -251,6 +254,7 @@ mod wrapped_event_tests {
             None,
             None,
             serde_json::json!({}),
+            None,
         );
         assert!(
             !event.correlation_id.as_str().is_empty(),
@@ -270,6 +274,7 @@ mod wrapped_event_tests {
             Some("opened".to_string()),
             Some(session.clone()),
             payload.clone(),
+            None,
         );
 
         assert_eq!(event.provider, "github");
@@ -289,6 +294,7 @@ mod wrapped_event_tests {
             None,
             None,
             serde_json::json!({}),
+            None,
         );
         let after = Timestamp::now();
 
@@ -305,6 +311,7 @@ mod wrapped_event_tests {
             None,
             None,
             serde_json::json!({}),
+            None,
         );
         let e2 = WrappedEvent::new(
             "github".to_string(),
@@ -312,6 +319,7 @@ mod wrapped_event_tests {
             None,
             None,
             serde_json::json!({}),
+            None,
         );
         assert_ne!(e1.event_id, e2.event_id);
     }
@@ -325,6 +333,7 @@ mod wrapped_event_tests {
             None,
             None,
             serde_json::json!({}),
+            None,
         );
         assert!(event.action.is_none());
     }
@@ -338,6 +347,7 @@ mod wrapped_event_tests {
             None,
             None,
             serde_json::json!({}),
+            None,
         );
         assert!(event.session_id.is_none());
     }
@@ -352,6 +362,7 @@ mod wrapped_event_tests {
             None,
             Some(session),
             serde_json::json!({"ref": "refs/heads/main"}),
+            None,
         );
 
         let json = serde_json::to_string(&event).expect("serialisation should succeed");
@@ -376,7 +387,7 @@ mod direct_queue_metadata_tests {
     /// Verify `new()` auto-generates a non-empty `EventId`.
     #[test]
     fn test_new_generates_event_id() {
-        let meta = DirectQueueMetadata::new("test-provider", "application/json");
+        let meta = DirectQueueMetadata::new("test-provider", "application/json", None);
         assert!(
             !meta.event_id().as_str().is_empty(),
             "event_id must be non-empty"
@@ -386,7 +397,7 @@ mod direct_queue_metadata_tests {
     /// Verify `new()` auto-generates a non-empty `CorrelationId`.
     #[test]
     fn test_new_generates_correlation_id() {
-        let meta = DirectQueueMetadata::new("test-provider", "application/json");
+        let meta = DirectQueueMetadata::new("test-provider", "application/json", None);
         assert!(
             !meta.correlation_id().as_str().is_empty(),
             "correlation_id must be non-empty"
@@ -397,7 +408,7 @@ mod direct_queue_metadata_tests {
     #[test]
     fn test_new_sets_received_at_to_current_time() {
         let before = Timestamp::now();
-        let meta = DirectQueueMetadata::new("test-provider", "application/json");
+        let meta = DirectQueueMetadata::new("test-provider", "application/json", None);
         let after = Timestamp::now();
 
         assert!(
@@ -409,14 +420,14 @@ mod direct_queue_metadata_tests {
     /// Verify `provider_id()` stores the value given at construction.
     #[test]
     fn test_provider_id_stored_correctly() {
-        let meta = DirectQueueMetadata::new("my-cool-app", "text/xml");
+        let meta = DirectQueueMetadata::new("my-cool-app", "text/xml", None);
         assert_eq!(meta.provider_id(), "my-cool-app");
     }
 
     /// Verify `content_type()` stores the value given at construction.
     #[test]
     fn test_content_type_stored_correctly() {
-        let meta = DirectQueueMetadata::new("my-cool-app", "text/xml");
+        let meta = DirectQueueMetadata::new("my-cool-app", "text/xml", None);
         assert_eq!(meta.content_type(), "text/xml");
     }
 
@@ -424,8 +435,8 @@ mod direct_queue_metadata_tests {
     /// event IDs (global uniqueness).
     #[test]
     fn test_two_instances_have_distinct_event_ids() {
-        let meta1 = DirectQueueMetadata::new("a", "application/json");
-        let meta2 = DirectQueueMetadata::new("a", "application/json");
+        let meta1 = DirectQueueMetadata::new("a", "application/json", None);
+        let meta2 = DirectQueueMetadata::new("a", "application/json", None);
 
         assert_ne!(
             meta1.event_id(),
@@ -437,7 +448,7 @@ mod direct_queue_metadata_tests {
     /// Verify serialisation round-trip for `DirectQueueMetadata`.
     #[test]
     fn test_serialization_roundtrip() {
-        let meta = DirectQueueMetadata::new("roundtrip-provider", "application/json");
+        let meta = DirectQueueMetadata::new("roundtrip-provider", "application/json", None);
 
         let json = serde_json::to_string(&meta).expect("serialisation should succeed");
         let deser: DirectQueueMetadata =
@@ -446,5 +457,95 @@ mod direct_queue_metadata_tests {
         assert_eq!(deser.provider_id(), meta.provider_id());
         assert_eq!(deser.content_type(), meta.content_type());
         assert_eq!(deser.event_id(), meta.event_id());
+    }
+}
+
+// ============================================================================
+// TraceContext propagation tests
+// ============================================================================
+
+mod trace_context_propagation_tests {
+    use super::*;
+    use crate::TraceContext;
+    use std::collections::HashMap;
+
+    fn make_trace_context(key: &str, value: &str) -> Option<TraceContext> {
+        let mut headers = HashMap::new();
+        headers.insert(key.to_string(), value.to_string());
+        TraceContext::from_headers(&headers)
+    }
+
+    /// Verify `WrappedEvent::new` seeds `correlation_id` from `TraceContext` when `Some`.
+    #[test]
+    fn test_wrapped_event_new_uses_trace_context_when_some() {
+        let ctx = make_trace_context("x-correlation-id", "my-upstream-id");
+        let event = WrappedEvent::new(
+            "github".to_string(),
+            "push".to_string(),
+            None,
+            None,
+            serde_json::json!({}),
+            ctx,
+        );
+        assert_eq!(event.correlation_id.as_str(), "my-upstream-id");
+    }
+
+    /// Verify `WrappedEvent::new` generates a fresh UUID when `trace_context` is `None`.
+    #[test]
+    fn test_wrapped_event_new_generates_fresh_id_when_no_trace_context() {
+        let event = WrappedEvent::new(
+            "github".to_string(),
+            "push".to_string(),
+            None,
+            None,
+            serde_json::json!({}),
+            None,
+        );
+        // Must be non-empty and parseable as a UUID v4
+        assert!(!event.correlation_id.as_str().is_empty());
+        assert!(
+            uuid::Uuid::parse_str(event.correlation_id.as_str()).is_ok(),
+            "generated correlation_id must be a valid UUID, got: {}",
+            event.correlation_id.as_str()
+        );
+    }
+
+    /// Verify `WrappedEvent::with_received_at` seeds `correlation_id` from `TraceContext`.
+    #[test]
+    fn test_wrapped_event_with_received_at_uses_trace_context() {
+        let tp = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+        let ctx = make_trace_context("traceparent", tp);
+        let received = crate::Timestamp::now();
+        let event = WrappedEvent::with_received_at(
+            received,
+            "jira".to_string(),
+            "issue".to_string(),
+            None,
+            None,
+            serde_json::json!({}),
+            ctx,
+        );
+        assert_eq!(event.correlation_id.as_str(), tp);
+    }
+
+    /// Verify `DirectQueueMetadata::new` seeds `correlation_id` from `TraceContext`.
+    #[test]
+    fn test_direct_metadata_new_uses_trace_context_when_some() {
+        let ctx = make_trace_context("x-request-id", "req-trace-123");
+        let meta = DirectQueueMetadata::new("jira", "application/json", ctx);
+        assert_eq!(meta.correlation_id().as_str(), "req-trace-123");
+    }
+
+    /// Verify `DirectQueueMetadata::new` generates a fresh UUID when `trace_context` is `None`.
+    #[test]
+    fn test_direct_metadata_new_generates_fresh_id_when_no_trace_context() {
+        let meta = DirectQueueMetadata::new("jira", "application/json", None);
+        // Must be non-empty and parseable as a UUID v4
+        assert!(!meta.correlation_id().as_str().is_empty());
+        assert!(
+            uuid::Uuid::parse_str(meta.correlation_id().as_str()).is_ok(),
+            "generated correlation_id must be a valid UUID, got: {}",
+            meta.correlation_id().as_str()
+        );
     }
 }

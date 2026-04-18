@@ -180,6 +180,7 @@ fn create_test_event() -> WrappedEvent {
                 "owner": {"id": 1, "login": "owner", "type": "User"}
             }
         }),
+        None,
     )
 }
 

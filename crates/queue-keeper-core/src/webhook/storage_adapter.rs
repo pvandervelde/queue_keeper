@@ -295,6 +295,7 @@ impl PayloadStorer for BlobStorageAdapter {
             body: stored.payload.body,
             received_at: stored.payload.metadata.received_at,
             raw_headers: std::collections::HashMap::new(),
+            trace_context: None,
         })
     }
 

@@ -26,7 +26,7 @@
 //! | **Wrap**   | `Wrapped(WrappedEvent)`         | Normalise into provider-agnostic form |
 //! | **Direct** | `Direct { payload, metadata }`  | Forward raw payload as-is             |
 
-use crate::{CorrelationId, EventId, SessionId, Timestamp};
+use crate::{CorrelationId, EventId, SessionId, Timestamp, TraceContext};
 use serde::{Deserialize, Serialize};
 
 // ============================================================================
@@ -69,6 +69,7 @@ use serde::{Deserialize, Serialize};
 ///     None,
 ///     None,
 ///     serde_json::json!({ "ref": "refs/heads/main" }),
+///     None,
 /// );
 ///
 /// assert_eq!(event.provider, "github");
@@ -139,6 +140,7 @@ impl WrappedEvent {
     ///     Some("opened".to_string()),
     ///     Some(session),
     ///     serde_json::json!({}),
+    ///     None,
     /// );
     /// assert_eq!(event.event_type, "pull_request");
     /// assert!(event.session_id.is_some());
@@ -149,15 +151,17 @@ impl WrappedEvent {
         action: Option<String>,
         session_id: Option<SessionId>,
         payload: serde_json::Value,
+        trace_context: Option<TraceContext>,
     ) -> Self {
         let now = Timestamp::now();
+        let correlation_id = trace_context.map(CorrelationId::from).unwrap_or_default();
         Self {
             event_id: EventId::new(),
             provider,
             event_type,
             action,
             session_id,
-            correlation_id: CorrelationId::new(),
+            correlation_id,
             received_at: now,
             processed_at: now,
             payload,
@@ -190,6 +194,7 @@ impl WrappedEvent {
     ///     Some("created".to_string()),
     ///     None,
     ///     serde_json::json!({}),
+    ///     None,
     /// );
     /// assert_eq!(event.event_type, "issue_updated");
     /// ```
@@ -200,14 +205,16 @@ impl WrappedEvent {
         action: Option<String>,
         session_id: Option<SessionId>,
         payload: serde_json::Value,
+        trace_context: Option<TraceContext>,
     ) -> Self {
+        let correlation_id = trace_context.map(CorrelationId::from).unwrap_or_default();
         Self {
             event_id: EventId::new(),
             provider,
             event_type,
             action,
             session_id,
-            correlation_id: CorrelationId::new(),
+            correlation_id,
             received_at,
             processed_at: Timestamp::now(),
             payload,
@@ -349,7 +356,7 @@ impl ProcessingOutput {
 /// ```rust
 /// use queue_keeper_core::webhook::DirectQueueMetadata;
 ///
-/// let meta = DirectQueueMetadata::new("jira", "application/json");
+/// let meta = DirectQueueMetadata::new("jira", "application/json", None);
 /// assert_eq!(meta.provider_id(), "jira");
 /// assert_eq!(meta.content_type(), "application/json");
 /// ```
@@ -384,13 +391,18 @@ impl DirectQueueMetadata {
     /// ```rust
     /// use queue_keeper_core::webhook::DirectQueueMetadata;
     ///
-    /// let meta = DirectQueueMetadata::new("gitlab", "application/json");
+    /// let meta = DirectQueueMetadata::new("gitlab", "application/json", None);
     /// assert!(!meta.event_id().as_str().is_empty());
     /// ```
-    pub fn new(provider_id: impl Into<String>, content_type: impl Into<String>) -> Self {
+    pub fn new(
+        provider_id: impl Into<String>,
+        content_type: impl Into<String>,
+        trace_context: Option<TraceContext>,
+    ) -> Self {
+        let correlation_id = trace_context.map(CorrelationId::from).unwrap_or_default();
         Self {
             event_id: EventId::new(),
-            correlation_id: CorrelationId::new(),
+            correlation_id,
             received_at: Timestamp::now(),
             provider_id: provider_id.into(),
             content_type: content_type.into(),

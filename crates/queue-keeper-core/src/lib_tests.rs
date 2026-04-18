@@ -49,3 +49,305 @@ fn test_retry_policy_delay_calculation() {
     assert!(delay3 > delay2);
     assert!(delay3 <= policy.max_delay);
 }
+
+// ============================================================================
+// CorrelationId – string-backed tests
+// ============================================================================
+
+mod correlation_id_tests {
+    use super::*;
+
+    /// Verify that a freshly generated CorrelationId is non-empty.
+    #[test]
+    fn test_correlation_id_new_is_non_empty() {
+        let id = CorrelationId::new();
+        assert!(!id.as_str().is_empty());
+    }
+
+    /// Verify that two generated CorrelationIds are distinct.
+    #[test]
+    fn test_correlation_id_new_generates_unique_ids() {
+        let id1 = CorrelationId::new();
+        let id2 = CorrelationId::new();
+        assert_ne!(id1, id2);
+    }
+
+    /// Verify that `as_str()` returns the same value as `Display`.
+    #[test]
+    fn test_correlation_id_as_str_matches_display() {
+        let id = CorrelationId::new();
+        assert_eq!(id.as_str(), id.to_string());
+    }
+
+    /// Verify that `FromStr` accepts any non-empty string, including non-UUID values.
+    #[test]
+    fn test_correlation_id_from_str_accepts_non_uuid_string() {
+        let result = "00-4bf92f3577b34da6a-00f067aa0ba902b7-01".parse::<CorrelationId>();
+        assert!(result.is_ok());
+        assert_eq!(
+            result.unwrap().as_str(),
+            "00-4bf92f3577b34da6a-00f067aa0ba902b7-01"
+        );
+    }
+
+    /// Verify that `FromStr` rejects an empty string.
+    #[test]
+    fn test_correlation_id_from_str_rejects_empty_string() {
+        let result = "".parse::<CorrelationId>();
+        assert!(result.is_err());
+    }
+
+    /// Verify that a CorrelationId preserves a non-UUID value verbatim.
+    #[test]
+    fn test_correlation_id_preserves_non_uuid_value() {
+        let id = "my-custom-trace-id".parse::<CorrelationId>().unwrap();
+        assert_eq!(id.as_str(), "my-custom-trace-id");
+    }
+}
+
+// ============================================================================
+// TraceContext tests
+// ============================================================================
+
+mod trace_context_tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn make_headers(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    /// Verify that `traceparent` header is extracted correctly.
+    #[test]
+    fn test_trace_context_from_headers_traceparent() {
+        let tp = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+        let headers = make_headers(&[("traceparent", tp)]);
+        let ctx = TraceContext::from_headers(&headers);
+        assert!(ctx.is_some());
+        assert_eq!(ctx.unwrap().as_str(), tp);
+    }
+
+    /// Verify that `x-correlation-id` header is extracted when present.
+    #[test]
+    fn test_trace_context_from_headers_correlation_id() {
+        let headers = make_headers(&[("x-correlation-id", "my-correlation-123")]);
+        let ctx = TraceContext::from_headers(&headers);
+        assert!(ctx.is_some());
+        assert_eq!(ctx.unwrap().as_str(), "my-correlation-123");
+    }
+
+    /// Verify that `x-request-id` header is extracted when present.
+    #[test]
+    fn test_trace_context_from_headers_request_id() {
+        let headers = make_headers(&[("x-request-id", "req-id-456")]);
+        let ctx = TraceContext::from_headers(&headers);
+        assert!(ctx.is_some());
+        assert_eq!(ctx.unwrap().as_str(), "req-id-456");
+    }
+
+    /// Verify that `traceparent` takes priority over `x-correlation-id` and `x-request-id`.
+    #[test]
+    fn test_trace_context_from_headers_priority_traceparent_wins() {
+        let headers = make_headers(&[
+            ("traceparent", "trace-val"),
+            ("x-correlation-id", "corr-val"),
+            ("x-request-id", "req-val"),
+        ]);
+        let ctx = TraceContext::from_headers(&headers).unwrap();
+        assert_eq!(ctx.as_str(), "trace-val");
+    }
+
+    /// Verify that `x-correlation-id` takes priority over `x-request-id` when both present.
+    #[test]
+    fn test_trace_context_from_headers_priority_correlation_over_request() {
+        let headers = make_headers(&[
+            ("x-correlation-id", "corr-val"),
+            ("x-request-id", "req-val"),
+        ]);
+        let ctx = TraceContext::from_headers(&headers).unwrap();
+        assert_eq!(ctx.as_str(), "corr-val");
+    }
+
+    /// Verify that `None` is returned when no recognised trace headers are present.
+    #[test]
+    fn test_trace_context_no_matching_headers_returns_none() {
+        let headers = make_headers(&[
+            ("content-type", "application/json"),
+            ("x-github-event", "push"),
+        ]);
+        let ctx = TraceContext::from_headers(&headers);
+        assert!(ctx.is_none());
+    }
+
+    /// Verify that `None` is returned for an empty header map.
+    #[test]
+    fn test_trace_context_empty_headers_returns_none() {
+        let headers = HashMap::new();
+        let ctx = TraceContext::from_headers(&headers);
+        assert!(ctx.is_none());
+    }
+
+    /// Verify that converting a TraceContext to CorrelationId preserves the value verbatim.
+    #[test]
+    fn test_trace_context_into_correlation_id_preserves_value() {
+        let headers = make_headers(&[("x-correlation-id", "my-id-123")]);
+        let ctx = TraceContext::from_headers(&headers).unwrap();
+        let corr_id: CorrelationId = ctx.into();
+        assert_eq!(corr_id.as_str(), "my-id-123");
+    }
+
+    /// Verify that a W3C traceparent value is preserved verbatim as the CorrelationId.
+    #[test]
+    fn test_trace_context_into_correlation_id_from_traceparent() {
+        let tp = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+        let headers = make_headers(&[("traceparent", tp)]);
+        let ctx = TraceContext::from_headers(&headers).unwrap();
+        let corr_id: CorrelationId = ctx.into();
+        assert_eq!(corr_id.as_str(), tp);
+    }
+
+    /// Verify that `Display` outputs the raw trace context string.
+    #[test]
+    fn test_trace_context_display() {
+        let headers = make_headers(&[("x-correlation-id", "some-trace-value")]);
+        let ctx = TraceContext::from_headers(&headers).unwrap();
+        assert_eq!(ctx.to_string(), "some-trace-value");
+    }
+
+    /// Verify that `as_str()` returns the raw trace context string.
+    #[test]
+    fn test_trace_context_as_str() {
+        let headers = make_headers(&[("x-request-id", "req-789")]);
+        let ctx = TraceContext::from_headers(&headers).unwrap();
+        assert_eq!(ctx.as_str(), "req-789");
+    }
+
+    /// Verify that an empty string value for a recognised header is skipped.
+    ///
+    /// An empty value is treated as absent: the extractor moves on to the
+    /// next header in priority order.
+    #[test]
+    fn test_trace_context_empty_value_is_skipped() {
+        let headers = make_headers(&[("traceparent", "")]);
+        let ctx = TraceContext::from_headers(&headers);
+        assert!(ctx.is_none(), "empty traceparent must be skipped");
+    }
+
+    /// Verify that a whitespace-only value for a recognised header is skipped.
+    #[test]
+    fn test_trace_context_whitespace_only_value_is_skipped() {
+        let headers = make_headers(&[("x-correlation-id", "   ")]);
+        let ctx = TraceContext::from_headers(&headers);
+        assert!(
+            ctx.is_none(),
+            "whitespace-only x-correlation-id must be skipped"
+        );
+    }
+
+    /// Verify that an empty higher-priority header falls through to the next
+    /// valid header in priority order.
+    #[test]
+    fn test_trace_context_empty_traceparent_falls_through_to_correlation_id() {
+        let headers = make_headers(&[
+            ("traceparent", ""),
+            ("x-correlation-id", "valid-correlation"),
+        ]);
+        let ctx = TraceContext::from_headers(&headers).unwrap();
+        assert_eq!(
+            ctx.as_str(),
+            "valid-correlation",
+            "must fall through to x-correlation-id when traceparent is empty"
+        );
+    }
+
+    /// Verify that all three headers being empty or whitespace returns `None`.
+    #[test]
+    fn test_trace_context_all_empty_or_whitespace_returns_none() {
+        let headers = make_headers(&[
+            ("traceparent", ""),
+            ("x-correlation-id", "  "),
+            ("x-request-id", "\t"),
+        ]);
+        let ctx = TraceContext::from_headers(&headers);
+        assert!(
+            ctx.is_none(),
+            "all empty/whitespace headers must return None"
+        );
+    }
+
+    /// Verify that a value exceeding the maximum length is rejected.
+    ///
+    /// A 257-character value must be ignored so the extractor falls through
+    /// to lower-priority headers (or returns None).
+    #[test]
+    fn test_trace_context_value_exceeding_max_length_is_rejected() {
+        let long_value = "a".repeat(257);
+        let headers = make_headers(&[("traceparent", &long_value)]);
+        let ctx = TraceContext::from_headers(&headers);
+        assert!(
+            ctx.is_none(),
+            "value longer than 256 chars must be rejected"
+        );
+    }
+
+    /// Verify that a value exactly at the maximum length (256 chars) is accepted.
+    #[test]
+    fn test_trace_context_value_at_max_length_is_accepted() {
+        let max_value = "a".repeat(256);
+        let headers = make_headers(&[("x-correlation-id", &max_value)]);
+        let ctx = TraceContext::from_headers(&headers);
+        assert!(ctx.is_some(), "256-char value must be accepted");
+    }
+
+    /// Verify that a value containing a newline (log injection vector) is rejected.
+    #[test]
+    fn test_trace_context_value_with_newline_is_rejected() {
+        let headers = make_headers(&[("traceparent", "valid-prefix\nforged-log-line")]);
+        let ctx = TraceContext::from_headers(&headers);
+        assert!(ctx.is_none(), "value containing \\n must be rejected");
+    }
+
+    /// Verify that a value containing a carriage return is rejected.
+    #[test]
+    fn test_trace_context_value_with_carriage_return_is_rejected() {
+        let headers = make_headers(&[("x-correlation-id", "id\r\ninjected")]);
+        let ctx = TraceContext::from_headers(&headers);
+        assert!(ctx.is_none(), "value containing \\r must be rejected");
+    }
+
+    /// Verify that a W3C traceparent with control chars falls through to the
+    /// next valid header.
+    #[test]
+    fn test_trace_context_control_char_falls_through_to_next_header() {
+        let headers = make_headers(&[
+            ("traceparent", "bad\x01value"),
+            ("x-correlation-id", "good-value"),
+        ]);
+        let ctx = TraceContext::from_headers(&headers).unwrap();
+        assert_eq!(
+            ctx.as_str(),
+            "good-value",
+            "must fall through to x-correlation-id when traceparent has control chars"
+        );
+    }
+
+    /// Verify that an over-length higher-priority header falls through to the
+    /// next valid header.
+    #[test]
+    fn test_trace_context_overlength_traceparent_falls_through_to_correlation_id() {
+        let long_value = "x".repeat(300);
+        let headers = make_headers(&[
+            ("traceparent", &long_value),
+            ("x-correlation-id", "fallback-id"),
+        ]);
+        let ctx = TraceContext::from_headers(&headers).unwrap();
+        assert_eq!(
+            ctx.as_str(),
+            "fallback-id",
+            "must fall through to x-correlation-id when traceparent exceeds max length"
+        );
+    }
+}

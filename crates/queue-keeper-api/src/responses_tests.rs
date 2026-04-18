@@ -268,6 +268,7 @@ mod blob_backed_event_store_tests {
             None,
             None,
             serde_json::json!({}),
+            None,
         );
         let event_id = event.event_id;
 
@@ -322,6 +323,7 @@ mod blob_backed_event_store_tests {
                 None,
                 None,
                 serde_json::json!({}),
+                None,
             );
             store_wrapped_event_to_blob(storage.as_ref(), &e)
                 .await
@@ -362,6 +364,7 @@ mod blob_backed_event_store_tests {
                 None,
                 None,
                 serde_json::json!({}),
+                None,
             );
             store_wrapped_event_to_blob(storage.as_ref(), &e)
                 .await
@@ -400,6 +403,7 @@ mod blob_backed_event_store_tests {
                 None,
                 None,
                 serde_json::json!({}),
+                None,
             );
             store_wrapped_event_to_blob(storage.as_ref(), &e)
                 .await
@@ -445,6 +449,7 @@ mod blob_backed_event_store_tests {
                 Some("opened".to_string()),
                 Some(session.clone()),
                 serde_json::json!({}),
+                None,
             );
             store_wrapped_event_to_blob(storage.as_ref(), &e)
                 .await
@@ -495,6 +500,7 @@ mod blob_backed_event_store_tests {
                 Some(action.to_string()),
                 Some(session.clone()),
                 serde_json::json!({}),
+                None,
             );
             store_wrapped_event_to_blob(storage.as_ref(), &e)
                 .await
@@ -554,6 +560,7 @@ mod blob_backed_event_store_tests {
                 None,
                 None,
                 serde_json::json!({}),
+                None,
             );
             store_wrapped_event_to_blob(storage.as_ref(), &e)
                 .await
@@ -585,6 +592,7 @@ mod blob_backed_event_store_tests {
             None,
             None,
             serde_json::json!({}),
+            None,
         );
         let event_id = event.event_id;
 
@@ -641,6 +649,7 @@ mod blob_backed_event_store_tests {
                 None,
                 None,
                 serde_json::json!({}),
+                None,
             );
             store_wrapped_event_to_blob(storage.as_ref(), &e)
                 .await
@@ -657,6 +666,7 @@ mod blob_backed_event_store_tests {
             None,
             None,
             serde_json::json!({}),
+            None,
         );
         store_wrapped_event_to_blob(storage.as_ref(), &e)
             .await
@@ -699,6 +709,7 @@ mod blob_backed_event_store_tests {
             None,
             Some(session_a.clone()),
             serde_json::json!({}),
+            None,
         );
         store_wrapped_event_to_blob(storage.as_ref(), &e_a)
             .await
@@ -713,6 +724,7 @@ mod blob_backed_event_store_tests {
             None,
             Some(session_b.clone()),
             serde_json::json!({}),
+            None,
         );
         store_wrapped_event_to_blob(storage.as_ref(), &e_b)
             .await
