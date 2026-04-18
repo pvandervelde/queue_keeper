@@ -154,9 +154,7 @@ impl WrappedEvent {
         trace_context: Option<TraceContext>,
     ) -> Self {
         let now = Timestamp::now();
-        let correlation_id = trace_context
-            .map(CorrelationId::from)
-            .unwrap_or_default();
+        let correlation_id = trace_context.map(CorrelationId::from).unwrap_or_default();
         Self {
             event_id: EventId::new(),
             provider,
@@ -209,9 +207,7 @@ impl WrappedEvent {
         payload: serde_json::Value,
         trace_context: Option<TraceContext>,
     ) -> Self {
-        let correlation_id = trace_context
-            .map(CorrelationId::from)
-            .unwrap_or_default();
+        let correlation_id = trace_context.map(CorrelationId::from).unwrap_or_default();
         Self {
             event_id: EventId::new(),
             provider,
@@ -403,9 +399,7 @@ impl DirectQueueMetadata {
         content_type: impl Into<String>,
         trace_context: Option<TraceContext>,
     ) -> Self {
-        let correlation_id = trace_context
-            .map(CorrelationId::from)
-            .unwrap_or_default();
+        let correlation_id = trace_context.map(CorrelationId::from).unwrap_or_default();
         Self {
             event_id: EventId::new(),
             correlation_id,
