@@ -277,4 +277,77 @@ mod trace_context_tests {
             "all empty/whitespace headers must return None"
         );
     }
+
+    /// Verify that a value exceeding the maximum length is rejected.
+    ///
+    /// A 257-character value must be ignored so the extractor falls through
+    /// to lower-priority headers (or returns None).
+    #[test]
+    fn test_trace_context_value_exceeding_max_length_is_rejected() {
+        let long_value = "a".repeat(257);
+        let headers = make_headers(&[("traceparent", &long_value)]);
+        let ctx = TraceContext::from_headers(&headers);
+        assert!(
+            ctx.is_none(),
+            "value longer than 256 chars must be rejected"
+        );
+    }
+
+    /// Verify that a value exactly at the maximum length (256 chars) is accepted.
+    #[test]
+    fn test_trace_context_value_at_max_length_is_accepted() {
+        let max_value = "a".repeat(256);
+        let headers = make_headers(&[("x-correlation-id", &max_value)]);
+        let ctx = TraceContext::from_headers(&headers);
+        assert!(ctx.is_some(), "256-char value must be accepted");
+    }
+
+    /// Verify that a value containing a newline (log injection vector) is rejected.
+    #[test]
+    fn test_trace_context_value_with_newline_is_rejected() {
+        let headers = make_headers(&[("traceparent", "valid-prefix\nforged-log-line")]);
+        let ctx = TraceContext::from_headers(&headers);
+        assert!(ctx.is_none(), "value containing \\n must be rejected");
+    }
+
+    /// Verify that a value containing a carriage return is rejected.
+    #[test]
+    fn test_trace_context_value_with_carriage_return_is_rejected() {
+        let headers = make_headers(&[("x-correlation-id", "id\r\ninjected")]);
+        let ctx = TraceContext::from_headers(&headers);
+        assert!(ctx.is_none(), "value containing \\r must be rejected");
+    }
+
+    /// Verify that a W3C traceparent with control chars falls through to the
+    /// next valid header.
+    #[test]
+    fn test_trace_context_control_char_falls_through_to_next_header() {
+        let headers = make_headers(&[
+            ("traceparent", "bad\x01value"),
+            ("x-correlation-id", "good-value"),
+        ]);
+        let ctx = TraceContext::from_headers(&headers).unwrap();
+        assert_eq!(
+            ctx.as_str(),
+            "good-value",
+            "must fall through to x-correlation-id when traceparent has control chars"
+        );
+    }
+
+    /// Verify that an over-length higher-priority header falls through to the
+    /// next valid header.
+    #[test]
+    fn test_trace_context_overlength_traceparent_falls_through_to_correlation_id() {
+        let long_value = "x".repeat(300);
+        let headers = make_headers(&[
+            ("traceparent", &long_value),
+            ("x-correlation-id", "fallback-id"),
+        ]);
+        let ctx = TraceContext::from_headers(&headers).unwrap();
+        assert_eq!(
+            ctx.as_str(),
+            "fallback-id",
+            "must fall through to x-correlation-id when traceparent exceeds max length"
+        );
+    }
 }

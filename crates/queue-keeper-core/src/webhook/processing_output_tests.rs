@@ -501,8 +501,13 @@ mod trace_context_propagation_tests {
             serde_json::json!({}),
             None,
         );
-        // A UUID v4 has 32 hex digits with 4 hyphens = 36 chars
-        assert_eq!(event.correlation_id.as_str().len(), 36);
+        // Must be non-empty and parseable as a UUID v4
+        assert!(!event.correlation_id.as_str().is_empty());
+        assert!(
+            uuid::Uuid::parse_str(event.correlation_id.as_str()).is_ok(),
+            "generated correlation_id must be a valid UUID, got: {}",
+            event.correlation_id.as_str()
+        );
     }
 
     /// Verify `WrappedEvent::with_received_at` seeds `correlation_id` from `TraceContext`.
@@ -535,6 +540,12 @@ mod trace_context_propagation_tests {
     #[test]
     fn test_direct_metadata_new_generates_fresh_id_when_no_trace_context() {
         let meta = DirectQueueMetadata::new("jira", "application/json", None);
-        assert_eq!(meta.correlation_id().as_str().len(), 36);
+        // Must be non-empty and parseable as a UUID v4
+        assert!(!meta.correlation_id().as_str().is_empty());
+        assert!(
+            uuid::Uuid::parse_str(meta.correlation_id().as_str()).is_ok(),
+            "generated correlation_id must be a valid UUID, got: {}",
+            meta.correlation_id().as_str()
+        );
     }
 }
