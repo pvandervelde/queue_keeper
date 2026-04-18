@@ -39,7 +39,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use std::sync::Arc;
-use tracing::instrument;
+use tracing::{info, instrument};
 
 // ============================================================================
 // GithubWebhookProvider
@@ -139,12 +139,30 @@ impl WebhookProcessor for GithubWebhookProvider {
         &self,
         request: WebhookRequest,
     ) -> Result<ProcessingOutput, WebhookError> {
+        // Capture delivery_id before the request is consumed by inner.process_webhook
+        let delivery_id = request.delivery_id().to_string();
+
         let mut output = self.inner.process_webhook(request).await?;
 
         // Stamp the provider name so consumers know this came from GitHub
         if let ProcessingOutput::Wrapped(ref mut event) = output {
             event.provider = Self::PROVIDER_ID.to_string();
         }
+
+        // Log the association between GitHub's delivery ID and Queue-Keeper's
+        // correlation ID so operators can cross-reference GitHub's delivery
+        // logs with processing logs using either identifier.
+        let correlation_id = match &output {
+            ProcessingOutput::Wrapped(event) => event.correlation_id.as_str().to_string(),
+            ProcessingOutput::Direct { metadata, .. } => {
+                metadata.correlation_id().as_str().to_string()
+            }
+        };
+        info!(
+            delivery_id = %delivery_id,
+            correlation_id = %correlation_id,
+            "GitHub webhook delivery correlated",
+        );
 
         Ok(output)
     }
