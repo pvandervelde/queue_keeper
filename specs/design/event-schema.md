@@ -2,115 +2,79 @@
 
 ## Overview
 
-Queue-Keeper normalizes GitHub webhook payloads into a standardized event schema that provides consistency for downstream bots while preserving the complete original payload for flexibility.
+Queue-Keeper normalizes webhook payloads into a standardized event envelope called `WrappedEvent` that provides consistency for downstream bots while preserving the complete original payload. This design serves both GitHub and generic webhook providers (GitLab, Jira, Slack, etc.).
 
-## Normalized Event Schema
+For the user-facing queue message format specification, see [Queue Message Format](../../docs/queue-message-format.md).
 
-### Core Event Structure
+## `WrappedEvent` — Normalized Event Envelope
+
+`WrappedEvent` is the queue message body produced by any provider running in **wrap mode**. It is the sole normalized event type in the system.
+
+### Rust Type Definition
 
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NormalizedEvent {
-    /// Unique identifier for this event (ULID format for sortability)
-    pub event_id: String,
+pub struct WrappedEvent {
+    /// Unique event identifier (ULID — sortable and globally unique).
+    pub event_id: EventId,
 
-    /// ISO 8601 timestamp when the event was processed by Queue-Keeper
-    pub processed_at: String,
+    /// The provider that generated this event (e.g. `"github"`, `"jira"`).
+    pub provider: String,
 
-    /// GitHub webhook delivery ID (X-GitHub-Delivery header)
-    pub delivery_id: String,
+    /// The event type (e.g. `"push"`, `"pull_request"`, `"issue_updated"`).
+    pub event_type: String,
 
-    /// Repository information
-    pub repository: RepositoryInfo,
-
-    /// Entity this event relates to (PR, issue, etc.)
-    pub entity: EntityInfo,
-
-    /// Session identifier for ordered processing
-    pub session_id: String,
-
-    /// GitHub event type and action
-    pub event_type: EventType,
-
-    /// Complete original GitHub webhook payload
-    pub payload: serde_json::Value,
-
-    /// Event metadata and processing information
-    pub metadata: EventMetadata,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RepositoryInfo {
-    /// Repository owner (organization or user)
-    pub owner: String,
-
-    /// Repository name
-    pub name: String,
-
-    /// Full repository name (owner/name)
-    pub full_name: String,
-
-    /// Repository ID (GitHub's internal ID)
-    pub id: u64,
-
-    /// Whether the repository is private
-    pub private: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EntityInfo {
-    /// Type of entity this event relates to
-    pub entity_type: EntityType,
-
-    /// Entity identifier (PR number, issue number, etc.)
-    pub entity_id: String,
-
-    /// Human-readable entity reference (e.g., "PR #123", "Issue #456")
-    pub entity_ref: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum EntityType {
-    PullRequest,
-    Issue,
-    Repository,      // For push, release events
-    Discussion,
-    CheckRun,
-    CheckSuite,
-    CodeScanningAlert,
-    DependabotAlert,
-    Release,
-    Other(String),   // Extensible for future GitHub event types
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EventType {
-    /// GitHub webhook event type (e.g., "pull_request", "issues")
-    pub event: String,
-
-    /// GitHub webhook action (e.g., "opened", "closed", "synchronize")
+    /// Optional action within the event type (e.g. `"opened"`, `"closed"`).
     pub action: Option<String>,
+
+    /// Session identifier for ordered processing.
+    ///
+    /// `Some` when the provider or event warrants ordered processing.
+    /// For GitHub, encodes the repository and affected entity:
+    /// `"{owner}/{repo}/{entity_type}/{entity_id}"`.
+    /// `None` for providers or events without an ordering requirement.
+    pub session_id: Option<SessionId>,
+
+    /// Correlation identifier for distributed tracing.
+    /// Propagated from the incoming `traceparent` / `X-Correlation-ID` /
+    /// `X-Request-ID` header, or generated as a UUID v4 when absent.
+    pub correlation_id: CorrelationId,
+
+    /// UTC time when the webhook was received by Queue-Keeper's HTTP layer.
+    pub received_at: Timestamp,
+
+    /// UTC time when normalization of this event completed.
+    pub processed_at: Timestamp,
+
+    /// The original webhook payload, preserved verbatim.
+    ///
+    /// All provider-specific structured data lives here. Consumers
+    /// extract what they need using the fields appropriate for their provider.
+    pub payload: serde_json::Value,
 }
+```
 
+### `DirectQueueMetadata` — Direct Mode Tracking
+
+When a provider operates in **direct mode**, the raw bytes are forwarded unmodified. The following metadata type is attached as Service Bus message properties (not as the message body):
+
+```rust
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EventMetadata {
-    /// Event format version for backward compatibility
-    pub schema_version: String,
+pub struct DirectQueueMetadata {
+    /// Unique event identifier for tracking and deduplication.
+    event_id: EventId,
 
-    /// Which bots this event was routed to
-    pub routed_to: Vec<String>,
+    /// Correlation identifier for distributed tracing.
+    correlation_id: CorrelationId,
 
-    /// Processing latency in milliseconds
-    pub processing_time_ms: u64,
+    /// UTC timestamp when the payload was received by Queue-Keeper.
+    received_at: Timestamp,
 
-    /// Blob storage location of raw payload
-    pub blob_url: String,
+    /// The provider ID that produced this output (e.g. `"jira"`, `"gitlab"`).
+    provider_id: String,
 
-    /// Whether this is a replayed event
-    pub is_replay: bool,
-
-    /// Original event timestamp from GitHub
-    pub github_timestamp: Option<String>,
+    /// The `Content-Type` of the original request body.
+    content_type: String,
 }
 ```
 
@@ -124,149 +88,74 @@ Examples:
 
 - `microsoft/vscode/pull_request/1234`
 - `octocat/hello-world/issue/567`
-- `github/docs/repository/push`
+- `github/docs/branch/main`
+- `github/docs/release/v1.0.0`
 
-### Session ID Generation Rules
+### Session ID Generation Rules (GitHub Provider)
 
-1. **Pull Request Events**: `{owner}/{repo}/pull_request/{pr_number}`
-2. **Issue Events**: `{owner}/{repo}/issue/{issue_number}`
-3. **Push Events**: `{owner}/{repo}/repository/push`
-4. **Release Events**: `{owner}/{repo}/repository/release`
-5. **Repository Events**: `{owner}/{repo}/repository/{event_type}`
+| GitHub event | `entity_type` | `entity_id` source |
+|---|---|---|
+| `pull_request`, `pull_request_review`, `pull_request_review_comment` | `pull_request` | `payload["pull_request"]["number"]` |
+| `issues`, `issue_comment` | `issue` | `payload["issue"]["number"]` |
+| `push`, `create`, `delete` (branch ref) | `branch` | `payload["ref"]` stripped of `refs/heads/` |
+| `release` | `release` | `payload["release"]["tag_name"]` |
+| `discussion`, `discussion_comment` | `discussion` | `payload["discussion"]["number"]` |
+| `workflow_run` | `workflow_run` | `payload["workflow_run"]["id"]` |
+| Repository-level events | `repository` | `"repository"` |
+| Unrecognised events | `unknown` | `"unknown"` |
 
 ### Ordering Implications
 
-- Events with the same session ID are processed sequentially
-- Events with different session IDs can be processed in parallel
-- Push events to the same repository are ordered
-- PR and Issue events are ordered per individual PR/Issue
+- Events with the same `session_id` are delivered to Azure Service Bus with the same `SessionId` property, guaranteeing FIFO order within that session
+- Events with different `session_id` values can be processed concurrently by separate session receivers
+- `session_id` is `None` (null in JSON) when no ordering concept applies, in which case no Service Bus `SessionId` is set
 
 ## Event Type Mapping
 
-### GitHub Event to Entity Type Mapping
-
-| GitHub Event | Entity Type | Session ID Pattern |
-|--------------|-------------|-------------------|
-| `pull_request` | `PullRequest` | `{owner}/{repo}/pull_request/{number}` |
-| `pull_request_review` | `PullRequest` | `{owner}/{repo}/pull_request/{number}` |
-| `pull_request_review_comment` | `PullRequest` | `{owner}/{repo}/pull_request/{number}` |
-| `issues` | `Issue` | `{owner}/{repo}/issue/{number}` |
-| `issue_comment` | `Issue` | `{owner}/{repo}/issue/{number}` |
-| `push` | `Repository` | `{owner}/{repo}/repository/push` |
-| `release` | `Repository` | `{owner}/{repo}/repository/release` |
-| `create` | `Repository` | `{owner}/{repo}/repository/create` |
-| `delete` | `Repository` | `{owner}/{repo}/repository/delete` |
-| `check_run` | `CheckRun` | `{owner}/{repo}/check_run/{id}` |
-| `check_suite` | `CheckSuite` | `{owner}/{repo}/check_suite/{id}` |
+See the session ID generation rules table above for the full GitHub event → `session_id` mapping. The spec for `EventEntity` extraction logic (which GitHub payload fields are read for each event type) is maintained in `specs/interfaces/webhook-processing.md`.
 
 ## Schema Evolution
 
-### Versioning Strategy
-
-- Schema version follows semantic versioning (e.g., "1.0.0")
-- Minor version increments for backward-compatible additions
-- Major version increments for breaking changes
-- Bots MUST handle unknown fields gracefully (forward compatibility)
-
 ### Backward Compatibility Rules
 
-1. Never remove required fields
-2. Never change field types (breaking change)
-3. New optional fields can be added freely
-4. Enum variants can be extended (use `Other(String)` pattern)
-5. Field renames require deprecation period with dual support
-
-### Migration Strategy
-
-```rust
-impl NormalizedEvent {
-    /// Migrate event from older schema version to current
-    pub fn migrate_from_version(mut self, from_version: &str) -> Result<Self, MigrationError> {
-        match from_version {
-            "1.0.0" => {
-                // Current version, no migration needed
-                Ok(self)
-            }
-            version => Err(MigrationError::UnsupportedVersion(version.to_string()))
-        }
-    }
-}
-```
+1. Never remove fields from `WrappedEvent` without a major version bump
+2. New optional fields (`Option<T>`) can be added at any time
+3. `action` and `session_id` are already `Option` — bots must handle `null` for both
+4. Bots must ignore unknown JSON fields (forward compatibility)
 
 ## Example Events
 
-### Pull Request Opened Event
+### Pull Request Opened
 
 ```json
 {
-  "event_id": "01H8X2K3M4N5P6Q7R8S9T0V1W2",
-  "processed_at": "2025-09-18T10:30:45.123Z",
-  "delivery_id": "12345678-1234-1234-1234-123456789abc",
-  "repository": {
-    "owner": "microsoft",
-    "name": "vscode",
-    "full_name": "microsoft/vscode",
-    "id": 41881900,
-    "private": false
-  },
-  "entity": {
-    "entity_type": "PullRequest",
-    "entity_id": "1234",
-    "entity_ref": "PR #1234"
-  },
-  "session_id": "microsoft/vscode/pull_request/1234",
-  "event_type": {
-    "event": "pull_request",
-    "action": "opened"
-  },
+  "event_id": "01JQZM7XK4B3VYFNHD0G2T8P1X",
+  "provider": "github",
+  "event_type": "pull_request",
+  "action": "opened",
+  "session_id": "myorg/myrepo/pull_request/42",
+  "correlation_id": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+  "received_at": "2026-04-18T10:00:00.000Z",
+  "processed_at": "2026-04-18T10:00:00.123Z",
   "payload": {
-    // Complete original GitHub webhook payload
-  },
-  "metadata": {
-    "schema_version": "1.0.0",
-    "routed_to": ["task-tactician", "merge-warden"],
-    "processing_time_ms": 45,
-    "blob_url": "https://storage.blob.core.windows.net/webhooks/2025/09/18/01H8X2K3M4N5P6Q7R8S9T0V1W2.json",
-    "is_replay": false,
-    "github_timestamp": "2025-09-18T10:30:44.000Z"
-  }
-}
-```
-
-### Issue Comment Event
-
-```json
-{
-  "event_id": "01H8X2K3M4N5P6Q7R8S9T0V1W3",
-  "processed_at": "2025-09-18T10:31:12.456Z",
-  "delivery_id": "87654321-4321-4321-4321-abcdef123456",
-  "repository": {
-    "owner": "octocat",
-    "name": "hello-world",
-    "full_name": "octocat/hello-world",
-    "id": 583231,
-    "private": false
-  },
-  "entity": {
-    "entity_type": "Issue",
-    "entity_id": "567",
-    "entity_ref": "Issue #567"
-  },
-  "session_id": "octocat/hello-world/issue/567",
-  "event_type": {
-    "event": "issue_comment",
-    "action": "created"
-  },
-  "payload": {
-    // Complete original GitHub webhook payload
-  },
-  "metadata": {
-    "schema_version": "1.0.0",
-    "routed_to": ["task-tactician"],
-    "processing_time_ms": 32,
-    "blob_url": "https://storage.blob.core.windows.net/webhooks/2025/09/18/01H8X2K3M4N5P6Q7R8S9T0V1W3.json",
-    "is_replay": false,
-    "github_timestamp": "2025-09-18T10:31:11.500Z"
+    "action": "opened",
+    "number": 42,
+    "pull_request": {
+      "number": 42,
+      "title": "Add new feature",
+      "state": "open",
+      "draft": false,
+      "head": { "sha": "abc123", "ref": "feature/new-feature" },
+      "base": { "ref": "main" }
+    },
+    "repository": {
+      "id": 123456789,
+      "name": "myrepo",
+      "full_name": "myorg/myrepo",
+      "private": false,
+      "owner": { "login": "myorg", "type": "Organization" }
+    },
+    "sender": { "login": "alice", "type": "User" }
   }
 }
 ```
@@ -275,123 +164,55 @@ impl NormalizedEvent {
 
 ```json
 {
-  "event_id": "01H8X2K3M4N5P6Q7R8S9T0V1W4",
-  "processed_at": "2025-09-18T10:32:01.789Z",
-  "delivery_id": "abcdef12-3456-7890-abcd-ef1234567890",
-  "repository": {
-    "owner": "github",
-    "name": "docs",
-    "full_name": "github/docs",
-    "id": 9919,
-    "private": false
-  },
-  "entity": {
-    "entity_type": "Repository",
-    "entity_id": "push",
-    "entity_ref": "Repository Push"
-  },
-  "session_id": "github/docs/repository/push",
-  "event_type": {
-    "event": "push",
-    "action": null
-  },
+  "event_id": "01JQZM8YL5C4WZGOHD1H3U9Q2Y",
+  "provider": "github",
+  "event_type": "push",
+  "action": null,
+  "session_id": "myorg/myrepo/branch/main",
+  "correlation_id": "550e8400-e29b-41d4-a716-446655440000",
+  "received_at": "2026-04-18T10:05:00.000Z",
+  "processed_at": "2026-04-18T10:05:00.087Z",
   "payload": {
-    // Complete original GitHub webhook payload
-  },
-  "metadata": {
-    "schema_version": "1.0.0",
-    "routed_to": ["spec-sentinel"],
-    "processing_time_ms": 28,
-    "blob_url": "https://storage.blob.core.windows.net/webhooks/2025/09/18/01H8X2K3M4N5P6Q7R8S9T0V1W4.json",
-    "is_replay": false,
-    "github_timestamp": "2025-09-18T10:32:00.000Z"
+    "ref": "refs/heads/main",
+    "head_commit": { "id": "def456", "message": "Fix bug" },
+    "repository": {
+      "id": 123456789,
+      "name": "myrepo",
+      "full_name": "myorg/myrepo",
+      "private": false,
+      "owner": { "login": "myorg", "type": "Organization" }
+    },
+    "sender": { "login": "bob", "type": "User" }
   }
 }
 ```
 
-## Service Bus Message Format
+## Service Bus Message Properties
 
-### Message Properties
+For **wrap mode** messages:
 
-Queue-Keeper sets the following Service Bus message properties:
+| Property | Value |
+|---|---|
+| `CorrelationId` | `WrappedEvent.correlation_id` |
+| `SessionId` | `WrappedEvent.session_id` (when ordered, may be absent) |
+| User property `event_type` | `WrappedEvent.event_type` |
+| User property `bot_name` | Target bot name |
 
-```rust
-// Standard Service Bus properties
-message.session_id = normalized_event.session_id;
-message.message_id = normalized_event.event_id;
-message.content_type = "application/json";
-
-// Custom properties for routing and filtering
-message.properties.insert("event_type", normalized_event.event_type.event);
-message.properties.insert("repository", normalized_event.repository.full_name);
-message.properties.insert("entity_type", normalized_event.entity.entity_type.to_string());
-message.properties.insert("processed_at", normalized_event.processed_at);
-message.properties.insert("is_replay", normalized_event.metadata.is_replay.to_string());
-```
-
-### Message Body
-
-The complete `NormalizedEvent` struct serialized as JSON.
-
-## Error Handling Schema
-
-### Processing Errors
-
-When event processing fails, Queue-Keeper creates error events:
-
-```rust
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ErrorEvent {
-    /// Original event ID that failed
-    pub original_event_id: String,
-
-    /// Error classification
-    pub error_type: ErrorType,
-
-    /// Human-readable error message
-    pub error_message: String,
-
-    /// Detailed error context
-    pub error_details: serde_json::Value,
-
-    /// Number of retry attempts made
-    pub retry_count: u32,
-
-    /// Whether this event can be retried
-    pub retryable: bool,
-
-    /// Timestamp of the error
-    pub error_timestamp: String,
-
-    /// Original event data (if available)
-    pub original_event: Option<NormalizedEvent>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ErrorType {
-    SignatureValidation,
-    PayloadParsing,
-    BlobStorageFailure,
-    QueueDeliveryFailure,
-    ConfigurationError,
-    UnknownEventType,
-    InternalError,
-}
-```
+For **direct mode** messages the raw body is forwarded with metadata as user properties prefixed `qk_`. See [Queue Message Format — Direct Mode](../../docs/queue-message-format.md#direct-mode-messages).
 
 ## Validation Rules
 
-### Event ID Validation
+### Event ID
 
-- Must be a valid ULID format
-- Must be unique across all events
-- Must be sortable chronologically
+- Must be a valid ULID (26 uppercase alphanumeric characters)
+- Globally unique across all events
+- Monotonically sortable: later events always sort after earlier ones
 
-### Session ID Validation
+### Session ID
 
-- Must match pattern: `^[a-zA-Z0-9\-_.]+/[a-zA-Z0-9\-_.]+/(pull_request|issue|repository|check_run|check_suite)/[a-zA-Z0-9\-_.]+$`
-- Maximum length: 256 characters
-- Must not contain special characters that interfere with Service Bus sessions
+- Format: `{owner}/{repo}/{entity_type}/{entity_id}`
+- Maximum length: 128 characters
+- Characters: ASCII graphic characters excluding whitespace; no leading, trailing, or consecutive slashes
 
 ### Repository Validation
 

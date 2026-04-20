@@ -82,6 +82,12 @@ Raw JSON webhook payload (maximum 25 MB).
 }
 ```
 
+**Queue Output**
+
+A successfully processed webhook results in one or more Azure Service Bus messages delivered to the queues of all matching bot subscriptions. See [Queue Message Format](queue-message-format.md) for the full schema of the messages your bot receives.
+
+---
+
 **curl Examples**
 
 GitHub webhook:
