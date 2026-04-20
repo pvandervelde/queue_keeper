@@ -1197,6 +1197,7 @@ impl GenericWebhookProvider {
         Ok(ProcessingOutput::Direct {
             payload: request.body,
             metadata,
+            target_queue: self.config.target_queue.clone(),
         })
     }
 }

@@ -62,6 +62,7 @@ mod processing_output_variants {
         let output = ProcessingOutput::Direct {
             payload: payload.clone(),
             metadata,
+            target_queue: None,
         };
 
         assert!(output.is_direct(), "expected is_direct() == true");
@@ -70,6 +71,7 @@ mod processing_output_variants {
         if let ProcessingOutput::Direct {
             payload: p,
             metadata: m,
+            ..
         } = &output
         {
             assert_eq!(p.as_ref(), payload.as_ref());
@@ -96,6 +98,7 @@ mod processing_output_variants {
         let output = ProcessingOutput::Direct {
             payload: Bytes::new(),
             metadata,
+            target_queue: None,
         };
 
         assert_eq!(output.event_id(), expected_id);
@@ -119,6 +122,7 @@ mod processing_output_variants {
         let output = ProcessingOutput::Direct {
             payload: Bytes::new(),
             metadata,
+            target_queue: None,
         };
 
         assert_eq!(output.correlation_id(), &expected);
@@ -154,6 +158,7 @@ mod processing_output_variants {
         let output = ProcessingOutput::Direct {
             payload: Bytes::new(),
             metadata: DirectQueueMetadata::new("jira", "application/json", None),
+            target_queue: None,
         };
 
         assert!(
@@ -181,6 +186,7 @@ mod processing_output_variants {
         let output = ProcessingOutput::Direct {
             payload: Bytes::new(),
             metadata: DirectQueueMetadata::new("jira", "application/json", None),
+            target_queue: None,
         };
 
         assert!(
@@ -211,6 +217,7 @@ mod processing_output_variants {
         let output = ProcessingOutput::Direct {
             payload: Bytes::new(),
             metadata: DirectQueueMetadata::new("jira", "application/json", None),
+            target_queue: None,
         };
 
         assert!(

@@ -17,6 +17,7 @@ use queue_keeper_core::{
     monitoring::MetricsCollector,
     webhook::{ProcessingOutput, WebhookHeaders, WebhookRequest},
 };
+use queue_runtime::{Message, QueueName};
 use std::collections::HashMap;
 use tracing::{error, info, instrument, warn};
 
@@ -153,9 +154,7 @@ pub async fn handle_provider_webhook(
     let event_id = processing_output.event_id();
     let session_id = processing_output.session_id().cloned();
 
-    // Spawn async queue delivery for wrapped events (fire-and-forget).
-    // Direct-mode events are forwarded as raw payloads and do not go through
-    // the event router.
+    // Spawn async queue delivery — fire-and-forget in both modes.
     if let ProcessingOutput::Wrapped(wrapped_event) = processing_output {
         // Persist the wrapped event to blob storage so that /api/events queries
         // return real data. This is fire-and-forget: a storage failure does not
@@ -202,6 +201,58 @@ pub async fn handle_provider_webhook(
                     }
                 }
             });
+        }
+    } else if let ProcessingOutput::Direct {
+        payload,
+        metadata,
+        target_queue,
+    } = processing_output
+    {
+        match target_queue {
+            Some(queue_name_str) => {
+                match QueueName::new(queue_name_str.clone()) {
+                    Ok(queue_name) => {
+                        if let Some(queue_client) = &state.queue_client {
+                            let queue_client = queue_client.clone();
+                            let logged_event_id = event_id;
+                            let message = Message::new(payload)
+                                .with_correlation_id(metadata.correlation_id().to_string());
+                            tokio::spawn(async move {
+                                match queue_client.send_message(&queue_name, message).await {
+                                    Ok(message_id) => {
+                                        info!(
+                                            event_id = %logged_event_id,
+                                            message_id = %message_id,
+                                            "Direct-mode payload delivered to queue"
+                                        );
+                                    }
+                                    Err(e) => {
+                                        error!(
+                                            event_id = %logged_event_id,
+                                            error = %e,
+                                            "Failed to deliver direct-mode payload to queue"
+                                        );
+                                    }
+                                }
+                            });
+                        }
+                    }
+                    Err(e) => {
+                        warn!(
+                            event_id = %event_id,
+                            queue_name = %queue_name_str,
+                            error = %e,
+                            "Direct-mode provider has invalid target_queue — event not delivered"
+                        );
+                    }
+                }
+            }
+            None => {
+                warn!(
+                    event_id = %event_id,
+                    "Direct-mode event has no target_queue configured — event not delivered"
+                );
+            }
         }
     }
 
