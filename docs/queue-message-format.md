@@ -89,8 +89,11 @@ Examples:
 
 `session_id` is `null` for:
 
-- Events where `ordered: false` in the bot subscription
-- Events from providers that do not produce sessions (entity type resolves to `Unknown`)
+- Events from generic providers in wrap mode (session IDs are not derived for non-GitHub providers)
+
+For GitHub events, `session_id` is always a non-null string — even for unrecognised event types, which produce `"owner/repo/unknown/unknown"`.
+
+> The `SessionId` queue property (which enables FIFO ordering) is set only when the bot subscription has `ordered: true` **and** the event carries a non-null `session_id`.
 
 #### `correlation_id` (string, required)
 
@@ -185,24 +188,15 @@ For **generic providers** in wrap mode, this is the raw request body as supplied
 
 ## Direct Mode Messages
 
+> **Not yet implemented.** Direct mode processing (`processing_mode: direct`) is parsed and validated by Queue-Keeper, but the delivery path that enqueues the raw payload is not yet implemented. Generic providers configured with `processing_mode: direct` currently receive a `200 OK` response and the payload is discarded. This section describes the planned behaviour. Do not build direct-mode consumers against this documentation until the feature ships.
+
 ### Message Structure
 
-In direct mode the raw webhook body is forwarded unmodified as the message body, with tracking metadata encoded as queue message attributes.
+In direct mode the raw webhook body will be forwarded unmodified as the message body.
 
 **Body**: Raw bytes from the webhook request body (typically JSON or form-encoded, as supplied by the provider).
 
-**Queue message attributes** (surfaced according to your backend's conventions):
-
-| Attribute | Value |
-|---|---|
-| `CorrelationId` | Propagated trace identifier (see [Trace Context](#trace-context)) |
-| `MessageId` | Auto-generated ULID (`event_id`) |
-| User attribute `qk_provider_id` | The provider ID (e.g. `"jira"`) |
-| User attribute `qk_event_id` | The event's ULID |
-| User attribute `qk_received_at` | ISO 8601 UTC timestamp of receipt |
-| User attribute `qk_content_type` | The `Content-Type` of the original request |
-
-The raw body contains exactly what the upstream provider sent — no transformation is applied. Your bot is responsible for parsing and validating it according to the provider's schema.
+The raw body will contain exactly what the upstream provider sent — no transformation is applied. Your bot is responsible for parsing and validating it according to the provider's schema.
 
 ### Direct Mode Example (Jira)
 
@@ -309,7 +303,7 @@ When Queue-Keeper exhausts all retry attempts for a message, it writes the event
 
 ### Event Replay
 
-Queue-Keeper supports replaying stored events via the admin API. Replayed events carry the same `event_id` as the original (enabling idempotency) but have a new `correlation_id`. Check the queue message attributes for a `qk_is_replay` attribute (value `"true"`) to distinguish replayed events from originals.
+Queue-Keeper supports replaying stored events via the admin API. Replayed events carry the same `event_id` as the original (enabling idempotency) but have a new `correlation_id`. Use `event_id` as your idempotency key to detect and handle replays safely.
 
 ---
 
@@ -323,11 +317,17 @@ The following table shows how GitHub event types map to `session_id` format:
 |---|---|---|
 | `pull_request` | `pull_request` | `myorg/myrepo/pull_request/42` |
 | `pull_request_review` | `pull_request_review` | `myorg/myrepo/pull_request/42` |
+| `pull_request_review_comment` | `pull_request_review_comment` | `myorg/myrepo/pull_request/42` |
 | `issues` | `issues` | `myorg/myrepo/issue/17` |
 | `issue_comment` | `issue_comment` | `myorg/myrepo/issue/17` |
 | `push` (branch) | `push` | `myorg/myrepo/branch/main` |
+| `create`, `delete` (branch ref) | `create` / `delete` | `myorg/myrepo/branch/main` |
 | `release` | `release` | `myorg/myrepo/release/v1.2.0` |
+| `discussion` | `discussion` | `myorg/myrepo/discussion/5` |
+| `discussion_comment` | `discussion_comment` | `myorg/myrepo/discussion/5` |
 | `workflow_run` | `workflow_run` | `myorg/myrepo/workflow_run/987654321` |
+| `workflow_job` | `workflow_job` | `myorg/myrepo/workflow_run/987654321` |
+| `team` | `team` | `myorg/myrepo/team/backend` |
 | `repository`, `push` (tag) | varies | `myorg/myrepo/repository/repository` |
 
 ### Accessing GitHub Payload Fields

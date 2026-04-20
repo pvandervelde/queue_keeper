@@ -309,7 +309,7 @@ bound_log.info("processing_complete", duration_ms=elapsed)
 To correlate with GitHub's delivery logs, note that Queue-Keeper emits a structured log line pairing the GitHub `X-GitHub-Delivery` ID with the `correlation_id`:
 
 ```
-INFO delivery_correlated delivery_id=12345678-... correlation_id=00-4bf92f...
+INFO GitHub webhook delivery correlated delivery_id=12345678-... correlation_id=00-4bf92f...
 ```
 
 Search for either the `delivery_id` or `correlation_id` to find related log entries across all systems.
@@ -380,31 +380,7 @@ Monitor the dead-letter queue for your subscription and alert when messages accu
 
 ## Direct Mode Consumers
 
-If your subscription uses a generic provider configured with `processing_mode: direct`, the message body is the raw webhook payload (not a `WrappedEvent`). Tracking metadata is available as queue message attributes prefixed with `qk_`:
-
-| Attribute key | Description |
-|---|---|
-| `qk_event_id` | Unique event ULID |
-| `qk_provider_id` | Provider that received the webhook (e.g. `"jira"`) |
-| `qk_received_at` | ISO 8601 UTC receipt timestamp |
-| `qk_content_type` | Content-Type of the original request body |
-| `CorrelationId` | Trace correlation ID (same semantics as wrapped mode) |
-
-Parse the body according to the provider's native schema. The example below uses Azure Service Bus:
-
-```python
-# Direct mode — body is the raw webhook bytes
-payload = json.loads(message_body)  # or xml.parse, etc.
-event_id = msg.application_properties.get(b"qk_event_id", b"unknown").decode()
-correlation_id = msg.correlation_id or "unknown"
-
-logger.info("Received direct payload", extra={
-    "correlation_id": correlation_id,
-    "event_id": event_id,
-})
-```
-
-See [Queue Message Format — Direct Mode](queue-message-format.md#direct-mode-messages) for the full property list.
+> **Not yet implemented.** Direct mode queue delivery is not yet functional. Generic providers configured with `processing_mode: direct` are accepted by Queue-Keeper but the payload is not delivered to any queue. See [Queue Message Format — Direct Mode](queue-message-format.md#direct-mode-messages) for the planned behaviour.
 
 ---
 

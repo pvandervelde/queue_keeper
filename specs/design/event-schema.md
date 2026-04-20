@@ -101,14 +101,16 @@ Examples:
 | `release` | `release` | `payload["release"]["tag_name"]` |
 | `discussion`, `discussion_comment` | `discussion` | `payload["discussion"]["number"]` |
 | `workflow_run` | `workflow_run` | `payload["workflow_run"]["id"]` |
+| `workflow_job` | `workflow_run` | `payload["workflow_run"]["id"]` (falls back to `payload["workflow_job"]["run_id"]`) |
+| `team` | `team` | `payload["team"]["slug"]` |
 | Repository-level events | `repository` | `"repository"` |
 | Unrecognised events | `unknown` | `"unknown"` |
 
 ### Ordering Implications
 
-- Events with the same `session_id` are delivered to Azure Service Bus with the same `SessionId` property, guaranteeing FIFO order within that session
+- Events with the same `session_id` are delivered with the same session identifier set on the outgoing message (the exact queue attribute name depends on the backend), guaranteeing FIFO order within that session when using session-aware receivers
 - Events with different `session_id` values can be processed concurrently by separate session receivers
-- `session_id` is `None` (null in JSON) when no ordering concept applies, in which case no Service Bus `SessionId` is set
+- `session_id` is `None` (null in JSON) for generic providers in wrap mode; for GitHub events it is always non-null. The session queue property is omitted when the bot subscription has `ordered: false`.
 
 ## Event Type Mapping
 
