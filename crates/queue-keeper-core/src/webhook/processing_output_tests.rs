@@ -62,6 +62,7 @@ mod processing_output_variants {
         let output = ProcessingOutput::Direct {
             payload: payload.clone(),
             metadata,
+            target_queue: None,
         };
 
         assert!(output.is_direct(), "expected is_direct() == true");
@@ -70,6 +71,7 @@ mod processing_output_variants {
         if let ProcessingOutput::Direct {
             payload: p,
             metadata: m,
+            ..
         } = &output
         {
             assert_eq!(p.as_ref(), payload.as_ref());
@@ -96,6 +98,7 @@ mod processing_output_variants {
         let output = ProcessingOutput::Direct {
             payload: Bytes::new(),
             metadata,
+            target_queue: None,
         };
 
         assert_eq!(output.event_id(), expected_id);
@@ -119,6 +122,7 @@ mod processing_output_variants {
         let output = ProcessingOutput::Direct {
             payload: Bytes::new(),
             metadata,
+            target_queue: None,
         };
 
         assert_eq!(output.correlation_id(), &expected);
@@ -154,6 +158,7 @@ mod processing_output_variants {
         let output = ProcessingOutput::Direct {
             payload: Bytes::new(),
             metadata: DirectQueueMetadata::new("jira", "application/json", None),
+            target_queue: None,
         };
 
         assert!(
@@ -181,6 +186,7 @@ mod processing_output_variants {
         let output = ProcessingOutput::Direct {
             payload: Bytes::new(),
             metadata: DirectQueueMetadata::new("jira", "application/json", None),
+            target_queue: None,
         };
 
         assert!(
@@ -205,12 +211,52 @@ mod processing_output_variants {
         );
     }
 
+    /// Verify `direct_target_queue()` returns `None` for wrapped outputs.
+    #[test]
+    fn test_direct_target_queue_returns_none_for_wrapped() {
+        let output = ProcessingOutput::Wrapped(test_wrapped_event());
+        assert!(
+            output.direct_target_queue().is_none(),
+            "direct_target_queue() should be None for Wrapped output"
+        );
+    }
+
+    /// Verify `direct_target_queue()` returns the queue name for direct outputs with a queue.
+    #[test]
+    fn test_direct_target_queue_returns_value_for_direct_with_queue() {
+        let output = ProcessingOutput::Direct {
+            payload: Bytes::new(),
+            metadata: DirectQueueMetadata::new("jira", "application/json", None),
+            target_queue: Some("queue-keeper-jira".to_string()),
+        };
+        assert_eq!(
+            output.direct_target_queue(),
+            Some("queue-keeper-jira"),
+            "direct_target_queue() should return the configured queue name"
+        );
+    }
+
+    /// Verify `direct_target_queue()` returns `None` for direct outputs without a queue.
+    #[test]
+    fn test_direct_target_queue_returns_none_for_direct_without_queue() {
+        let output = ProcessingOutput::Direct {
+            payload: Bytes::new(),
+            metadata: DirectQueueMetadata::new("jira", "application/json", None),
+            target_queue: None,
+        };
+        assert!(
+            output.direct_target_queue().is_none(),
+            "direct_target_queue() should be None when no queue is configured"
+        );
+    }
+
     /// Verify `as_wrapped()` returns `None` for direct outputs.
     #[test]
     fn test_as_wrapped_returns_none_for_direct() {
         let output = ProcessingOutput::Direct {
             payload: Bytes::new(),
             metadata: DirectQueueMetadata::new("jira", "application/json", None),
+            target_queue: None,
         };
 
         assert!(
