@@ -203,20 +203,20 @@ pub async fn handle_provider_webhook(
             });
         }
     } else if let ProcessingOutput::Direct {
-        payload,
-        metadata,
-        target_queue,
+        ref payload,
+        ref metadata,
+        ..
     } = processing_output
     {
-        match target_queue {
+        match processing_output.direct_target_queue().map(str::to_owned) {
             Some(queue_name_str) => match QueueName::new(queue_name_str.clone()) {
                 Ok(queue_name) => {
                     if let Some(queue_client) = &state.queue_client {
                         let queue_client = queue_client.clone();
                         let logged_event_id = event_id;
-                        let message = Message::new(payload)
+                        let message = Message::new(payload.clone())
                             .with_correlation_id(metadata.correlation_id().to_string());
-                        tokio::spawn(async move {
+                        let handle = tokio::spawn(async move {
                             match queue_client.send_message(&queue_name, message).await {
                                 Ok(message_id) => {
                                     info!(
@@ -234,6 +234,24 @@ pub async fn handle_provider_webhook(
                                 }
                             }
                         });
+                        let monitor_event_id = event_id;
+                        tokio::spawn(async move {
+                            if let Err(join_err) = handle.await {
+                                if join_err.is_panic() {
+                                    error!(
+                                        event_id = %monitor_event_id,
+                                        "Direct-mode queue delivery task panicked \
+                                         — payload may not have been delivered"
+                                    );
+                                }
+                            }
+                        });
+                    } else {
+                        warn!(
+                            event_id = %event_id,
+                            queue_name = %queue_name_str,
+                            "Direct-mode event has no queue client configured — event not delivered"
+                        );
                     }
                 }
                 Err(e) => {

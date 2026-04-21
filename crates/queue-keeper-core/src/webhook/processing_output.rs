@@ -24,7 +24,7 @@
 //! | Mode       | Output variant                  | Use case                              |
 //! |------------|---------------------------------|---------------------------------------|
 //! | **Wrap**   | `Wrapped(WrappedEvent)`         | Normalise into provider-agnostic form |
-//! | **Direct** | `Direct { payload, metadata }`  | Forward raw payload as-is             |
+//! | **Direct** | `Direct { payload, metadata, target_queue }` | Forward raw payload as-is |
 
 use crate::{CorrelationId, EventId, SessionId, Timestamp, TraceContext};
 use serde::{Deserialize, Serialize};
