@@ -205,10 +205,10 @@ pub async fn handle_provider_webhook(
     } else if let ProcessingOutput::Direct {
         ref payload,
         ref metadata,
-        ref target_queue,
+        ..
     } = processing_output
     {
-        match target_queue.as_deref().map(str::to_owned) {
+        match processing_output.direct_target_queue().map(str::to_owned) {
             Some(queue_name_str) => match QueueName::new(queue_name_str.clone()) {
                 Ok(queue_name) => {
                     if let Some(queue_client) = &state.queue_client {
