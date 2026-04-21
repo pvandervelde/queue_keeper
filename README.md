@@ -82,10 +82,34 @@ github-bot-sdk = "0.1.0"
 queue-runtime = "0.1.0"
 ```
 
+Key public types from `queue-keeper-core`:
+
+- `EventId` — ULID-based unique event identifier
+- `SessionId` — ordered-processing session key (`owner/repo/entity_type/id`)
+- `CorrelationId` — string-backed distributed trace identifier
+- `WrappedEvent` — normalized event envelope placed on Service Bus queues
+- `WebhookProcessor` — trait implemented by each provider (GitHub, generic)
+- `EventRouter` — trait for routing `WrappedEvent` to bot queues
+
+Key public types from `queue-runtime`:
+
+- `QueueClient` — provider-agnostic queue send/receive abstraction
+- `Message` / `ReceivedMessage` — Service Bus message wrappers
+- `SessionId` — queue-layer session identifier (distinct from core's `SessionId`)
+
 ## Documentation
 
+**For bot developers:**
+- **[Bot Integration Guide](docs/bot-integration.md)** - End-to-end guide: subscribe, receive, parse, and trace events
+- **[Queue Message Format](docs/queue-message-format.md)** - Full schema reference for `WrappedEvent` and direct mode messages
+- **[Provider Integration Examples](docs/provider-examples.md)** - GitHub, GitLab, Jira, and Slack configuration examples
+
+**For operators:**
 - **[Configuration Guide](docs/configuration.md)** - Bot subscriptions, event routing, and deployment
+- **[API Reference](docs/api.md)** - HTTP endpoints, trace context headers, health checks
 - **[Container Usage](docs/container-usage.md)** - Building, running, and testing containers
+
+**For contributors:**
 - **[Contributing Guide](CONTRIBUTING.md)** - Development setup, commit conventions, and release process
 - **[Architecture](specs/README.md)** - System design and component interactions
 - **[API Documentation](https://docs.rs/queue-keeper-core)** - Rustdoc for all public APIs

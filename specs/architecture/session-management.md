@@ -370,32 +370,25 @@ service_bus_queues:
 **Session Message Properties**:
 
 ```rust
-// Set Service Bus message properties for session-based routing
+// Set queue message properties for session-based routing
 pub fn set_message_properties(
-    message: &mut ServiceBusMessage,
-    event: &NormalizedEvent,
-    session_id: Option<&str>,
+    message: &mut Message,
+    event: &WrappedEvent,
+    bot: &BotSubscription,
 ) {
-    // Core routing properties
-    message.properties.insert("event_type", event.event_type.event.clone());
-    message.properties.insert("repository", event.repository.full_name.clone());
-    message.properties.insert("entity_type", event.entity.entity_type.to_string());
+    // Correlation ID for tracing
+    message = message.with_correlation_id(event.correlation_id.to_string());
 
-    // Session handling
-    if let Some(session_id) = session_id {
-        message.session_id = Some(session_id.to_string());
-        message.properties.insert("session_scope", "ordered");
-    } else {
-        message.properties.insert("session_scope", "unordered");
+    // Session handling — only set when bot is configured for ordered delivery
+    if bot.ordered {
+        if let Some(ref session_id) = event.session_id {
+            message = message.with_session_id(session_id.as_str().to_string());
+        }
     }
 
-    // Tracing context
-    message.properties.insert("trace_id", event.trace_context.trace_id.clone());
-    message.properties.insert("correlation_id", event.event_id.clone());
-
-    // Timing information
-    message.properties.insert("processed_at", event.processed_at.to_rfc3339());
-    message.properties.insert("github_delivery_id", event.delivery_id.clone());
+    // Routing attributes
+    message = message.with_attribute("bot_name".to_string(), bot.name.as_str().to_string());
+    message = message.with_attribute("event_type".to_string(), event.event_type.clone());
 }
 ```
 

@@ -283,9 +283,13 @@ When `ordered: true`:
    - For branch events: `{owner}/{repo}/branch/{branch_name}`
    - For release events: `{owner}/{repo}/release/{tag}`
 
-2. **Session-Based Delivery**: Events with the same session ID are delivered in order
-3. **Concurrent Processing**: Different sessions can be processed in parallel
-4. **Maximum Sessions**: Configure `max_concurrent_sessions` to control concurrency
+2. **Azure Service Bus Sessions**: The session ID is set as the Service Bus `SessionId` property on the outgoing message. Azure Service Bus uses this to guarantee FIFO ordering within a session. Your bot **must** use a session-aware receiver (`ServiceBusSessionReceiver` or equivalent) — a plain receiver cannot read session-locked messages.
+
+3. **Concurrent Processing**: Different sessions (different PRs, different issues) are independent and can be processed in parallel by multiple session receivers running concurrently.
+
+4. **Session Lock**: When your bot receives a session, it holds a lock. If the lock expires before the message is settled (completed, abandoned, or dead-lettered), the session becomes available to another receiver. Set your lock duration long enough for your worst-case processing time.
+
+> **Note on queue creation**: When `ordered: true`, the Azure Service Bus queue must be created with `RequiresSession = true`. A session-less queue silently drops the `SessionId` property and delivers messages without ordering. See [Bot Integration Guide](bot-integration.md#step-2-create-the-azure-service-bus-queue) for the queue creation command.
 
 ### Ordering Configuration Example
 
