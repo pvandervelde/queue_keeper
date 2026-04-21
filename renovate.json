@@ -64,7 +64,6 @@
   },
   "prConcurrentLimit": 10,
   "prHourlyLimit": 2,
-  "allowedPostUpdateOptions": [],
   "postUpdateOptions": [],
   "ignoreScripts": true
 }
