@@ -285,9 +285,10 @@ pub trait EventStore: Send + Sync {
 /// restricted to test code. Production deployments must use
 /// [`ServiceHealthChecker`], which validates that at least one webhook
 /// provider is registered before reporting ready.
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) struct DefaultHealthChecker;
 
+#[cfg(test)]
 #[async_trait::async_trait]
 impl HealthChecker for DefaultHealthChecker {
     async fn check_basic_health(&self) -> HealthStatus {

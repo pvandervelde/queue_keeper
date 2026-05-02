@@ -48,11 +48,6 @@ impl CircuitBreakerQueueProvider {
         }
     }
 
-    /// Get reference to inner provider for operations not requiring circuit breaker.
-    #[allow(dead_code)]
-    pub fn inner(&self) -> &dyn QueueProvider {
-        &*self.inner
-    }
 }
 
 #[async_trait]
@@ -281,11 +276,6 @@ impl CircuitBreakerQueueClient {
         }
     }
 
-    /// Get reference to inner client.
-    #[allow(dead_code)]
-    pub fn inner(&self) -> &dyn QueueClient {
-        &*self.inner
-    }
 }
 
 /// Map a `CircuitBreakerError<QueueError>` to a `QueueError` for send operations.

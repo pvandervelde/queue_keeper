@@ -170,9 +170,10 @@ pub enum ReplayType {
 
 impl ReplayType {
     /// Get estimated event count for this replay type
-    pub async fn estimate_event_count(
+    #[allow(dead_code)]
+    pub(crate) async fn estimate_event_count(
         &self,
-        _event_store: &dyn EventStore,
+        _event_store: &dyn EventCountStore,
     ) -> Result<usize, ReplayError> {
         match self {
             ReplayType::SingleEvent { .. } => Ok(1),
@@ -1299,13 +1300,15 @@ impl ReplayError {
 }
 
 // ============================================================================
-// Stub Traits (TODO: Move to appropriate modules)
+// Internal Count Trait
 // ============================================================================
 
-/// Stub trait for event storage (TODO: Move to appropriate module)
+/// Minimal trait used internally by [`ReplayType`] to estimate event counts
+/// without pulling in the full storage contract.
+#[allow(dead_code)]
 #[async_trait]
-pub trait EventStore: Send + Sync {
-    /// Count events (stub)
+pub(crate) trait EventCountStore: Send + Sync {
+    /// Return the number of stored events.
     async fn count_events(&self) -> Result<usize, ReplayError>;
 }
 

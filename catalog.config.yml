@@ -1,0 +1,157 @@
+# catalog.config.yml
+#
+# Configuration for scripts/update_catalog.py
+#
+# ── How domains work ──────────────────────────────────────────────────────────
+#
+# Each extracted symbol is assigned to a domain based on its file path.
+# Domains are checked in order — the first path pattern that matches wins.
+# The last domain entry should always be a catch-all (paths: ["**"]).
+#
+# Per-domain output files are written to docs/catalog/<domain>.md
+# A master index is written to docs/catalog/index.md
+#
+# ── How languages work ────────────────────────────────────────────────────────
+#
+# Each language entry lists:
+#   extensions:       File extensions to scan
+#   exclude_patterns: Glob patterns to skip (in addition to exclude_global)
+#   symbols:          ast-grep patterns to extract
+#
+# The $NAME metavariable in each pattern must capture the symbol name.
+# The 'kind' field becomes the Kind column in the catalog table.
+# The 'tags' field adds static tags to every symbol matched by this pattern.
+# The 'filter' field supports: "not_private" (skip names starting with _)
+
+# ── Output & state ────────────────────────────────────────────────────────────
+
+catalog:
+  output_dir: docs/catalog # Where to write catalog markdown files
+  state_file: .llm/.catalog-state.json # Tracks last-indexed commit
+
+# ── LLM settings ─────────────────────────────────────────────────────────────
+
+llm:
+  # claude-haiku-4-5-20251001 is fast and cheap — suitable for bulk description generation.
+  # Upgrade to claude-sonnet-4-6 if you want richer descriptions.
+  model: claude-haiku-4-5-20251001
+  batch_size: 20 # Symbols per API call. Reduce if you hit token limits.
+
+# ── Global exclusions ─────────────────────────────────────────────────────────
+# Applied to all languages. Use **/dir/** to exclude directories anywhere in the tree.
+
+exclude_global:
+  - "**/target/**"
+  - "**/.git/**"
+  - "**/generated/**"
+
+# ── Language definitions ──────────────────────────────────────────────────────
+
+languages:
+
+  rust:
+    extensions: [ ".rs" ]
+    exclude_patterns:
+      # Test files in this repo follow the *_tests.rs naming convention
+      - "**/*_tests.rs"
+      # Inline test modules referenced via #[path = "..."]
+      - "**/tests/**"
+      - "**/benches/**"
+      - "**/examples/**"
+      # The integration-tests and e2e-tests crates are test-only; exclude entirely
+      - "crates/queue-keeper-integration-tests/**"
+      - "crates/queue-keeper-e2e-tests/**"
+    symbols:
+      - kind: fn
+        pattern: "pub fn $NAME($$$)"
+        tags: []
+      - kind: fn
+        pattern: "pub async fn $NAME($$$)"
+        tags: [ async ]
+      - kind: struct
+        pattern: "pub struct $NAME"
+        tags: []
+      - kind: enum
+        pattern: "pub enum $NAME"
+        tags: []
+      - kind: trait
+        pattern: "pub trait $NAME"
+        tags: [ trait ]
+      - kind: type
+        pattern: "pub type $NAME = $$$"
+        tags: []
+
+  python:
+    extensions: [ ".py" ]
+    exclude_patterns:
+      - "**/__pycache__/**"
+      - "**/test_*.py"
+      - "**/*_test.py"
+      - "**/tests/**"
+      - "**/conftest.py"
+    symbols:
+      - kind: fn
+        pattern: "def $NAME($$$):"
+        tags: []
+        filter: "not_private"
+      - kind: fn
+        pattern: "async def $NAME($$$):"
+        tags: [ async ]
+        filter: "not_private"
+      - kind: class
+        pattern: "class $NAME"
+        tags: []
+        filter: "not_private"
+
+# ── Domain definitions ────────────────────────────────────────────────────────
+#
+# Order matters — first match wins.
+# Each entry needs: name, description, paths (list of globs), tags (list).
+# The last entry should always match "**" to catch everything else.
+#
+# Paths are matched against repo-relative, forward-slash paths (e.g.
+# "crates/core/src/checks.rs").
+
+domains:
+  - name: core
+    description: "Core business logic — webhook processing, event routing, audit
+      logging, blob storage, circuit breaker, bot configuration, and queue
+      integration abstractions"
+    paths:
+      - "crates/queue-keeper-core/**"
+    tags: [ core, webhook, routing ]
+
+  - name: api
+    description: "HTTP API library — request handlers, provider registry, queue
+      delivery, retry logic, DLQ storage, middleware, metrics, and Azure
+      configuration"
+    paths:
+      - "crates/queue-keeper-api/**"
+    tags: [ api, http ]
+
+  - name: service
+    description: "Service binary — HTTP server startup, signature validation, and
+      circuit breaker wiring"
+    paths:
+      - "crates/queue-keeper-service/**"
+    tags: [ service, binary ]
+
+  - name: cli
+    description: "CLI binary — command-line interface for managing and interacting
+      with the queue-keeper service"
+    paths:
+      - "crates/queue-keeper-cli/**"
+    tags: [ cli ]
+
+  - name: scripts
+    description: "Repository tooling — catalog generation, test runners, and
+      maintenance scripts"
+    paths:
+      - "scripts/**"
+    tags: [ tooling ]
+
+  - name: general
+    description: "Uncategorised entries — add domain rules above to reduce this"
+    paths:
+      - "**" # Catch-all — always keep this last
+    tags: []
