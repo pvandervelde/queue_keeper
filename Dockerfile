@@ -10,7 +10,7 @@
 # ============================================================================
 # Stage 1: Builder
 # ============================================================================
-FROM rust:1.94-slim-bookworm@sha256:98c4414986f091750177710b667e76c7e66c39e75da95a41d60583da16fbe47f AS builder
+FROM rust:1.94-slim-bookworm@sha256:cf9dd0ec73e75f827fe59123fff9dc65af1a1c8363c3c31ee8d7f8ad0b6a5fb2 AS builder
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
