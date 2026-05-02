@@ -69,29 +69,7 @@ impl QueueProvider for CircuitBreakerQueueProvider {
             // INVARIANT: the closure always returns Ok(vec![one_id]), so the
             // vec is guaranteed to have exactly one element; unwrap cannot panic.
             .map(|ids| ids.into_iter().next().unwrap())
-            .map_err(|e| match e {
-                CircuitBreakerError::CircuitOpen => QueueError::ProviderError {
-                    provider: "CircuitBreaker".to_string(),
-                    code: "CircuitOpen".to_string(),
-                    message: "Queue send circuit breaker is open".to_string(),
-                },
-                CircuitBreakerError::Timeout { timeout_ms } => QueueError::ProviderError {
-                    provider: "CircuitBreaker".to_string(),
-                    code: "Timeout".to_string(),
-                    message: format!("Queue send operation timed out after {}ms", timeout_ms),
-                },
-                CircuitBreakerError::OperationFailed(e) => e,
-                CircuitBreakerError::TooManyConcurrentRequests => QueueError::ProviderError {
-                    provider: "CircuitBreaker".to_string(),
-                    code: "TooManyConcurrentRequests".to_string(),
-                    message: "Too many concurrent queue send requests".to_string(),
-                },
-                CircuitBreakerError::InternalError { message } => QueueError::ProviderError {
-                    provider: "CircuitBreaker".to_string(),
-                    code: "InternalError".to_string(),
-                    message,
-                },
-            })
+            .map_err(map_send_cb_error)
     }
 
     async fn send_messages(
@@ -106,32 +84,7 @@ impl QueueProvider for CircuitBreakerQueueProvider {
         self.circuit_breaker_send
             .call(|| async move { inner.send_messages(&queue, &messages).await })
             .await
-            .map_err(|e| match e {
-                CircuitBreakerError::CircuitOpen => QueueError::ProviderError {
-                    provider: "CircuitBreaker".to_string(),
-                    code: "CircuitOpen".to_string(),
-                    message: "Queue send circuit breaker is open".to_string(),
-                },
-                CircuitBreakerError::Timeout { timeout_ms } => QueueError::ProviderError {
-                    provider: "CircuitBreaker".to_string(),
-                    code: "Timeout".to_string(),
-                    message: format!(
-                        "Queue batch send operation timed out after {}ms",
-                        timeout_ms
-                    ),
-                },
-                CircuitBreakerError::OperationFailed(e) => e,
-                CircuitBreakerError::TooManyConcurrentRequests => QueueError::ProviderError {
-                    provider: "CircuitBreaker".to_string(),
-                    code: "TooManyConcurrentRequests".to_string(),
-                    message: "Too many concurrent queue send requests".to_string(),
-                },
-                CircuitBreakerError::InternalError { message } => QueueError::ProviderError {
-                    provider: "CircuitBreaker".to_string(),
-                    code: "InternalError".to_string(),
-                    message,
-                },
-            })
+            .map_err(map_send_cb_error)
     }
 
     async fn receive_message(

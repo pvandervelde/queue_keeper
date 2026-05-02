@@ -110,6 +110,9 @@ async fn test_command_handlers_return_err_not_panic() {
 }
 
 /// Verify load_configuration returns Ok with default config when no path is given.
+///
+/// The stub ignores the path argument. When a real implementation lands, add a
+/// second case exercising `Some(path)` to cover config-file loading.
 #[tokio::test]
 async fn test_load_configuration_returns_default_config() {
     let result = load_configuration(None).await;
