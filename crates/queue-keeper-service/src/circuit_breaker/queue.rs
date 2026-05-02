@@ -47,7 +47,6 @@ impl CircuitBreakerQueueProvider {
             circuit_breaker_receive,
         }
     }
-
 }
 
 #[async_trait]
@@ -275,7 +274,6 @@ impl CircuitBreakerQueueClient {
             circuit_breaker_receive,
         }
     }
-
 }
 
 /// Map a `CircuitBreakerError<QueueError>` to a `QueueError` for send operations.
