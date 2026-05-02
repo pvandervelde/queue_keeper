@@ -314,7 +314,6 @@ impl HealthChecker for DefaultHealthChecker {
     async fn check_deep_health(&self) -> HealthStatus {
         let start = std::time::Instant::now();
         let mut checks = HashMap::new();
-        let overall_healthy = true;
 
         // Service check
         checks.insert(
@@ -333,7 +332,7 @@ impl HealthChecker for DefaultHealthChecker {
         // For now, deep health is same as basic health
 
         HealthStatus {
-            is_healthy: overall_healthy,
+            is_healthy: true,
             checks,
         }
     }

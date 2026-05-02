@@ -608,9 +608,7 @@ fn initialize_logging(_cli: &Cli) -> Result<(), CliError> {
 /// Load configuration from file or defaults
 async fn load_configuration(_config_path: Option<&PathBuf>) -> Result<CliConfig, CliConfigError> {
     // See specs/interfaces/cli-interface.md
-    Err(CliConfigError::MissingRequired {
-        key: "not yet implemented".to_string(),
-    })
+    Ok(CliConfig::default())
 }
 
 /// Execute start command

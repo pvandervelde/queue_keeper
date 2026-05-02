@@ -64,13 +64,59 @@ async fn test_command_handlers_return_err_not_panic() {
         matches!(result, Err(CliError::CommandFailed { .. })),
         "monitor: {result:?}"
     );
+
+    let result = execute_events_command(EventCommands::List {
+        limit: 10,
+        event_type: None,
+        repository: None,
+        session: None,
+        since: None,
+        format: OutputFormat::Text,
+    })
+    .await;
+    assert!(
+        matches!(result, Err(CliError::CommandFailed { .. })),
+        "events: {result:?}"
+    );
+
+    let result = execute_sessions_command(SessionCommands::List {
+        repository: None,
+        entity_type: None,
+        pending_only: false,
+        format: OutputFormat::Text,
+    })
+    .await;
+    assert!(
+        matches!(result, Err(CliError::CommandFailed { .. })),
+        "sessions: {result:?}"
+    );
+
+    let result = execute_health_command(HealthCommands::Check {
+        verbose: false,
+        timeout: 10,
+        format: OutputFormat::Text,
+    })
+    .await;
+    assert!(
+        matches!(result, Err(CliError::CommandFailed { .. })),
+        "health: {result:?}"
+    );
+
+    let result = execute_completions_command(clap_complete::Shell::Bash).await;
+    assert!(
+        matches!(result, Err(CliError::CommandFailed { .. })),
+        "completions: {result:?}"
+    );
 }
 
-/// Verify load_configuration returns a recoverable Err rather than panicking.
+/// Verify load_configuration returns Ok with default config when no path is given.
 #[tokio::test]
-async fn test_load_configuration_returns_err_not_panic() {
+async fn test_load_configuration_returns_default_config() {
     let result = load_configuration(None).await;
-    assert!(result.is_err(), "expected Err from stub load_configuration");
+    assert!(
+        result.is_ok(),
+        "expected Ok from stub load_configuration: {result:?}"
+    );
 }
 
 /// Verify initialize_logging returns Ok(()) (no-op stub).
