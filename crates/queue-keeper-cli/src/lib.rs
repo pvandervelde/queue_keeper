@@ -396,10 +396,10 @@ pub enum HealthCommands {
 #[derive(Debug, thiserror::Error)]
 pub enum CliError {
     #[error("Configuration error: {0}")]
-    Configuration(#[from] ConfigError),
+    Configuration(#[from] CliConfigError),
 
     #[error("Service error: {0}")]
-    Service(#[from] ServiceError),
+    Service(#[from] CliServiceError),
 
     #[error("Command failed: {message}")]
     CommandFailed { message: String },
@@ -414,9 +414,12 @@ pub enum CliError {
     QueueKeeper(#[from] QueueKeeperError),
 }
 
-/// Configuration-related errors
+/// Configuration-related errors for the CLI process.
+///
+/// Distinct from `queue_keeper_api::ConfigError` which handles server-side
+/// provider configuration validation.
 #[derive(Debug, thiserror::Error)]
-pub enum ConfigError {
+pub enum CliConfigError {
     #[error("Configuration file not found: {path}")]
     FileNotFound { path: PathBuf },
 
@@ -430,9 +433,12 @@ pub enum ConfigError {
     MissingRequired { key: String },
 }
 
-/// Service operation errors
+/// Service process-management errors for the CLI.
+///
+/// Distinct from `queue_keeper_api::ServiceError` which handles HTTP server
+/// lifecycle failures.
 #[derive(Debug, thiserror::Error)]
-pub enum ServiceError {
+pub enum CliServiceError {
     #[error("Service not running")]
     NotRunning,
 
@@ -460,10 +466,10 @@ pub struct CliConfig {
     pub default_mode: ServiceMode,
 
     /// Default HTTP server settings
-    pub server: ServerConfig,
+    pub server: CliServerConfig,
 
     /// Default logging configuration
-    pub logging: LoggingConfig,
+    pub logging: CliLoggingConfig,
 
     /// Output formatting preferences
     pub output: OutputConfig,
@@ -473,22 +479,25 @@ impl Default for CliConfig {
     fn default() -> Self {
         Self {
             default_mode: ServiceMode::Combined,
-            server: ServerConfig::default(),
-            logging: LoggingConfig::default(),
+            server: CliServerConfig::default(),
+            logging: CliLoggingConfig::default(),
             output: OutputConfig::default(),
         }
     }
 }
 
-/// HTTP server configuration
+/// HTTP server connection settings used by the CLI when launching the service.
+///
+/// Contains only the fields the CLI user can override; the full server
+/// configuration lives in `queue_keeper_api::ServerConfig`.
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-pub struct ServerConfig {
+pub struct CliServerConfig {
     pub host: String,
     pub port: u16,
     pub timeout_seconds: u64,
 }
 
-impl Default for ServerConfig {
+impl Default for CliServerConfig {
     fn default() -> Self {
         Self {
             host: "0.0.0.0".to_string(),
@@ -498,15 +507,18 @@ impl Default for ServerConfig {
     }
 }
 
-/// Logging configuration
+/// Logging preferences for the CLI process.
+///
+/// Distinct from `queue_keeper_api::LoggingConfig` which uses a boolean
+/// `json_format` field and `file_path: Option<String>`.
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-pub struct LoggingConfig {
+pub struct CliLoggingConfig {
     pub level: String,
     pub format: LogFormat,
     pub file: Option<PathBuf>,
 }
 
-impl Default for LoggingConfig {
+impl Default for CliLoggingConfig {
     fn default() -> Self {
         Self {
             level: "info".to_string(),
@@ -588,16 +600,15 @@ pub async fn run_cli() -> Result<(), CliError> {
 
 /// Initialize logging based on CLI arguments
 fn initialize_logging(_cli: &Cli) -> Result<(), CliError> {
-    // TODO: Implement logging initialization
     // See specs/interfaces/cli-interface.md
-    unimplemented!("Logging initialization not yet implemented")
+    tracing::warn!("logging initialisation not yet implemented");
+    Ok(())
 }
 
 /// Load configuration from file or defaults
-async fn load_configuration(_config_path: Option<&PathBuf>) -> Result<CliConfig, ConfigError> {
-    // TODO: Implement configuration loading
+async fn load_configuration(_config_path: Option<&PathBuf>) -> Result<CliConfig, CliConfigError> {
     // See specs/interfaces/cli-interface.md
-    unimplemented!("Configuration loading not yet implemented")
+    Ok(CliConfig::default())
 }
 
 /// Execute start command
@@ -615,10 +626,10 @@ async fn execute_start_command(
         foreground = foreground,
         "Starting Queue-Keeper service"
     );
-
-    // TODO: Implement service startup
     // See specs/interfaces/cli-interface.md
-    unimplemented!("Service startup not yet implemented")
+    Err(CliError::CommandFailed {
+        message: "not yet implemented".to_string(),
+    })
 }
 
 /// Execute stop command
@@ -628,10 +639,10 @@ async fn execute_stop_command(timeout: u64, force: bool) -> Result<(), CliError>
         force = force,
         "Stopping Queue-Keeper service"
     );
-
-    // TODO: Implement service shutdown
     // See specs/interfaces/cli-interface.md
-    unimplemented!("Service shutdown not yet implemented")
+    Err(CliError::CommandFailed {
+        message: "not yet implemented".to_string(),
+    })
 }
 
 /// Execute status command
@@ -641,10 +652,10 @@ async fn execute_status_command(verbose: bool, format: OutputFormat) -> Result<(
         format = ?format,
         "Checking service status"
     );
-
-    // TODO: Implement status checking
     // See specs/interfaces/cli-interface.md
-    unimplemented!("Status checking not yet implemented")
+    Err(CliError::CommandFailed {
+        message: "not yet implemented".to_string(),
+    })
 }
 
 /// Execute config command
@@ -659,10 +670,10 @@ async fn execute_config_command(
         format = ?format,
         "Processing config command"
     );
-
-    // TODO: Implement configuration management
     // See specs/interfaces/cli-interface.md
-    unimplemented!("Configuration management not yet implemented")
+    Err(CliError::CommandFailed {
+        message: "not yet implemented".to_string(),
+    })
 }
 
 /// Execute monitor command
@@ -681,10 +692,10 @@ async fn execute_monitor_command(
         limit = limit,
         "Starting event monitoring"
     );
-
-    // TODO: Implement event monitoring
     // See specs/interfaces/cli-interface.md
-    unimplemented!("Event monitoring not yet implemented")
+    Err(CliError::CommandFailed {
+        message: "not yet implemented".to_string(),
+    })
 }
 
 /// Execute events command
@@ -707,8 +718,9 @@ async fn execute_events_command(action: EventCommands) -> Result<(), CliError> {
                 format = ?format,
                 "Listing events"
             );
-            // TODO: Implement event listing
-            unimplemented!("Event listing not yet implemented")
+            Err(CliError::CommandFailed {
+                message: "not yet implemented".to_string(),
+            })
         }
         EventCommands::Show {
             event_id,
@@ -721,8 +733,9 @@ async fn execute_events_command(action: EventCommands) -> Result<(), CliError> {
                 raw = raw,
                 "Showing event details"
             );
-            // TODO: Implement event details
-            unimplemented!("Event details not yet implemented")
+            Err(CliError::CommandFailed {
+                message: "not yet implemented".to_string(),
+            })
         }
         EventCommands::Replay {
             event_id,
@@ -735,8 +748,9 @@ async fn execute_events_command(action: EventCommands) -> Result<(), CliError> {
                 queue = ?queue,
                 "Replaying event"
             );
-            // TODO: Implement event replay
-            unimplemented!("Event replay not yet implemented")
+            Err(CliError::CommandFailed {
+                message: "not yet implemented".to_string(),
+            })
         }
         EventCommands::Delete { event_id, yes } => {
             info!(
@@ -744,8 +758,9 @@ async fn execute_events_command(action: EventCommands) -> Result<(), CliError> {
                 yes = yes,
                 "Deleting event"
             );
-            // TODO: Implement event deletion
-            unimplemented!("Event deletion not yet implemented")
+            Err(CliError::CommandFailed {
+                message: "not yet implemented".to_string(),
+            })
         }
     }
 }
@@ -766,8 +781,9 @@ async fn execute_sessions_command(action: SessionCommands) -> Result<(), CliErro
                 format = ?format,
                 "Listing sessions"
             );
-            // TODO: Implement session listing
-            unimplemented!("Session listing not yet implemented")
+            Err(CliError::CommandFailed {
+                message: "not yet implemented".to_string(),
+            })
         }
         SessionCommands::Show {
             session_id,
@@ -780,8 +796,9 @@ async fn execute_sessions_command(action: SessionCommands) -> Result<(), CliErro
                 with_events = with_events,
                 "Showing session details"
             );
-            // TODO: Implement session details
-            unimplemented!("Session details not yet implemented")
+            Err(CliError::CommandFailed {
+                message: "not yet implemented".to_string(),
+            })
         }
         SessionCommands::Reset {
             session_id,
@@ -794,8 +811,9 @@ async fn execute_sessions_command(action: SessionCommands) -> Result<(), CliErro
                 reason = ?reason,
                 "Resetting session"
             );
-            // TODO: Implement session reset
-            unimplemented!("Session reset not yet implemented")
+            Err(CliError::CommandFailed {
+                message: "not yet implemented".to_string(),
+            })
         }
         SessionCommands::Pause { session_id, reason } => {
             info!(
@@ -803,16 +821,18 @@ async fn execute_sessions_command(action: SessionCommands) -> Result<(), CliErro
                 reason = ?reason,
                 "Pausing session"
             );
-            // TODO: Implement session pause
-            unimplemented!("Session pause not yet implemented")
+            Err(CliError::CommandFailed {
+                message: "not yet implemented".to_string(),
+            })
         }
         SessionCommands::Resume { session_id } => {
             info!(
                 session_id = %session_id,
                 "Resuming session"
             );
-            // TODO: Implement session resume
-            unimplemented!("Session resume not yet implemented")
+            Err(CliError::CommandFailed {
+                message: "not yet implemented".to_string(),
+            })
         }
     }
 }
@@ -831,8 +851,9 @@ async fn execute_health_command(action: HealthCommands) -> Result<(), CliError> 
                 format = ?format,
                 "Checking system health"
             );
-            // TODO: Implement health check
-            unimplemented!("Health check not yet implemented")
+            Err(CliError::CommandFailed {
+                message: "not yet implemented".to_string(),
+            })
         }
         HealthCommands::Queue { provider, stats } => {
             info!(
@@ -840,8 +861,9 @@ async fn execute_health_command(action: HealthCommands) -> Result<(), CliError> 
                 stats = stats,
                 "Checking queue health"
             );
-            // TODO: Implement queue health check
-            unimplemented!("Queue health check not yet implemented")
+            Err(CliError::CommandFailed {
+                message: "not yet implemented".to_string(),
+            })
         }
         HealthCommands::Github { auth, rate_limits } => {
             info!(
@@ -849,8 +871,9 @@ async fn execute_health_command(action: HealthCommands) -> Result<(), CliError> 
                 rate_limits = rate_limits,
                 "Checking GitHub connectivity"
             );
-            // TODO: Implement GitHub health check
-            unimplemented!("GitHub health check not yet implemented")
+            Err(CliError::CommandFailed {
+                message: "not yet implemented".to_string(),
+            })
         }
         HealthCommands::Storage {
             storage_type,
@@ -861,8 +884,9 @@ async fn execute_health_command(action: HealthCommands) -> Result<(), CliError> 
                 stats = stats,
                 "Checking storage health"
             );
-            // TODO: Implement storage health check
-            unimplemented!("Storage health check not yet implemented")
+            Err(CliError::CommandFailed {
+                message: "not yet implemented".to_string(),
+            })
         }
     }
 }
@@ -870,10 +894,10 @@ async fn execute_health_command(action: HealthCommands) -> Result<(), CliError> 
 /// Execute completions command
 async fn execute_completions_command(shell: clap_complete::Shell) -> Result<(), CliError> {
     info!(shell = ?shell, "Generating shell completions");
-
-    // TODO: Implement shell completions generation
     // See specs/interfaces/cli-interface.md
-    unimplemented!("Shell completions not yet implemented")
+    Err(CliError::CommandFailed {
+        message: "not yet implemented".to_string(),
+    })
 }
 
 #[cfg(test)]

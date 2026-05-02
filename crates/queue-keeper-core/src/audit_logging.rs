@@ -1478,6 +1478,9 @@ pub enum AuditError {
 
     #[error("Service unavailable: {service} - {message}")]
     ServiceUnavailable { service: String, message: String },
+
+    #[error("Internal error: {message}")]
+    Internal { message: String },
 }
 
 impl AuditError {
@@ -1515,16 +1518,23 @@ impl AuditError {
 }
 
 // ============================================================================
-// Default Implementations (Stubs)
+// Stub Implementations (not-yet-implemented placeholders)
 // ============================================================================
 
-/// Default implementation of AuditLogger
-pub struct DefaultAuditLogger;
+/// Stub implementation of AuditLogger.
+///
+/// Returns `Err(AuditError::Internal)` for every method so that callers
+/// receive a recoverable error rather than a process abort. Replace with a
+/// real backend once audit logging is implemented.
+#[allow(dead_code)]
+pub(crate) struct StubAuditLogger;
 
 #[async_trait]
-impl AuditLogger for DefaultAuditLogger {
+impl AuditLogger for StubAuditLogger {
     async fn log_event(&self, _event: AuditEvent) -> Result<AuditLogId, AuditError> {
-        unimplemented!("Audit logger not yet implemented - see specs/interfaces/audit-logging.md")
+        Err(AuditError::Internal {
+            message: "not yet implemented — see specs/interfaces/audit-logging.md".to_string(),
+        })
     }
 
     async fn log_webhook_processing(
@@ -1536,7 +1546,9 @@ impl AuditLogger for DefaultAuditLogger {
         _result: AuditResult,
         _context: AuditContext,
     ) -> Result<AuditLogId, AuditError> {
-        unimplemented!("Audit logger not yet implemented - see specs/interfaces/audit-logging.md")
+        Err(AuditError::Internal {
+            message: "not yet implemented — see specs/interfaces/audit-logging.md".to_string(),
+        })
     }
 
     async fn log_admin_action(
@@ -1547,7 +1559,9 @@ impl AuditLogger for DefaultAuditLogger {
         _result: AuditResult,
         _context: AuditContext,
     ) -> Result<AuditLogId, AuditError> {
-        unimplemented!("Audit logger not yet implemented - see specs/interfaces/audit-logging.md")
+        Err(AuditError::Internal {
+            message: "not yet implemented — see specs/interfaces/audit-logging.md".to_string(),
+        })
     }
 
     async fn log_security_event(
@@ -1555,36 +1569,49 @@ impl AuditLogger for DefaultAuditLogger {
         _security_event: SecurityAuditEvent,
         _context: AuditContext,
     ) -> Result<AuditLogId, AuditError> {
-        unimplemented!("Audit logger not yet implemented - see specs/interfaces/audit-logging.md")
+        Err(AuditError::Internal {
+            message: "not yet implemented — see specs/interfaces/audit-logging.md".to_string(),
+        })
     }
 
     async fn log_events_batch(
         &self,
         _events: Vec<AuditEvent>,
     ) -> Result<Vec<AuditLogId>, AuditError> {
-        unimplemented!("Audit logger not yet implemented - see specs/interfaces/audit-logging.md")
+        Err(AuditError::Internal {
+            message: "not yet implemented — see specs/interfaces/audit-logging.md".to_string(),
+        })
     }
 
     async fn flush(&self) -> Result<(), AuditError> {
-        unimplemented!("Audit logger not yet implemented - see specs/interfaces/audit-logging.md")
+        Err(AuditError::Internal {
+            message: "not yet implemented — see specs/interfaces/audit-logging.md".to_string(),
+        })
     }
 }
 
-/// Default implementation of AuditQuery
-pub struct DefaultAuditQuery;
+/// Stub implementation of AuditQuery.
+///
+/// Returns `Err(AuditError::Internal)` for every method.
+#[allow(dead_code)]
+pub(crate) struct StubAuditQuery;
 
 #[async_trait]
-impl AuditQuery for DefaultAuditQuery {
+impl AuditQuery for StubAuditQuery {
     async fn query_events(
         &self,
         _query: AuditQuerySpec,
         _pagination: PaginationOptions,
     ) -> Result<AuditQueryResult, AuditError> {
-        unimplemented!("Audit query not yet implemented - see specs/interfaces/audit-logging.md")
+        Err(AuditError::Internal {
+            message: "not yet implemented — see specs/interfaces/audit-logging.md".to_string(),
+        })
     }
 
     async fn get_event(&self, _audit_id: AuditLogId) -> Result<Option<AuditEvent>, AuditError> {
-        unimplemented!("Audit query not yet implemented - see specs/interfaces/audit-logging.md")
+        Err(AuditError::Internal {
+            message: "not yet implemented — see specs/interfaces/audit-logging.md".to_string(),
+        })
     }
 
     async fn get_resource_trail(
@@ -1592,21 +1619,27 @@ impl AuditQuery for DefaultAuditQuery {
         _resource: AuditResource,
         _time_range: TimeRange,
     ) -> Result<Vec<AuditEvent>, AuditError> {
-        unimplemented!("Audit query not yet implemented - see specs/interfaces/audit-logging.md")
+        Err(AuditError::Internal {
+            message: "not yet implemented — see specs/interfaces/audit-logging.md".to_string(),
+        })
     }
 
     async fn get_session_trail(
         &self,
         _session_id: SessionId,
     ) -> Result<Vec<AuditEvent>, AuditError> {
-        unimplemented!("Audit query not yet implemented - see specs/interfaces/audit-logging.md")
+        Err(AuditError::Internal {
+            message: "not yet implemented — see specs/interfaces/audit-logging.md".to_string(),
+        })
     }
 
     async fn generate_compliance_report(
         &self,
         _report_spec: ComplianceReportSpec,
     ) -> Result<ComplianceReport, AuditError> {
-        unimplemented!("Audit query not yet implemented - see specs/interfaces/audit-logging.md")
+        Err(AuditError::Internal {
+            message: "not yet implemented — see specs/interfaces/audit-logging.md".to_string(),
+        })
     }
 
     async fn verify_chain_integrity(
@@ -1614,7 +1647,9 @@ impl AuditQuery for DefaultAuditQuery {
         _start_time: Timestamp,
         _end_time: Timestamp,
     ) -> Result<IntegrityVerificationResult, AuditError> {
-        unimplemented!("Audit query not yet implemented - see specs/interfaces/audit-logging.md")
+        Err(AuditError::Internal {
+            message: "not yet implemented — see specs/interfaces/audit-logging.md".to_string(),
+        })
     }
 
     async fn get_statistics(
@@ -1622,38 +1657,43 @@ impl AuditQuery for DefaultAuditQuery {
         _time_range: TimeRange,
         _group_by: Option<StatisticsGroupBy>,
     ) -> Result<AuditStatistics, AuditError> {
-        unimplemented!("Audit query not yet implemented - see specs/interfaces/audit-logging.md")
+        Err(AuditError::Internal {
+            message: "not yet implemented — see specs/interfaces/audit-logging.md".to_string(),
+        })
     }
 }
 
-/// Default implementation of AuditRetention
-pub struct DefaultAuditRetention;
+/// Stub implementation of AuditRetention.
+///
+/// Returns `Err(AuditError::Internal)` for every method.
+#[allow(dead_code)]
+pub(crate) struct StubAuditRetention;
 
 #[async_trait]
-impl AuditRetention for DefaultAuditRetention {
+impl AuditRetention for StubAuditRetention {
     async fn archive_logs(
         &self,
         _before_date: Timestamp,
         _archive_location: String,
     ) -> Result<ArchiveResult, AuditError> {
-        unimplemented!(
-            "Audit retention not yet implemented - see specs/interfaces/audit-logging.md"
-        )
+        Err(AuditError::Internal {
+            message: "not yet implemented — see specs/interfaces/audit-logging.md".to_string(),
+        })
     }
 
     async fn delete_expired_logs(
         &self,
         _retention_policy: RetentionPolicy,
     ) -> Result<DeletionResult, AuditError> {
-        unimplemented!(
-            "Audit retention not yet implemented - see specs/interfaces/audit-logging.md"
-        )
+        Err(AuditError::Internal {
+            message: "not yet implemented — see specs/interfaces/audit-logging.md".to_string(),
+        })
     }
 
     async fn get_retention_status(&self) -> Result<RetentionStatus, AuditError> {
-        unimplemented!(
-            "Audit retention not yet implemented - see specs/interfaces/audit-logging.md"
-        )
+        Err(AuditError::Internal {
+            message: "not yet implemented — see specs/interfaces/audit-logging.md".to_string(),
+        })
     }
 
     async fn compress_logs(
@@ -1661,9 +1701,9 @@ impl AuditRetention for DefaultAuditRetention {
         _before_date: Timestamp,
         _compression_level: CompressionLevel,
     ) -> Result<CompressionResult, AuditError> {
-        unimplemented!(
-            "Audit retention not yet implemented - see specs/interfaces/audit-logging.md"
-        )
+        Err(AuditError::Internal {
+            message: "not yet implemented — see specs/interfaces/audit-logging.md".to_string(),
+        })
     }
 
     async fn restore_archived_logs(
@@ -1671,18 +1711,18 @@ impl AuditRetention for DefaultAuditRetention {
         _archive_location: String,
         _time_range: TimeRange,
     ) -> Result<RestoreResult, AuditError> {
-        unimplemented!(
-            "Audit retention not yet implemented - see specs/interfaces/audit-logging.md"
-        )
+        Err(AuditError::Internal {
+            message: "not yet implemented — see specs/interfaces/audit-logging.md".to_string(),
+        })
     }
 
     async fn validate_compliance(
         &self,
         _compliance_rules: Vec<ComplianceRule>,
     ) -> Result<ComplianceValidationResult, AuditError> {
-        unimplemented!(
-            "Audit retention not yet implemented - see specs/interfaces/audit-logging.md"
-        )
+        Err(AuditError::Internal {
+            message: "not yet implemented — see specs/interfaces/audit-logging.md".to_string(),
+        })
     }
 }
 

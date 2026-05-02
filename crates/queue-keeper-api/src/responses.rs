@@ -285,9 +285,10 @@ pub trait EventStore: Send + Sync {
 /// restricted to test code. Production deployments must use
 /// [`ServiceHealthChecker`], which validates that at least one webhook
 /// provider is registered before reporting ready.
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) struct DefaultHealthChecker;
 
+#[cfg(test)]
 #[async_trait::async_trait]
 impl HealthChecker for DefaultHealthChecker {
     async fn check_basic_health(&self) -> HealthStatus {
@@ -313,7 +314,6 @@ impl HealthChecker for DefaultHealthChecker {
     async fn check_deep_health(&self) -> HealthStatus {
         let start = std::time::Instant::now();
         let mut checks = HashMap::new();
-        let overall_healthy = true;
 
         // Service check
         checks.insert(
@@ -332,7 +332,7 @@ impl HealthChecker for DefaultHealthChecker {
         // For now, deep health is same as basic health
 
         HealthStatus {
-            is_healthy: overall_healthy,
+            is_healthy: true,
             checks,
         }
     }

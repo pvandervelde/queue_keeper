@@ -122,7 +122,7 @@ impl QueueProvider for FailingQueueProvider {
     }
 
     fn supports_sessions(&self) -> SessionSupport {
-        SessionSupport::Unsupported
+        SessionSupport::Emulated
     }
 
     fn supports_batching(&self) -> bool {
@@ -156,8 +156,8 @@ fn create_failing_provider() -> (CircuitBreakerQueueProvider, Arc<FailingQueuePr
 #[test]
 fn test_circuit_breaker_queue_provider_creation() {
     let provider = create_test_provider();
-    // Verify inner provider is accessible
-    assert_eq!(provider.inner().provider_type(), ProviderType::InMemory);
+    // Verify the circuit breaker wrapper correctly delegates to the inner provider.
+    assert_eq!(provider.provider_type(), ProviderType::InMemory);
 }
 
 #[test]
@@ -604,7 +604,7 @@ fn create_failing_client() -> (CircuitBreakerQueueClient, Arc<FailingQueueClient
 #[test]
 fn test_circuit_breaker_queue_client_creation() {
     let (client, _) = create_failing_client();
-    assert_eq!(client.inner().provider_type(), ProviderType::AwsSqs);
+    assert_eq!(client.provider_type(), ProviderType::AwsSqs);
 }
 
 /// Verify Clone works for CircuitBreakerQueueClient.
