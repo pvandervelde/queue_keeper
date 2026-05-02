@@ -17,7 +17,7 @@ tokio = { workspace = true, features = ["full", "test-util"] }
 tokio-test = { workspace = true }
 
 # HTTP testing
-axum = "=0.8.8"
+axum = "=0.8.9"
 tower = { workspace = true }
 bytes = { workspace = true }
 
