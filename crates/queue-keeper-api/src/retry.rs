@@ -194,7 +194,7 @@ impl RetryPolicy {
     /// Uses `rng()` which is acceptable for retry scenarios (infrequent calls).
     /// For high-frequency random generation in async contexts, consider `SmallRng` or `fastrand`.
     fn add_jitter(delay_secs: f64, jitter_percent: f64) -> f64 {
-        use rand::Rng;
+        use rand::RngExt;
         let mut rng = rand::rng();
 
         // Calculate jitter range: ±jitter_percent of delay
