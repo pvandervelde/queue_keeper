@@ -12,7 +12,7 @@
 //! | [`KeyVaultSignatureValidator`] | Production with Azure Key Vault | Production-safe |
 
 use async_trait::async_trait;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use queue_keeper_core::key_vault::{KeyVaultError, KeyVaultProvider, SecretName};
 use queue_keeper_core::webhook::{SecretError, SignatureValidator};
 use queue_keeper_core::ValidationError;

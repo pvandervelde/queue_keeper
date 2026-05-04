@@ -2127,7 +2127,6 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tower-service",
- "webpki-roots 1.0.7",
 ]
 
 [[package]]
@@ -3058,7 +3057,7 @@ dependencies = [
  "pkcs5",
  "rand 0.10.1",
  "rc2",
- "sha1",
+ "sha1 0.10.6",
  "sha2 0.10.9",
  "thiserror 2.0.18",
  "x509-parser",
@@ -3506,18 +3505,18 @@ dependencies = [
  "bytes",
  "chrono",
  "hex",
- "hmac 0.12.1",
+ "hmac 0.13.0",
  "hyper",
  "opentelemetry",
  "opentelemetry-otlp",
  "prometheus",
  "queue-keeper-core",
  "queue-runtime",
- "rand 0.9.4",
+ "rand 0.10.1",
  "serde",
  "serde_json",
  "serial_test",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "thiserror 2.0.18",
  "tokio",
  "toml",
@@ -3540,7 +3539,7 @@ dependencies = [
  "dirs",
  "predicates",
  "queue-keeper-core",
- "reqwest 0.12.28",
+ "reqwest 0.13.2",
  "serde",
  "serde_json",
  "tempfile",
@@ -3566,15 +3565,15 @@ dependencies = [
  "futures",
  "github-bot-sdk",
  "hex",
- "hmac 0.12.1",
+ "hmac 0.13.0",
  "mockall",
  "queue-runtime",
  "regex",
  "serde",
  "serde_json",
  "serde_yaml",
- "sha1",
- "sha2 0.10.9",
+ "sha1 0.11.0",
+ "sha2 0.11.0",
  "subtle",
  "tempfile",
  "thiserror 2.0.18",
@@ -3591,7 +3590,7 @@ name = "queue-keeper-e2e-tests"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "reqwest 0.12.28",
+ "reqwest 0.13.2",
  "serde",
  "serde_json",
  "tokio",
@@ -3628,13 +3627,13 @@ dependencies = [
  "config",
  "github-bot-sdk",
  "hex",
- "hmac 0.12.1",
+ "hmac 0.13.0",
  "queue-keeper-api",
  "queue-keeper-core",
  "queue-runtime",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "tokio",
  "toml",
  "tracing",
@@ -3943,26 +3942,20 @@ checksum = "eddd3ca559203180a307f12d114c268abf583f59b03cb906fd0b3ff8646c1147"
 dependencies = [
  "base64 0.22.1",
  "bytes",
- "encoding_rs",
  "futures-channel",
  "futures-core",
  "futures-util",
- "h2",
  "http 1.4.0",
  "http-body",
  "http-body-util",
  "hyper",
- "hyper-rustls",
  "hyper-tls",
  "hyper-util",
  "js-sys",
  "log",
- "mime",
  "native-tls",
  "percent-encoding",
  "pin-project-lite",
- "quinn",
- "rustls",
  "rustls-pki-types",
  "serde",
  "serde_json",
@@ -3970,7 +3963,6 @@ dependencies = [
  "sync_wrapper",
  "tokio",
  "tokio-native-tls",
- "tokio-rustls",
  "tokio-util",
  "tower",
  "tower-http",
@@ -3980,7 +3972,6 @@ dependencies = [
  "wasm-bindgen-futures",
  "wasm-streams 0.4.2",
  "web-sys",
- "webpki-roots 1.0.7",
 ]
 
 [[package]]
@@ -4542,6 +4533,17 @@ dependencies = [
  "cfg-if",
  "cpufeatures 0.2.17",
  "digest 0.10.7",
+]
+
+[[package]]
+name = "sha1"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aacc4cc499359472b4abe1bf11d0b12e688af9a805fa5e3016f9a386dc2d0214"
+dependencies = [
+ "cfg-if",
+ "cpufeatures 0.3.0",
+ "digest 0.11.2",
 ]
 
 [[package]]

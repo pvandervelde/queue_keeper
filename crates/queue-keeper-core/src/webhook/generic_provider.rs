@@ -965,7 +965,7 @@ impl WebhookProcessor for GenericWebhookProvider {
 
         match sig_config.algorithm {
             SignatureAlgorithm::HmacSha256 => {
-                use hmac::{Hmac, Mac};
+                use hmac::{Hmac, KeyInit, Mac};
                 use sha2::Sha256;
                 type HmacSha256 = Hmac<Sha256>;
 
@@ -992,7 +992,7 @@ impl WebhookProcessor for GenericWebhookProvider {
             }
 
             SignatureAlgorithm::HmacSha1 => {
-                use hmac::{Hmac, Mac};
+                use hmac::{Hmac, KeyInit, Mac};
                 use sha1::Sha1;
                 type HmacSha1 = Hmac<Sha1>;
 
