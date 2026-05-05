@@ -190,9 +190,21 @@ jobs:
           # Each crate that depends on another workspace crate via a path dep has an
           # explicit version string that must stay in sync with the workspace version;
           # Cargo enforces this constraint even for local path dependencies.
+          #
+          # The sed pattern is anchored to lines that also contain `path =` so that
+          # third-party dependencies that happen to share the same version string are
+          # not accidentally modified.
           for crate_toml in crates/*/Cargo.toml; do
-            sed -i "s/version = \"${CURRENT_VERSION}\"/version = \"${NEXT_VERSION}\"/g" "${crate_toml}"
+            # Two-pass approach: match lines with both `path =` and `version = "OLD"`
+            # and replace only the version portion on those lines.
+            sed -i "/path = /s/version = \"${CURRENT_VERSION}\"/version = \"${NEXT_VERSION}\"/g" "${crate_toml}"
           done
+
+          # Regenerate the lock file so the release branch is self-consistent.
+          # Without this, Cargo.lock would still reference the old version for
+          # workspace path dependencies, causing CI on the release branch to see
+          # a stale lock file.
+          cargo generate-lockfile
 
           echo "Updated workspace version to ${NEXT_VERSION}"
 
@@ -284,8 +296,8 @@ jobs:
             exit 1
           fi
 
-          # Add Cargo.toml, crate Cargo.toml files, and CHANGELOG.md changes
-          git add Cargo.toml crates/*/Cargo.toml CHANGELOG.md
+          # Add Cargo.toml, crate Cargo.toml files, Cargo.lock and CHANGELOG.md changes
+          git add Cargo.toml crates/*/Cargo.toml Cargo.lock CHANGELOG.md
 
           # Commit if there are changes, otherwise skip
           if git diff --cached --quiet; then
