@@ -288,7 +288,8 @@ jobs:
           git push origin "${BRANCH_NAME}" --force-with-lease
 
       - name: Create or update release PR
-        if: steps.check_changes.outputs.has_changes == 'true' && steps.create_branch.outputs.committed == 'true'
+        if: steps.check_changes.outputs.has_changes == 'true' &&
+          steps.create_branch.outputs.committed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -339,12 +340,12 @@ jobs:
               --title "chore(release): prepare release v${NEXT_VERSION}" \
               --body-file pr_body.md \
               --base master \
-              --head "${BRANCH_NAME}" \
-              --label "release"
+              --head "${BRANCH_NAME}"
           fi
 
       - name: Skip release PR creation (no version file changes)
-        if: steps.check_changes.outputs.has_changes == 'true' && steps.create_branch.outputs.committed == 'false'
+        if: steps.check_changes.outputs.has_changes == 'true' &&
+          steps.create_branch.outputs.committed == 'false'
         run: |
           echo "Cargo.toml already at target version ${{ steps.calc_version.outputs.NEXT_VERSION }}. No PR needed."
 

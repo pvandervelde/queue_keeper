@@ -13,8 +13,8 @@ permissions:
 jobs:
   release:
     name: Create release and publish artifacts
-    # Only run if PR was merged and has the release label
-    if: github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'release')
+    # Only run if PR was merged from a release/* branch
+    if: github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release/')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
