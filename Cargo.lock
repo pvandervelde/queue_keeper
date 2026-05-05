@@ -3465,7 +3465,7 @@ dependencies = [
 
 [[package]]
 name = "queue-keeper-api"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3496,7 +3496,7 @@ dependencies = [
 
 [[package]]
 name = "queue-keeper-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -3521,7 +3521,7 @@ dependencies = [
 
 [[package]]
 name = "queue-keeper-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3555,7 +3555,7 @@ dependencies = [
 
 [[package]]
 name = "queue-keeper-e2e-tests"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "reqwest 0.13.3",
@@ -3567,7 +3567,7 @@ dependencies = [
 
 [[package]]
 name = "queue-keeper-integration-tests"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -3586,7 +3586,7 @@ dependencies = [
 
 [[package]]
 name = "queue-keeper-service"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",

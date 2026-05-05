@@ -14,10 +14,12 @@ description = "HTTP service for receiving GitHub webhooks"
 
 [dependencies]
 # HTTP API library
-queue-keeper-api = { path = "../queue-keeper-api", version = "0.1.0" }
+queue-keeper-api = { path = "../queue-keeper-api", version = "0.2.0" }
 
 # Core dependencies
-queue-keeper-core = { path = "../queue-keeper-core", version = "0.1.0", features = ["azure"] }
+queue-keeper-core = { path = "../queue-keeper-core", version = "0.2.0", features = [
+    "azure",
+] }
 queue-runtime = { workspace = true }
 github-bot-sdk = { workspace = true }
 tokio = { workspace = true }
