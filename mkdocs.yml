@@ -1,0 +1,99 @@
+site_name: Queue-Keeper
+site_description: GitHub webhook event processor with ordered delivery to
+  downstream automation bots
+site_url: https://pvandervelde.github.io/queue_keeper/
+repo_url: https://github.com/pvandervelde/queue_keeper
+repo_name: pvandervelde/queue_keeper
+edit_uri: edit/master/docs/user/
+docs_dir: docs/user
+site_dir: site
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - navigation.footer
+    - search.suggest
+    - search.highlight
+    - content.tabs.link
+    - content.code.annotate
+    - content.code.copy
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format ""
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - tables
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+
+nav:
+  - Home: index.md
+  - Tutorials:
+      - Overview: tutorials/index.md
+      - Get Started: tutorials/quickstart.md
+      - Build Your First Bot: tutorials/first-bot.md
+  - How-to Guides:
+      - Overview: how-to/index.md
+      - For Operators:
+          - Deploy with Docker: how-to/operators/deploy-docker.md
+          - Deploy on Kubernetes: how-to/operators/deploy-kubernetes.md
+          - Configure Azure Services: how-to/operators/configure-azure.md
+          - Configure AWS Services: how-to/operators/configure-aws.md
+          - Add a Bot Subscription: how-to/operators/add-bot-subscription.md
+          - Configure Webhook Providers: how-to/operators/configure-providers.md
+          - Replay Events: how-to/operators/replay-events.md
+          - Rotate Secrets: how-to/operators/rotate-secrets.md
+          - Monitor the Service: how-to/operators/monitor.md
+      - For Bot Developers:
+          - Register a Bot: how-to/bot-developers/register-bot.md
+          - Use Ordered Delivery: how-to/bot-developers/ordered-delivery.md
+          - Correlate Distributed Traces: how-to/bot-developers/trace-correlation.md
+          - Handle Dead-Letter Messages: how-to/bot-developers/handle-dead-letters.md
+          - Deduplicate Replayed Events: how-to/bot-developers/deduplicate-events.md
+  - Reference:
+      - Overview: reference/index.md
+      - Configuration: reference/configuration.md
+      - HTTP API: reference/api.md
+      - CLI: reference/cli.md
+      - Queue Message Format: reference/queue-message-format.md
+      - Event Types and Session IDs: reference/event-types.md
+      - Environment Variables: reference/environment-variables.md
+  - Explanation:
+      - Overview: explanation/index.md
+      - Architecture: explanation/architecture.md
+      - Ordering and Sessions: explanation/ordering-sessions.md
+      - Providers and Processing Modes: explanation/providers.md
+      - Security Model: explanation/security.md
+      - Reliability: explanation/reliability.md
