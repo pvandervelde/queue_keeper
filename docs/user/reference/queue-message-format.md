@@ -1,6 +1,9 @@
 # Queue Message Format
 
-Queue-Keeper places messages on Azure Service Bus queues for downstream bot consumption. Two formats are produced depending on the provider's processing mode.
+Queue-Keeper places messages on the configured queue backend for downstream bot consumption. Two formats are produced depending on the provider's processing mode.
+
+!!! note "Azure Service Bus and AWS SQS"
+    This page uses Azure Service Bus terminology (`CorrelationId`, `SessionId`, user properties). See the [AWS SQS attribute mapping](#aws-sqs-attribute-mapping) section at the bottom for the equivalent SQS `MessageAttributes`.
 
 | Mode | Output | Producers |
 |---|---|---|
@@ -133,3 +136,46 @@ payload = json.loads(raw_body)
 correlation_id = msg.application_properties.get(b"correlation_id", b"").decode()
 event_type = msg.application_properties.get(b"event_type", b"").decode()
 ```
+
+---
+
+## AWS SQS attribute mapping
+
+When Queue-Keeper is configured with the `aws_sqs` backend, Azure Service Bus message attributes map to SQS `MessageAttributes` as follows:
+
+### Wrapped mode
+
+| Azure Service Bus | AWS SQS `MessageAttributes` key | Type |
+|---|---|---|
+| `CorrelationId` | `CorrelationId` | `String` |
+| `SessionId` | `SessionId` | `String` (omitted when null) |
+| `event_type` (user property) | `event_type` | `String` |
+| `bot_name` (user property) | `bot_name` | `String` |
+
+**Reading wrapped-mode SQS messages (Python):**
+
+```python
+import json
+import boto3
+
+sqs = boto3.client("sqs")
+response = sqs.receive_message(
+    QueueUrl="https://sqs.us-east-1.amazonaws.com/123456789012/queue-keeper-my-bot",
+    MessageAttributeNames=["All"],
+)
+
+for msg in response.get("Messages", []):
+    body = json.loads(msg["Body"])                     # WrappedEvent JSON
+    attrs = msg.get("MessageAttributes", {})
+    event_type = attrs.get("event_type", {}).get("StringValue", "")
+    correlation_id = attrs.get("CorrelationId", {}).get("StringValue", "")
+```
+
+### Direct mode
+
+| Azure Service Bus | AWS SQS `MessageAttributes` key | Type |
+|---|---|---|
+| `CorrelationId` | `CorrelationId` | `String` |
+| `content_type` (user property) | `content_type` | `String` |
+| `provider_id` (user property) | `provider_id` | `String` |
+| `event_type` (user property) | `event_type` | `String` |

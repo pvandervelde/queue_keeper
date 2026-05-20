@@ -36,14 +36,14 @@ server:
 
 logging:
   level: "debug"
-  format: "text"
+  json_format: false
 
 providers:
   - id: "github"
     require_signature: false
 
 queue:
-  in_memory: {}
+  provider: in_memory
 ```
 
 !!! warning

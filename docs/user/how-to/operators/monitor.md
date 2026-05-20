@@ -90,7 +90,7 @@ scrape_configs:
 
 ## Structured logs
 
-Queue-Keeper emits JSON logs by default (set `logging.format: "text"` for human-readable output). Every log entry includes:
+Queue-Keeper emits JSON logs by default (set `logging.json_format: false` for human-readable output). Every log entry includes:
 
 - `timestamp` — ISO 8601 UTC
 - `level` — trace, debug, info, warn, error

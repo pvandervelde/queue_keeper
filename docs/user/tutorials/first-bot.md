@@ -87,7 +87,7 @@ Update `service.yaml` to point Queue-Keeper at your queue backend:
 
     logging:
       level: "debug"
-      format: "text"
+      json_format: false
 
     providers:
       - id: "github"
@@ -107,7 +107,7 @@ Update `service.yaml` to point Queue-Keeper at your queue backend:
 
     logging:
       level: "debug"
-      format: "text"
+      json_format: false
 
     providers:
       - id: "github"

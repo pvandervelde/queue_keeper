@@ -5,6 +5,11 @@ on:
   push:
     branches:
       - master
+    paths:
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - 'requirements-docs.txt'
+      - '.github/workflows/docs.yml'
     tags:
       - "v*"
 
@@ -44,6 +49,10 @@ jobs:
           path: ./site
 
   build-api-docs:
+    # NOTE: This job builds Rust API documentation and uploads it as a workflow
+    # artifact for archival purposes. It is intentionally not deployed to GitHub
+    # Pages in this workflow — a hosting destination and deployment step will be
+    # added in a follow-up when that decision is made.
     name: Build Rust API Documentation
     runs-on: ubuntu-latest
     steps:

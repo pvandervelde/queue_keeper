@@ -1,6 +1,6 @@
 # Environment Variables
 
-Queue-Keeper reads the following environment variables. Most settings are also configurable via `service.yaml`; the environment variable takes precedence when both are set.
+Queue-Keeper reads the following environment variables. Most settings are also configurable via `service.yaml`; environment variables take precedence when both are set.
 
 ---
 
@@ -9,28 +9,31 @@ Queue-Keeper reads the following environment variables. Most settings are also c
 | Variable | Description | Example |
 |---|---|---|
 | `QUEUE_KEEPER_CONFIG` | Path to `service.yaml`. Equivalent to `--config` CLI flag. | `/config/service.yaml` |
-| `QUEUE_KEEPER_LOG_LEVEL` | Override the `logging.level` value from `service.yaml`. | `debug` |
 
 ---
 
-## Server
+## Configuration field overrides (`QK__` prefix)
 
-These variables override the corresponding `server.*` fields in `service.yaml`.
+Any field in `service.yaml` can be overridden by setting an environment variable using the pattern:
 
-| Variable | Description | Default |
+```
+QK__<SECTION>__<FIELD>=<value>
+```
+
+The prefix is `QK__` (uppercase, double-underscore separator). Each nesting level is also separated by double underscores. The table below shows common overrides:
+
+| Variable | Equivalent `service.yaml` field | Default |
 |---|---|---|
-| `QUEUE_KEEPER_PORT` | HTTP port to listen on | `8080` |
-| `QUEUE_KEEPER_HOST` | Interface to bind | `0.0.0.0` |
+| `QK__SERVER__PORT` | `server.port` | `8080` |
+| `QK__SERVER__HOST` | `server.host` | `0.0.0.0` |
+| `QK__SERVER__TIMEOUT_SECONDS` | `server.timeout_seconds` | `30` |
+| `QK__LOGGING__LEVEL` | `logging.level` | `info` |
+| `QK__LOGGING__JSON_FORMAT` | `logging.json_format` | `false` |
+| `QK__SECURITY__ENABLE_RATE_LIMITING` | `security.enable_rate_limiting` | `true` |
+| `QK__SECURITY__ADMIN_API_KEY` | `security.admin_api_key` | — |
 
----
-
-## Development overrides
-
-These variables are provided as a convenience for local development without a Key Vault. **Do not use them in production** — they expose secrets in the process environment and in `docker inspect` output.
-
-| Variable | Description |
-|---|---|
-| `QUEUE_KEEPER_GITHUB_SECRET` | Webhook secret for the built-in GitHub provider when `secret.type: literal` is not appropriate |
+!!! warning "Secrets in environment variables"
+    Do not store `QK__SECURITY__ADMIN_API_KEY` or other secrets in a Dockerfile or compose file committed to source control. Inject them at runtime via your orchestrator's secrets mechanism (e.g. Kubernetes Secrets, Docker secrets, Azure Key Vault CSI driver).
 
 ---
 

@@ -53,7 +53,7 @@ data:
 
     logging:
       level: "info"
-      format: "json"
+      json_format: true
 
     providers:
       - id: "github"

@@ -34,11 +34,21 @@ queue:     { ... }           # Queue backend selection
 |---|---|---|---|
 | `port` | integer | `8080` | TCP port to listen on |
 | `host` | string | `"0.0.0.0"` | Interface to bind to |
+| `timeout_seconds` | integer | `30` | Request timeout in seconds |
+| `shutdown_timeout_seconds` | integer | `30` | Graceful shutdown timeout in seconds |
+| `max_body_size` | integer | `10485760` (10 MB) | Maximum request body size in bytes |
+| `enable_cors` | boolean | `true` | Enable CORS headers |
+| `enable_compression` | boolean | `true` | Enable response compression |
 
 ```yaml
 server:
   port: 8080
   host: "0.0.0.0"
+  timeout_seconds: 30
+  shutdown_timeout_seconds: 30
+  max_body_size: 10485760
+  enable_cors: true
+  enable_compression: true
 ```
 
 ---
@@ -47,13 +57,19 @@ server:
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `max_payload_size_bytes` | integer | `26214400` (25 MB) | Maximum accepted webhook body size |
-| `bot_config_path` | string | required | Path to `bot-config.yaml` |
+| `endpoint_path` | string | `"/webhook"` | Base URL path for webhook endpoints |
+| `require_signature` | boolean | `true` | Global default: reject requests without a valid HMAC signature (overridden per-provider by `providers[*].require_signature`) |
+| `store_payloads` | boolean | `true` | Write raw payloads to object storage for audit and replay |
+| `allowed_event_types` | list | `[]` (all) | Global event-type allowlist; empty list accepts all types |
+| `rate_limit_per_repo` | integer or null | `100` | Max events per repository per minute; `null` disables the limit |
 
 ```yaml
 webhooks:
-  max_payload_size_bytes: 26214400
-  bot_config_path: "/config/bot-config.yaml"
+  endpoint_path: "/webhook"
+  require_signature: true
+  store_payloads: true
+  allowed_event_types: []
+  rate_limit_per_repo: 100
 ```
 
 ---
@@ -62,17 +78,28 @@ webhooks:
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `rate_limit.enabled` | boolean | `true` | Enable IP-based rate limiting |
-| `rate_limit.auth_failure_window_secs` | integer | `300` | Sliding window for auth failure counting |
-| `rate_limit.max_auth_failures` | integer | `10` | Max auth failures before IP is blocked |
+| `enable_rate_limiting` | boolean | `true` | Enable global request rate limiting |
+| `global_rate_limit` | integer | `1000` | Max requests per minute (service-wide) |
+| `enable_ip_rate_limiting` | boolean | `true` | Enable per-IP rate limiting |
+| `ip_rate_limit` | integer | `100` | Max requests per minute per source IP |
+| `auth_failure_threshold` | integer | `10` | Auth failures before an IP enters the rate-restricted tier |
+| `auth_block_threshold` | integer | `50` | Auth failures before an IP is fully blocked |
+| `auth_failure_window_secs` | integer | `300` | Sliding window for auth failure counting (seconds) |
+| `auth_rate_restrict_duration_secs` | integer | `3600` | Duration an IP stays in rate-restricted tier (seconds) |
+| `auth_block_duration_secs` | integer | `86400` | Duration an IP stays fully blocked (seconds) |
+| `admin_api_key` | string | none | Bearer token required for `/admin/**` endpoints. Set via `QK__SECURITY__ADMIN_API_KEY`; do not commit to source control |
 
 ```yaml
 security:
-  rate_limit:
-    enabled: true
-    auth_failure_window_secs: 300
-    max_auth_failures: 10
+  enable_rate_limiting: true
+  enable_ip_rate_limiting: true
+  auth_failure_threshold: 10
+  auth_block_threshold: 50
+  auth_failure_window_secs: 300
 ```
+
+!!! warning "Admin API key"
+    Never store `admin_api_key` in a committed YAML file. Inject it at runtime via `QK__SECURITY__ADMIN_API_KEY`.
 
 ---
 
@@ -81,12 +108,13 @@ security:
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `level` | string | `"info"` | Log level: `trace`, `debug`, `info`, `warn`, `error` |
-| `format` | string | `"json"` | Output format: `json` or `text` |
+| `json_format` | boolean | `false` | `true` emits structured JSON logs; `false` emits human-readable text |
+| `file_path` | string | none | Optional path to write logs to a file in addition to stdout |
 
 ```yaml
 logging:
   level: "info"
-  format: "json"
+  json_format: true
 ```
 
 ---
@@ -260,11 +288,11 @@ Unique identifier for the bot.
 
 ### `queue`
 
-Target Azure Service Bus queue name.
+Target queue name for this bot's messages. With Azure Service Bus this is the queue name; with AWS SQS this is the queue name or ARN.
 
 - Required
 - Must start with `queue-keeper-`
-- Must follow Azure Service Bus naming rules (1–260 characters, letters/numbers/`.`/`-`/`_`)
+- 1–260 characters; allowed characters: letters, numbers, `.`, `-`, `_`
 - Example: `"queue-keeper-task-tactician"`
 
 ---

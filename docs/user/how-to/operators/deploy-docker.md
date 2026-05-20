@@ -82,7 +82,7 @@ server:
 
 logging:
   level: "info"
-  format: "json"          # Use "text" in development
+  json_format: true          # Use false in development for human-readable output
 
 providers:
   - id: "github"
@@ -95,9 +95,8 @@ key_vault:
   vault_url: "https://my-vault.vault.azure.net"
 
 queue:
-  azure_service_bus:
-    namespace_url: "https://my-namespace.servicebus.windows.net"
-    use_managed_identity: true
+  provider: azure_service_bus
+  namespace: my-namespace.servicebus.windows.net
 ```
 
 ### `bot-config.yaml` — minimal starter
