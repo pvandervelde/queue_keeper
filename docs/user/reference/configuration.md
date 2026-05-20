@@ -92,10 +92,14 @@ webhooks:
 ```yaml
 security:
   enable_rate_limiting: true
+  global_rate_limit: 1000
   enable_ip_rate_limiting: true
+  ip_rate_limit: 100
   auth_failure_threshold: 10
   auth_block_threshold: 50
   auth_failure_window_secs: 300
+  auth_rate_restrict_duration_secs: 3600
+  auth_block_duration_secs: 86400
 ```
 
 !!! warning "Admin API key"

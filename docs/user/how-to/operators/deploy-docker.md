@@ -53,7 +53,7 @@ services:
       - ./config/bot-config.yaml:/config/bot-config.yaml:ro
     environment:
       QUEUE_KEEPER_CONFIG: /config/service.yaml
-      QUEUE_KEEPER_LOG_LEVEL: info
+      QK__LOGGING__LEVEL: info
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
       interval: 30s
@@ -123,14 +123,29 @@ Set `key_vault.vault_url` in `service.yaml` and grant the container's managed id
 
 **Environment variable override (CI / local dev)**
 
+Webhook secrets are injected via a user-defined environment variable wired into the provider's `secret` config. First, add the `environment_variable` secret source to `service.yaml`:
+
+```yaml
+providers:
+  - id: "github"
+    require_signature: true
+    secret:
+      type: environment_variable
+      env_var_name: "GITHUB_WEBHOOK_SECRET"
+```
+
+Then pass the secret at runtime:
+
 ```bash
 docker run ... \
-  -e QUEUE_KEEPER_GITHUB_SECRET=my-dev-secret \
+  -e GITHUB_WEBHOOK_SECRET=my-dev-secret \
   ...
 ```
 
+The env var name (`GITHUB_WEBHOOK_SECRET` above) is chosen by you — it must match `env_var_name` in `service.yaml`.
+
 !!! warning
-    Environment variable overrides are provided as a convenience for local development. Do not use them in production — they expose secrets in the process environment and Docker inspect output.
+    Environment variable secrets are a convenience for local development. Do not use them in production — they expose secrets in the process environment and `docker inspect` output.
 
 ---
 
