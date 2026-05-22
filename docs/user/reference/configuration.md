@@ -82,6 +82,7 @@ webhooks:
 | `global_rate_limit` | integer | `1000` | Max requests per minute (service-wide) |
 | `enable_ip_rate_limiting` | boolean | `true` | Enable per-IP rate limiting |
 | `ip_rate_limit` | integer | `100` | Max requests per minute per source IP |
+| `log_requests` | boolean | `true` | Log each incoming request; set to `false` to reduce log volume |
 | `auth_failure_threshold` | integer | `10` | Auth failures before an IP enters the rate-restricted tier |
 | `auth_block_threshold` | integer | `50` | Auth failures before an IP is fully blocked |
 | `auth_failure_window_secs` | integer | `300` | Sliding window for auth failure counting (seconds) |
@@ -95,6 +96,7 @@ security:
   global_rate_limit: 1000
   enable_ip_rate_limiting: true
   ip_rate_limit: 100
+  log_requests: true
   auth_failure_threshold: 10
   auth_block_threshold: 50
   auth_failure_window_secs: 300

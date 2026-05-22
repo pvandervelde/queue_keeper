@@ -54,7 +54,7 @@ Accepts an incoming webhook payload from the named provider.
 
 **Request body**
 
-Raw JSON webhook payload. Maximum 25 MB.
+Raw JSON webhook payload. Maximum `server.max_body_size` bytes (default: 10 MB). Configure a higher limit via `server.max_body_size` in `service.yaml`.
 
 **Responses**
 
@@ -63,7 +63,7 @@ Raw JSON webhook payload. Maximum 25 MB.
 | `200 OK` | Processed successfully |
 | `400 Bad Request` | Missing headers, invalid JSON, or signature mismatch |
 | `404 Not Found` | Provider ID not registered |
-| `413 Payload Too Large` | Body exceeds 25 MB |
+| `413 Payload Too Large` | Body exceeds `server.max_body_size` (default 10 MB) |
 | `429 Too Many Requests` | IP rate limit exceeded |
 | `500 Internal Server Error` | Unexpected error |
 | `503 Service Unavailable` | Transient failure; retry after `Retry-After` seconds |
