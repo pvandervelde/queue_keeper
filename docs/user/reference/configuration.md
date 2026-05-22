@@ -229,20 +229,36 @@ Selects and configures the queue backend. Exactly one variant must be specified.
 
 **In-memory (development only):**
 
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `max_queue_size` | integer or null | `10000` | Maximum messages held per in-memory queue |
+
 ```yaml
 queue:
   provider: in_memory
+  max_queue_size: 10000
 ```
 
 Events are not persisted across restarts.
 
 **Azure Service Bus — managed identity (production):**
 
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `namespace` | string | required\* | Fully-qualified namespace hostname, e.g. `mybus.servicebus.windows.net` |
+| `connection_string` | string | — | Dev/test only — SharedAccessKey connection string (\*required when `namespace` is absent) |
+| `use_sessions` | boolean | `true` | Enable session-ordered delivery; **must match the session setting on the target queues** |
+| `session_timeout_seconds` | integer | `300` | Session lock duration in seconds |
+
 ```yaml
 queue:
   provider: azure_service_bus
   namespace: my-namespace.servicebus.windows.net
+  use_sessions: true
 ```
+
+!!! warning "`use_sessions` must match queue configuration"
+    If `use_sessions: true` (the default) but the target queue has sessions **disabled**, message sends will fail. Set `use_sessions: false` when provisioning standard (non-session) queues — for example when all your bots use `ordered: false`.
 
 **Azure Service Bus — connection string (dev/test):**
 
@@ -250,15 +266,25 @@ queue:
 queue:
   provider: azure_service_bus
   connection_string: "Endpoint=sb://..."
+  use_sessions: true
 ```
 
 **AWS SQS — IAM role (production):**
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `region` | string | required | AWS region, e.g. `us-east-1` |
+| `use_fifo_queues` | boolean | `true` | Use FIFO queues for ordered delivery; **must match the queue type provisioned** |
 
 ```yaml
 queue:
   provider: aws_sqs
   region: us-east-1
+  use_fifo_queues: true
 ```
+
+!!! warning "`use_fifo_queues` must match queue type"
+    If `use_fifo_queues: true` (the default) but standard (non-FIFO) SQS queues are provisioned, sends will fail. Set `use_fifo_queues: false` when using standard SQS queues — for example when all your bots use `ordered: false` and you prioritise throughput over ordering.
 
 The AWS SDK credential chain is used (ECS task role, EC2 instance profile, environment variables). Do not embed credentials in `service.yaml`.
 

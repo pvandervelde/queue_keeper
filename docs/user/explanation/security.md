@@ -89,7 +89,7 @@ See [Rotate Secrets](../how-to/operators/rotate-secrets.md) for the full procedu
 
 **Maximum payload size**
 
-Payloads larger than 25 MB are rejected with `413 Payload Too Large`. This prevents memory exhaustion attacks using oversized bodies.
+Payloads exceeding the configured `server.max_body_size` (default: 10 MB) are rejected with `413 Payload Too Large`. This prevents memory exhaustion attacks using oversized bodies. Adjust `max_body_size` in `service.yaml` if your provider sends larger payloads.
 
 **No code execution**
 
@@ -98,6 +98,9 @@ Webhook payloads are parsed as JSON and stored. Queue-Keeper never evaluates pay
 **Immutable audit trail**
 
 Every webhook is stored in object storage at an immutable path (`{year}/{month}/{day}/{event_id}.json`) upon receipt. The raw bytes are stored before any processing, so the audit record represents exactly what was received. Object storage is configured to deny public read access.
+
+!!! note "Best-effort storage"
+    Object storage writes are best-effort and do not block event routing. If the storage backend is unavailable, the event is still delivered to the bot queue but the audit record for that event is lost. See [Reliability — graceful degradation](reliability.md#graceful-degradation) for details.
 
 ---
 

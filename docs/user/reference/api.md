@@ -11,7 +11,7 @@ Queue-Keeper exposes an HTTP API on port 8080 (configurable). All endpoints expe
 | `POST /webhook/{provider}` | No — validated per-provider via HMAC signature |
 | `GET /health`, `GET /ready` | No |
 | `GET /metrics` | No |
-| `GET /api/*` | No |
+| `GET /api/*` | No (contains event metadata — restrict at network boundary in production) |
 | `GET /debug/*` | No (restrict at network boundary in production) |
 | `POST/PUT/GET /admin/*` | Yes — Bearer token |
 
