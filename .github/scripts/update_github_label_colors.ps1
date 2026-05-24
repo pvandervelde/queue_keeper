@@ -1,4 +1,4 @@
-# PowerShell script to update GitHub label colors for pvandervelde/RepoRoller
+# PowerShell script to update GitHub label colors for pvandervelde/queue_keeper
 # Requires: GitHub CLI (gh) installed and authenticated
 # Colors chosen from ColorBrewer/Colorblind-safe palettes for accessibility
 
