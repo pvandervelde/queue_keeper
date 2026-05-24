@@ -1,47 +1,63 @@
-# PowerShell script to update GitHub label colors for pvandervelde/RepoRoller
+# PowerShell script to update GitHub label colors for pvandervelde/queue_keeper
 # Requires: GitHub CLI (gh) installed and authenticated
 # Colors chosen from ColorBrewer/Colorblind-safe palettes for accessibility
 
 # Label definitions: name, color, description
 $labelDefinitions = @(
-    @{ Name = "type: feat"; Color = "fcc37b"; Description = "New feature or enhancement" }
-    @{ Name = "type: fix"; Color = "fcc37b"; Description = "Bug fix" }
-    @{ Name = "type: chore"; Color = "fcc37b"; Description = "Chore or maintenance task" }
-    @{ Name = "type: docs"; Color = "fcc37b"; Description = "Documentation change" }
-    @{ Name = "type: refactor"; Color = "fcc37b"; Description = "Code refactoring" }
-    @{ Name = "type: test"; Color = "fcc37b"; Description = "Test-related change" }
-    @{ Name = "type: ci"; Color = "fcc37b"; Description = "Continuous integration or build change" }
+    @{ Name = "comp:core"; Color = "91c764"; Description = "Core component" }
+    @{ Name = "comp:github"; Color = "91c764"; Description = "GitHub integration/component" }
+    @{ Name = "comp:config"; Color = "91c764"; Description = "Configuration component" }
+    @{ Name = "comp:cli"; Color = "91c764"; Description = "Command-line interface component" }
+    @{ Name = "comp:api"; Color = "91c764"; Description = "API component" }
+    @{ Name = "comp:azure"; Color = "91c764"; Description = "Azure integration/component" }
 
-    @{ Name = "status: needs-triage"; Color = "64befb"; Description = "Needs triage" }
-    @{ Name = "status: in-progress"; Color = "64befb"; Description = "Work in progress" }
-    @{ Name = "status: needs-review"; Color = "64befb"; Description = "Needs review" }
-    @{ Name = "status: blocked"; Color = "64befb"; Description = "Blocked by another issue or PR" }
-    @{ Name = "status: completed"; Color = "64befb"; Description = "Work completed" }
+    @{ Name = "comp:tooling"; Color = "91c764"; Description = "Tooling component" }
 
-    @{ Name = "prio: high"; Color = "e94648"; Description = "High priority" }
-    @{ Name = "prio: medium"; Color = "e94648"; Description = "Medium priority" }
-    @{ Name = "prio: low"; Color = "e94648"; Description = "Low priority" }
+    @{ Name = "type:feat"; Color = "fcc37b"; Description = "New feature or enhancement" }
+    @{ Name = "type:fix"; Color = "fcc37b"; Description = "Bug fix" }
+    @{ Name = "type:chore"; Color = "fcc37b"; Description = "Chore or maintenance task" }
+    @{ Name = "type:docs"; Color = "fcc37b"; Description = "Documentation changes" }
+    @{ Name = "type:refactor"; Color = "fcc37b"; Description = "Code refactoring" }
+    @{ Name = "type:style"; Color = "fcc37b"; Description = "Code style changes" }
+    @{ Name = "type:perf"; Color = "fcc37b"; Description = "Performance improvements" }
+    @{ Name = "type:test"; Color = "fcc37b"; Description = "Test-related changes" }
+    @{ Name = "type:ci"; Color = "fcc37b"; Description = "Continuous integration or build changes" }
+    @{ Name = "type:revert"; Color = "fcc37b"; Description = "Revert changes" }
 
-    @{ Name = "comp: core"; Color = "91c764"; Description = "Core component" }
-    @{ Name = "comp: github"; Color = "91c764"; Description = "GitHub integration/component" }
-    @{ Name = "comp: config"; Color = "91c764"; Description = "Configuration component" }
-    @{ Name = "comp: cli"; Color = "91c764"; Description = "Command-line interface component" }
-    @{ Name = "comp: api"; Color = "91c764"; Description = "API component" }
-    @{ Name = "comp: azure"; Color = "91c764"; Description = "Azure integration/component" }
+    @{ Name = "status:needs-triage"; Color = "64befb"; Description = "Needs triage or review" }
+    @{ Name = "status:draft"; Color = "64befb"; Description = "Work is in draft mode" }
+    @{ Name = "status:in-progress"; Color = "64befb"; Description = "Work in progress" }
+    @{ Name = "status:wip"; Color = "64befb"; Description = "Work in progress (WIP)" }
+    @{ Name = "status:needs-review"; Color = "64befb"; Description = "Needs code or design review" }
+    @{ Name = "status:in-review"; Color = "64befb"; Description = "Currently under code or design review" }
+    @{ Name = "status:approved"; Color = "64befb"; Description = "Pull request approved" }
+    @{ Name = "status:blocked"; Color = "64befb"; Description = "Blocked by another issue or dependency" }
+    @{ Name = "status:completed"; Color = "64befb"; Description = "Work completed" }
 
-    @{ Name = "size: XS"; Color = "fecc3e"; Description = "Extra small change" }
-    @{ Name = "size: S"; Color = "fecc3e"; Description = "Small change" }
-    @{ Name = "size: M"; Color = "fecc3e"; Description = "Medium change" }
-    @{ Name = "size: L"; Color = "fecc3e"; Description = "Large change" }
-    @{ Name = "size: XL"; Color = "fecc3e"; Description = "Extra large change" }
+    @{ Name = "prio:high"; Color = "e94648"; Description = "High priority" }
+    @{ Name = "prio:medium"; Color = "e94648"; Description = "Medium priority" }
+    @{ Name = "prio:low"; Color = "e94648"; Description = "Low priority" }
 
-    @{ Name = "feedback: discussion"; Color = "c8367a"; Description = "Discussion or feedback requested" }
-    @{ Name = "feedback: rfc"; Color = "c8367a"; Description = "Request for comments" }
-    @{ Name = "feedback: question"; Color = "c8367a"; Description = "Question or clarification needed" }
+    @{ Name = "size:xs"; Color = "fecc3e"; Description = "Extra small change" }
+    @{ Name = "size:s"; Color = "fecc3e"; Description = "Small change" }
+    @{ Name = "size:m"; Color = "fecc3e"; Description = "Medium change" }
+    @{ Name = "size:l"; Color = "fecc3e"; Description = "Large change" }
+    @{ Name = "size:xl"; Color = "fecc3e"; Description = "Extra large change" }
 
-    @{ Name = "inactive: duplicate"; Color = "d3d8de"; Description = "Duplicate issue or PR" }
-    @{ Name = "inactive: wontfix"; Color = "d3d8de"; Description = "Will not fix" }
-    @{ Name = "inactive: by-design"; Color = "d3d8de"; Description = "Closed by design" }
+    @{ Name = "feedback:discussion"; Color = "c8367a"; Description = "Discussion or open feedback" }
+    @{ Name = "feedback:rfc"; Color = "c8367a"; Description = "Request for comments (RFC)" }
+    @{ Name = "feedback:question"; Color = "c8367a"; Description = "General question or inquiry" }
+
+    @{ Name = "inactive:duplicate"; Color = "d3d8de"; Description = "Duplicate issue or PR" }
+    @{ Name = "inactive:wontfix"; Color = "d3d8de"; Description = "Will not fix" }
+    @{ Name = "inactive:by-design"; Color = "d3d8de"; Description = "Closed as by design" }
+
+    @{ Name = "pr-issue:invalid-title-format"; Color = "986ee2"; Description = "The PR title does not follow the required format" }
+    @{ Name = "pr-issue:missing-work-item"; Color = "986ee2"; Description = "The PR is missing a linked work item" }
+
+    @{ Name = "rr:override-major"; Color = "57ab5a"; Description = "Override required for major version change" }
+    @{ Name = "rr:override-minor"; Color = "57ab5a"; Description = "Override required for minor version change" }
+    @{ Name = "rr:override-patch"; Color = "57ab5a"; Description = "Override required for patch version change" }
 )
 
 # Get all current labels from GitHub, handling pagination
