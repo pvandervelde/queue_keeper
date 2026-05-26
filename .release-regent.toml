@@ -32,7 +32,7 @@ main = "master"
 strategy = "conventional"
 
 # Allow contributors to override the calculated bump via a PR comment
-# (e.g. /override-bump minor).
+# (e.g. !release minor).
 allow_override = true
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -87,10 +87,17 @@ manifest_files = [
 # ─────────────────────────────────────────────────────────────────────────────
 # GitHub releases
 # ─────────────────────────────────────────────────────────────────────────────
-# NOTE: The [releases] section is intentionally omitted.
-# .github/workflows/release.yml handles tagging and GitHub release creation
-# when a release/* PR is merged. Enabling release-regent's release creation
-# here would race with that workflow and cause duplicate-release errors.
+# Release Regent creates the Git tag and GitHub release when a release PR is
+# merged. The release.yml workflow then attaches build artifacts to the
+# already-published release.
+
+[releases]
+# Create a standard (non-draft) public release.
+draft = false
+# Mark as a stable release (not a pre-release).
+prerelease = false
+# Use the changelog body from the release PR; do not append GitHub-generated notes.
+generate_notes = false
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Changelog
@@ -98,26 +105,13 @@ manifest_files = [
 
 [changelog]
 # Rendering strategy: "internal" (default) | "git_cliff"
-# Use "git_cliff" to delegate to the bundled git-cliff-core Tera renderer.
-strategy = "internal"
-
-# Include commit author names in each entry.
-include_authors = true
-
-# Include short commit SHAs in each entry.
-include_shas = true
+# Use "git_cliff" to delegate to the bundled git-cliff-core Tera renderer,
+# keeping changelog format consistent with the project's cliff.toml config.
+strategy = "git_cliff"
 
 # Hyperlink commits and pull requests where detectable.
+# When true, git-cliff-core attempts to resolve remote context for PR links.
 include_links = true
-
-# Section heading template — {title} is replaced with the commit type.
-section_template = "### {title}\n\n{entries}\n"
-
-# Per-commit line template — {description} and {sha} are replaced at runtime.
-commit_template = "- {description} [{sha}]"
-
-# Remote URL for link generation (leave blank to auto-detect from git remote).
-# remote_url = "https://github.com/pvandervelde/release_regent"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Error handling / retries
