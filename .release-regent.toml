@@ -41,7 +41,7 @@ allow_override = true
 
 [release_pr]
 # Template for the release PR title.
-# Supported placeholders: ${version} (e.g. "1.2.3"), ${version_tag} (e.g. "v1.2.3").
+# Supported placeholders: ${version} (e.g. "1.2.3"), ${version_tag} (e.g. "1.2.3" with configured prefix).
 title_template = "chore(release): prepare version ${version}"
 
 # Template for the release PR body.
