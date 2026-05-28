@@ -1,10 +1,8 @@
-name: Release
+name: Release Artifacts
 
 on:
-  pull_request:
-    types: [closed]
-    branches:
-      - master
+  release:
+    types: [published]
 
 permissions:
   contents: write
@@ -12,73 +10,24 @@ permissions:
 
 jobs:
   release:
-    name: Create release and publish artifacts
-    # Only run if PR was merged from a release/* branch
-    if: github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release/')
+    name: Build and publish release artifacts
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
+          ref: ${{ github.event.release.tag_name }}
           fetch-depth: 0
 
-      - name: Extract version from branch
+      - name: Extract version from release tag
         id: version
         run: |
-          BRANCH="${{ github.event.pull_request.head.ref }}"
-
-          # Extract version from branch name (release/X.Y.Z)
-          if [[ "$BRANCH" =~ ^release/([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
-            VERSION="${BASH_REMATCH[1]}"
-            echo "version=$VERSION" >> $GITHUB_OUTPUT
-            echo "tag=v$VERSION" >> $GITHUB_OUTPUT
-            echo "Extracted version: $VERSION"
-          else
-            echo "❌ Could not extract version from branch name: $BRANCH"
-            exit 1
-          fi
-
-      - name: Extract changelog for this version
-        id: changelog
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-
-          # Extract the section for this version from CHANGELOG.md
-          if [ -f CHANGELOG.md ]; then
-            # Get content for this version only: start at the matching version
-            # header, stop when a different version header is encountered.
-            # The range-based pattern /start/,/end/ cannot be used here because
-            # the end pattern also matches the start line, causing awk to output
-            # nothing. A flag-based approach is used instead.
-            awk "/^## \[${VERSION}\]/{found=1} found && /^## \[/ && !/^## \[${VERSION}\]/{exit} found{print}" CHANGELOG.md > release_notes.md
-
-            # If release notes are empty, use a default message
-            if [ ! -s release_notes.md ]; then
-              echo "Release $VERSION" > release_notes.md
-            fi
-          else
-            echo "Release $VERSION" > release_notes.md
-          fi
-
-          # Append Docker container link
-          {
-            echo ""
-            echo "## Docker Image"
-            echo ""
-            echo "The container image for this release is available on GitHub Packages:"
-            echo ""
-            echo '```'
-            echo "ghcr.io/${{ github.repository_owner }}/queue-keeper:${VERSION}"
-            echo '```'
-            echo ""
-            echo "Pull with:"
-            echo ""
-            echo '```sh'
-            echo "docker pull ghcr.io/${{ github.repository_owner }}/queue-keeper:${VERSION}"
-            echo '```'
-          } >> release_notes.md
-
-          echo "Extracted changelog for version $VERSION"
+          TAG="${{ github.event.release.tag_name }}"
+          # Tags have no 'v' prefix in this repository (core.version_prefix = "")
+          VERSION="${TAG}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "Extracted version: ${VERSION}"
 
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
@@ -162,18 +111,6 @@ jobs:
         run: |
           docker rm -f queue-keeper-validation-test 2>/dev/null || true
 
-      - name: Create Git tag
-        run: |
-          TAG="${{ steps.version.outputs.tag }}"
-
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          git tag -a "$TAG" -m "Release $TAG"
-          git push origin "$TAG"
-
-          echo "✅ Created and pushed tag $TAG"
-
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
@@ -192,29 +129,25 @@ jobs:
           echo "✅ Docker image pushed: ghcr.io/${OWNER}/queue-keeper:${VERSION}"
           echo "✅ Docker image pushed: ghcr.io/${OWNER}/queue-keeper:latest"
 
-      - name: Create GitHub Release
+      - name: Upload artifacts to GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ steps.version.outputs.tag }}"
-          VERSION="${{ steps.version.outputs.version }}"
 
-          # Create release with artifacts
-          gh release create "$TAG" \
-            --title "Release $TAG" \
-            --notes-file release_notes.md \
+          gh release upload "$TAG" \
             artifacts/queue-keeper-cli-linux-x86_64 \
             artifacts/queue-keeper-cli-windows-x86_64.exe \
             artifacts/README-macos.txt
 
-          echo "✅ Created GitHub release $TAG"
+          echo "✅ Uploaded artifacts to release $TAG"
 
       - name: Summary
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           TAG="${{ steps.version.outputs.tag }}"
 
-          echo "✅ Release workflow completed successfully"
+          echo "✅ Release artifacts workflow completed"
           echo ""
           echo "**Release Details:**"
           echo "  - Version: $VERSION"

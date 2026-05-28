@@ -1,0 +1,144 @@
+# =============================================================================
+# Release Regent — repository dotfile (Level 5 of 5 in the hierarchy)
+# =============================================================================
+# This file lives at the root of the repository as `.release-regent.toml`.
+#
+# All settings shown are optional and match the built-in defaults unless
+# noted otherwise. Remove or comment out any section you do not need to
+# override.
+#
+# Full reference: https://github.com/pvandervelde/release_regent/blob/master/docs/configuration-reference.md
+# =============================================================================
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Core settings
+# ─────────────────────────────────────────────────────────────────────────────
+
+[core]
+# Prefix prepended to version numbers in tags and PR titles.
+version_prefix = ""
+
+[core.branches]
+# The default (main) branch of the repository.
+main = "master"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Versioning
+# ─────────────────────────────────────────────────────────────────────────────
+
+[versioning]
+# How to calculate the next version.
+# Options: "conventional" (parse conventional commits) | "external" (custom command)
+strategy = "conventional"
+
+# Allow contributors to override the calculated bump via a PR comment
+# (e.g. !release minor).
+allow_override = true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Release pull request
+# ─────────────────────────────────────────────────────────────────────────────
+
+[release_pr]
+# Template for the release PR title.
+# Supported placeholders: ${version} (e.g. "1.2.3"), ${version_tag} (e.g. "1.2.3" with configured prefix).
+title_template = "chore(release): prepare version ${version}"
+
+# Template for the release PR body.
+# Available variables: ${version}, ${version_tag}, ${changelog}, ${commit_count}, ${date}
+body_template = """
+## Release ${version_tag}
+
+### Changes
+
+${changelog}
+
+### Release Information
+
+- **Version**: ${version}
+- **Commits**: ${commit_count} commits since last release
+- **Generated**: ${date}
+
+### Checklist
+
+- [ ] Review changelog for accuracy
+- [ ] Verify version bump is appropriate
+- [ ] Check that all features are documented
+"""
+
+# Create the release PR as a draft.
+draft = false
+
+# Automatically detect and update well-known manifest files
+# (Cargo.toml, package.json, pyproject.toml, composer.json).
+# auto_detect_manifests = true
+
+# Explicit list of manifest files to update on each release.
+# Uncomment and adjust paths/formats as required.
+# Supported formats: "toml", "json", "plain_text"
+#
+# This workspace uses [workspace.package] version rather than [package] version.
+# Auto-detect targets [package] and will not update the workspace manifest.
+# The explicit entry below ensures the correct key is updated.
+manifest_files = [
+  { path = "Cargo.toml", format = "toml", version_key = "workspace.package.version" },
+]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GitHub releases
+# ─────────────────────────────────────────────────────────────────────────────
+# Release Regent creates the Git tag and GitHub release when a release PR is
+# merged. The release.yml workflow then attaches build artifacts to the
+# already-published release.
+
+[releases]
+# Create a standard (non-draft) public release.
+draft = false
+# Mark as a stable release (not a pre-release).
+prerelease = false
+# Use the changelog body from the release PR; do not append GitHub-generated notes.
+generate_notes = false
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Changelog
+# ─────────────────────────────────────────────────────────────────────────────
+
+[changelog]
+# Rendering strategy: "internal" (default) | "git_cliff"
+# Use "git_cliff" to delegate to the bundled git-cliff-core Tera renderer,
+# keeping changelog format consistent with the project's cliff.toml config.
+strategy = "git_cliff"
+
+# Hyperlink commits and pull requests where detectable.
+# When true, git-cliff-core attempts to resolve remote context for PR links.
+include_links = true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Error handling / retries
+# ─────────────────────────────────────────────────────────────────────────────
+
+[error_handling]
+# Maximum number of retry attempts for transient GitHub API errors.
+max_retries = 5
+
+# Exponential back-off multiplier between retries.
+backoff_multiplier = 2.0
+
+# Initial delay before the first retry (milliseconds).
+initial_delay_ms = 1000
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Notifications
+# ─────────────────────────────────────────────────────────────────────────────
+
+[notifications]
+enabled = true
+
+# Where to report errors encountered during processing.
+# Options: "github_issue" | "webhook" | "slack" | "none"
+strategy = "github_issue"
+
+[notifications.github_issue]
+# Labels applied to any auto-created error issue.
+labels = ["comp:tooling", "type:fix"]
+assignees = []
