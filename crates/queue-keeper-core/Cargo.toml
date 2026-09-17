@@ -47,7 +47,7 @@ subtle = { workspace = true }
 futures = { version = "0.3", optional = true }
 azure_security_keyvault = { version = "0.21", optional = true }
 azure_identity = { version = "0.21", optional = true }
-azure_core = { version = "0.21", optional = true }
+azure_core = { version = "0.22", optional = true }
 
 # Dependencies on library crates
 github-bot-sdk = { workspace = true }

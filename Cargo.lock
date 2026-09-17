@@ -557,6 +557,27 @@ dependencies = [
 
 [[package]]
 name = "azure_core"
+version = "0.22.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c749d6035e8835014fa4897173792d772f0a65fac32e57c3cd9d676c8114e8a"
+dependencies = [
+ "async-lock",
+ "async-trait",
+ "bytes",
+ "futures",
+ "once_cell",
+ "paste",
+ "pin-project",
+ "rustc_version",
+ "serde",
+ "serde_json",
+ "tracing",
+ "typespec 0.2.0",
+ "typespec_client_core 0.1.0",
+]
+
+[[package]]
+name = "azure_core"
 version = "0.35.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9966f75417a6779ea221531960d9d46fe630879606501aa5277312ad4ae38587"
@@ -572,8 +593,8 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
- "typespec",
- "typespec_client_core",
+ "typespec 0.14.0",
+ "typespec_client_core 0.14.0",
 ]
 
 [[package]]
@@ -3525,7 +3546,7 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "azure_core 0.21.0",
+ "azure_core 0.22.0",
  "azure_identity 0.21.0",
  "azure_security_keyvault",
  "bytes",
@@ -5194,6 +5215,18 @@ checksum = "40ce102ab67701b8526c123c1bab5cbe42d7040ccfd0f64af1a385808d2f43de"
 
 [[package]]
 name = "typespec"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f39c392e9cb463e8f1f9b86d2d5934ef391ee83724095e7f813aa0202e4e8d3b"
+dependencies = [
+ "base64 0.22.1",
+ "http-types",
+ "serde_json",
+ "url",
+]
+
+[[package]]
+name = "typespec"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "247afbeabe0c383f630d0fdcb4fb92818c31cd3fe5d293335daff8cac79d4e0f"
@@ -5204,6 +5237,31 @@ dependencies = [
  "serde",
  "serde_json",
  "url",
+]
+
+[[package]]
+name = "typespec_client_core"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0839582d301a1ba457905b6940f10879ff16b43b98ff66477cb4a44cbea81a92"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "bytes",
+ "dyn-clone",
+ "futures",
+ "getrandom 0.2.17",
+ "http-types",
+ "pin-project",
+ "rand 0.8.6",
+ "serde",
+ "serde_json",
+ "time",
+ "tokio",
+ "tracing",
+ "typespec 0.2.0",
+ "url",
+ "uuid",
 ]
 
 [[package]]
@@ -5225,7 +5283,7 @@ dependencies = [
  "time",
  "tokio",
  "tracing",
- "typespec",
+ "typespec 0.14.0",
  "typespec_macros",
  "url",
  "uuid",
